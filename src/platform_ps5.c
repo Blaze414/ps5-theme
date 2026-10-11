@@ -16,6 +16,7 @@
 #include <unistd.h>
 
 #include <sys/mount.h>
+#include <sys/thr.h>
 #include <sys/socket.h>
 #include <sys/sysctl.h>
 #include <sys/ucontext.h>
@@ -153,6 +154,13 @@ plat_list_views(plat_view_t *out, int max) {
     count++;
   }
   return count;
+}
+
+
+void
+plat_set_name(const char *name) {
+  long tid;
+  if(!thr_self(&tid)) thr_set_name(tid, name);
 }
 
 

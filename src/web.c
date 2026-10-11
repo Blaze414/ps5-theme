@@ -977,6 +977,22 @@ api_delete_preview(request_t *req) {
 
 
 /* The shown picture, or the one named by `kind`. */
+/* A newer copy of the plugin asks this one to step aside. Only a process on
+   the console itself may ask. */
+static void
+api_handoff(request_t *req) {
+  struct sockaddr_in peer;
+  socklen_t len = sizeof(peer);
+  if(getpeername(req->fd, (struct sockaddr *)&peer, &len) || peer.sin_family != AF_INET ||
+     ntohl(peer.sin_addr.s_addr) != INADDR_LOOPBACK) {
+    return respond_error(req->fd, 403, "only the console itself can ask for this");
+  }
+  log_msg("a newer copy of the plugin asked to take over");
+  respond_ok(req->fd);
+  request_handoff();
+}
+
+
 /* The live mount table, for diagnosing what the system shows where (read-only). */
 static void
 api_mounts(request_t *req) {
@@ -1390,6 +1406,7 @@ route(request_t *req) {
   if(post && !strcmp(p, "/api/theme/settings")) return api_theme_settings(req);
   if(post && !strcmp(p, "/api/themes/duplicate")) return api_duplicate_theme(req);
   if(post && !strcmp(p, "/api/theme/save")) return api_save_theme(req);
+  if(post && !strcmp(p, "/api/handoff"))     return api_handoff(req);
   if(post && !strcmp(p, "/api/theme/discard")) return api_discard_theme(req);
 #ifdef HOST_TEST
   if(post && !strcmp(p, "/api/debug/crash")) {

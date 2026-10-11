@@ -8,14 +8,14 @@ else
 endif
 
 TITLE_ID := THEM00001
-VERSION  := 1.22
+VERSION  := 1.23
 
 ELF    := ps5-theme.elf
 PLUGIN := ps5-theme.plugin
 
 # Portable sources are shared with the host test rig (tests/host).
 SRCS   := src/main.c src/web.c src/tile.c src/log.c src/fsguard.c src/verify.c \
-          src/crash.c src/policy.c src/atrac9.c src/texture.c src/zstd.c src/platform_ps5.c
+          src/crash.c src/policy.c src/atrac9.c src/texture.c src/zstd.c src/update.c src/platform_ps5.c
 HDRS   := src/theme.h src/platform.h src/atrac9_tables.h
 ASSETS := web/index.html web/atrac9.js assets/icon0.png
 

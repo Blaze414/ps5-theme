@@ -14,6 +14,7 @@
 #include <string.h>
 #include <ucontext.h>
 #include <unistd.h>
+#include <sys/prctl.h>
 
 #include <sys/mount.h>
 #include <sys/stat.h>
@@ -156,6 +157,12 @@ plat_list_views(plat_view_t *out, int max) {
   }
   fclose(f);
   return count;
+}
+
+
+void
+plat_set_name(const char *name) {
+  prctl(PR_SET_NAME, name, 0, 0, 0);
 }
 
 

@@ -3,10 +3,10 @@
 #   crash: plain build with a debug crash route, for the crash-handler test
 
 SRCS := src/main.c src/web.c src/tile.c src/log.c src/fsguard.c src/verify.c \
-        src/crash.c src/policy.c src/atrac9.c src/texture.c src/zstd.c tests/host/platform_linux.c
+        src/crash.c src/policy.c src/atrac9.c src/texture.c src/zstd.c src/update.c tests/host/platform_linux.c
 DEPS := $(SRCS) src/theme.h src/platform.h src/atrac9_tables.h web/index.html web/atrac9.js assets/icon0.png
 
-CFLAGS := -std=gnu11 -D_GNU_SOURCE -Isrc -g -O1 -fno-omit-frame-pointer \
+CFLAGS := -std=gnu11 -D_GNU_SOURCE -DTEST_HOOKS -Isrc -g -O1 -fno-omit-frame-pointer \
           -Wall -Wextra -Wno-unused-parameter -Wno-format-truncation -Werror
 
 all: build-host/ps5-theme-asan build-host/ps5-theme-crash

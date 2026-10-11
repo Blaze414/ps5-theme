@@ -5,7 +5,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#define PLUGIN_VERSION "1.22"
+#define PLUGIN_VERSION "1.23"
 #define TITLE_ID       "THEM00001"
 #define WEB_PORT       8095
 
@@ -171,6 +171,17 @@ int  music_order_valid(const char *order);
    each file it replaces under STOCK_DIR/<firmware>/. */
 void stock_path(const char *asset, char *out, size_t size);
 int  write_theme_ini(const char *id, const char *name, const char *fw, const music_settings_t *music);
+
+
+/* update.c: one running copy, and handing over to a newer one. */
+int   version_value(const char *v);        /* "1.23" -> 123, or -1 */
+int   my_version(void);
+int   instance_lock(int wait_ms);          /* 0 once this copy holds the lock */
+int   running_version(void);               /* of the copy answering locally, or -1 */
+int   ask_handoff(void);
+void  request_handoff(void);
+int   handoff_requested(void);
+void  update_check(void);
 
 
 /* web.c, tile.c */

@@ -43,6 +43,7 @@
 #define MAX_TARGETS      64
 #define STAGE_SIZE_LIMIT (512ull * 1024 * 1024)
 #define POLL_SECONDS     1
+#define UPDATE_CHECK_SECONDS 10
 #define WEB_STACK_SIZE   (1024 * 1024)
 
 /* Themable folders: ShellUI's React Native apps and its own VSH assets
@@ -73,10 +74,19 @@ static atomic_int reapply_requested;
 static void
 set_progress(int pct, const char *fmt, ...) __attribute__((format(printf, 2, 3)));
 
-/* What the apply is doing, for the manager. The percentage never goes back. */
+/* Console notifications queue up and each stays a few seconds, so a long
+   apply gets at most one progress notification every PROGRESS_NOTE_SECONDS
+   (and none in its first seconds), on top of the start and the result. */
+#define PROGRESS_NOTE_SECONDS 8
+static time_t progress_started, progress_noted;   /* main thread only */
+
+/* What the apply is doing, for the manager and the console. The percentage
+   never goes back. */
 static void
 set_progress(int pct, const char *fmt, ...) {
   va_list ap;
+  char text[sizeof(progress_text)];
+  int shown = -1;
   pthread_mutex_lock(&state_lock);
   if(pct < 0) {
     progress_pct = -1;
@@ -87,8 +97,20 @@ set_progress(int pct, const char *fmt, ...) {
     va_start(ap, fmt);
     vsnprintf(progress_text, sizeof(progress_text), fmt, ap);
     va_end(ap);
+    shown = progress_pct;
+    snprintf(text, sizeof(text), "%s", progress_text);
   }
   pthread_mutex_unlock(&state_lock);
+
+  time_t now = time(NULL);
+  if(shown < 0) {
+    progress_started = 0;
+  } else if(!progress_started) {
+    progress_started = progress_noted = now;
+  } else if(now - progress_noted >= PROGRESS_NOTE_SECONDS && shown < 100) {
+    progress_noted = now;
+    notify("ps5-theme: %s... %d%%", text, shown);
+  }
 }
 
 
@@ -851,12 +873,112 @@ static int live_stages;           /* stages[] behind the live overlays */
 static char live_theme[128];
 
 
+#define LIVE_FILE BASE_DIR "/live"   /* the applied theme's targets and stages */
+
 static void
 forget_live(void) {
   for(int k = 0; k < live_stages; k++) plan_free(&stages[k].plan);
   live_stages = 0;
   ntargets = 0;
   live_theme[0] = 0;
+  if(!access(LIVE_FILE, F_OK)) fs_unlink(LIVE_FILE);
+}
+
+
+static int
+plan_push(plan_t *p, const char *rel) {
+  if(p->count == p->cap) {
+    if(p->cap >= PLAN_MAX_FILES) return -1;
+    int cap = p->cap ? p->cap * 2 : 64;
+    void *n = realloc(p->rel, (size_t)cap * PATH_MAX);
+    if(!n) return -1;
+    p->rel = n;
+    p->cap = cap;
+  }
+  snprintf(p->rel[p->count++], PATH_MAX, "%s", rel);
+  return 0;
+}
+
+
+/* Written after every apply, so a new copy of the plugin (an update, or a
+   restart after a hard kill) can carry on with the overlays in place instead
+   of taking them down. Lines: "theme\t<id>", "target\t<path>",
+   "stage\t<state>\t<dir>\t<real>" and "file\t<rel>" for that stage. */
+static void
+save_live(void) {
+  char tmp[] = LIVE_FILE ".tmp";
+  int fd = fs_open_write(tmp);
+  FILE *f = fd < 0 ? NULL : fdopen(fd, "w");
+  if(!f) {
+    if(fd >= 0) close(fd);
+    return;
+  }
+  fprintf(f, "theme\t%s\n", live_theme);
+  for(int i = 0; i < ntargets; i++) fprintf(f, "target\t%s\n", targets[i]);
+  for(int k = 0; k < live_stages; k++) {
+    fprintf(f, "stage\t%d\t%s\t%s\n", stages[k].state, stages[k].dir, stages[k].real);
+    for(int r = 0; r < stages[k].plan.count; r++) fprintf(f, "file\t%s\n", stages[k].plan.rel[r]);
+  }
+  int ok = !ferror(f);
+  if(fclose(f) || !ok || fs_rename(tmp, LIVE_FILE)) fs_unlink(tmp);
+}
+
+
+/* Carry on with the overlays a previous copy left for theme `active`. 0 if
+   they are all there; otherwise nothing is kept and the caller applies. */
+static int
+adopt_live(const char *active) {
+  char line[PATH_MAX * 2 + 64], theme[128] = "";
+  int ours = 0, bad = 0;
+  FILE *f = fopen(LIVE_FILE, "r");
+  if(!f) return -1;
+  for(int k = 0; k < live_stages; k++) plan_free(&stages[k].plan);
+  live_stages = 0;
+  ntargets = 0;
+  while(!bad && fgets(line, sizeof(line), f)) {
+    line[strcspn(line, "\n")] = 0;
+    char *tab = strchr(line, '\t');
+    if(!tab) continue;
+    *tab++ = 0;
+    if(!strcmp(line, "theme")) {
+      snprintf(theme, sizeof(theme), "%s", tab);
+    } else if(!strcmp(line, "target") && ntargets < MAX_TARGETS) {
+      snprintf(targets[ntargets++], PATH_MAX, "%s", tab);
+    } else if(!strcmp(line, "stage") && live_stages < MAX_JOBS) {
+      char *dir = strchr(tab, '\t'), *real = dir ? strchr(dir + 1, '\t') : NULL;
+      if(!dir || !real) { bad = 1; break; }
+      *dir++ = 0;
+      *real++ = 0;
+      stage_t *st = &stages[live_stages++];
+      memset(st, 0, sizeof(*st));
+      st->state = atoi(tab);
+      snprintf(st->dir, sizeof(st->dir), "%s", dir);
+      snprintf(st->real, sizeof(st->real), "%s", real);
+      if(!st->state && (strncmp(dir, STAGE_DIR "/", sizeof(STAGE_DIR)) || !fs_is_dir(dir))) bad = 1;
+    } else if(!strcmp(line, "file") && live_stages) {
+      if(plan_push(&stages[live_stages - 1].plan, tab)) bad = 1;
+    }
+  }
+  fclose(f);
+
+  /* The recorded overlays must still be ours. */
+  f = bad ? NULL : fopen(MOUNTS_FILE, "r");
+  if(f) {
+    while(fgets(line, sizeof(line), f)) {
+      line[strcspn(line, "\r\n")] = 0;
+      if(line[0] && plat_is_our_mount(line, STAGE_DIR "/")) ours++;
+    }
+    fclose(f);
+  }
+  if(bad || !ours || strcmp(theme, active) || !ntargets || !live_stages) {
+    for(int k = 0; k < live_stages; k++) plan_free(&stages[k].plan);
+    live_stages = 0;
+    ntargets = 0;
+    return -1;
+  }
+  snprintf(live_theme, sizeof(live_theme), "%s", theme);
+  log_msg("theme %s: carrying on with %d overlay(s) left by the previous copy", theme, ours);
+  return 0;
 }
 
 
@@ -1081,9 +1203,10 @@ apply_theme(const char *name) {
     if(j->view) views_mounted++;
     mounted++;
   }
-  if(mounted) {   /* kept for the view watcher */
+  if(mounted) {   /* kept for the view watcher, and for a new copy to carry on with */
     live_stages = nstages;
     snprintf(live_theme, sizeof(live_theme), "%s", name);
+    save_live();
   } else {
     for(int k = 0; k < nstages; k++) plan_free(&stages[k].plan);
   }
@@ -1362,6 +1485,28 @@ main(void) {
   log_init();
   fw_string(fw, sizeof(fw));
   log_msg("ps5-theme %s starting, pid %d, firmware %s", PLUGIN_VERSION, getpid(), fw);
+
+  /* One copy at a time. A newer copy takes over from an older one (an
+     update); an older or equal one leaves the running copy alone. */
+  if(instance_lock(0)) {
+    int running = running_version(), mine = my_version();
+    if(running >= mine) {
+      log_msg("ps5-theme %d.%02d is already running; this copy exits", running / 100, running % 100);
+      return 0;
+    }
+    log_msg("taking over from the running copy (%d.%02d)", running / 100, running % 100);
+    if(ask_handoff() || instance_lock(20000)) {
+      log_err("the running copy did not hand over; this copy exits");
+      notify("ps5-theme: could not take over from the running copy. Restart the console to update.");
+      return 1;
+    }
+  } else if(running_version() >= 0) {
+    /* A copy from before 1.23 holds no lock and can't hand over. */
+    log_err("an older copy without hand-over is running; this copy exits");
+    notify("ps5-theme: an older copy is still running. Restart the console to finish the update.");
+    return 1;
+  }
+  plat_set_name(TITLE_ID);   /* the name etaHEN knows a running plugin by */
   crash_report_previous();
 
   fs_mkdirs(THEMES_DIR);
@@ -1371,8 +1516,26 @@ main(void) {
   /* 1.09's audio output choice; the plugin no longer plays audio itself. */
   if(!access(BASE_DIR "/audio-route", F_OK)) fs_unlink(BASE_DIR "/audio-route");
 
-  /* Mounts from a previous run (plugin Stop is a hard kill) are cleaned first. */
-  revert_all();
+  /* Overlays from a previous copy (an update, or plugin Stop, which is a hard
+     kill) are kept when they are complete and for the selected theme;
+     otherwise they are taken down and the theme is applied again. */
+  char listing[PATH_MAX];
+  asset_listing_path(listing, sizeof(listing));
+  read_active(active, sizeof(active));
+  int adopted = strcmp(active, "none") && !access(listing, F_OK) && !adopt_live(active);
+  if(adopted) {
+    char ini[PATH_MAX], title[128];
+    snprintf(ini, sizeof(ini), "%s/%s/theme.ini", THEMES_DIR, active);
+    if(read_ini_value(ini, "name", title, sizeof(title))) snprintf(title, sizeof(title), "%s", active);
+    pthread_mutex_lock(&state_lock);
+    snprintf(applied, sizeof(applied), "%s", active);
+    pthread_mutex_unlock(&state_lock);
+    snprintf(current, sizeof(current), "%s", active);
+    set_result("%s is applied (kept through the plugin's restart).", title);
+  } else {
+    forget_live();
+    revert_all();
+  }
   dump_mount_table();
 
   pthread_attr_init(&attr);
@@ -1407,7 +1570,16 @@ main(void) {
   else notify("ps5-theme ready. Open the Themes tile.");
   crumb(CRUMB_MAIN, "idle");
 
+  time_t last_update_check = 0;
   for(;;) {
+    if(handoff_requested()) {
+      log_msg("handing over to the new copy; the theme stays as it is");
+      _exit(0);   /* the overlays stay; the lock is released with the process */
+    }
+    if(time(NULL) - last_update_check >= UPDATE_CHECK_SECONDS) {
+      last_update_check = time(NULL);
+      update_check();
+    }
     /* Say so if the system is slow to register the tile; nothing else waits on it. */
     if(!tile_warned && !atomic_load(&tile_done) && time(NULL) - tile_started > 45) {
       tile_warned = 1;
@@ -1428,13 +1600,13 @@ main(void) {
       if(theme) set_progress(0, "Starting");
 
       if(theme) {
-        /* At start the console shows stock until the theme is back: say so. */
-        if(!current[0]) {
-          char ini[PATH_MAX], title[128];
-          snprintf(ini, sizeof(ini), "%s/%s/theme.ini", THEMES_DIR, active);
-          if(read_ini_value(ini, "name", title, sizeof(title))) snprintf(title, sizeof(title), "%s", active);
-          notify("ps5-theme: putting '%s' back...", title);
-        }
+        /* Say on the console what is happening: at start it shows stock until
+           the theme is back. */
+        char ini[PATH_MAX], title[128];
+        snprintf(ini, sizeof(ini), "%s/%s/theme.ini", THEMES_DIR, active);
+        if(read_ini_value(ini, "name", title, sizeof(title))) snprintf(title, sizeof(title), "%s", active);
+        if(!current[0]) notify("ps5-theme: putting '%s' back...", title);
+        else notify("ps5-theme: applying '%s'...", title);
         themes_lock();
         int rc = apply_theme(active);
         themes_unlock();

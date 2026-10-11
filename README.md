@@ -10,7 +10,7 @@ the plugin stops, and the plugin puts your theme back each time etaHEN starts.
 
 ![The theme library](docs/screenshots/library.png)
 
-Version 1.22. Developed and tested on a PS5 with firmware 13.42 and etaHEN
+Version 1.23. Developed and tested on a PS5 with firmware 13.42 and etaHEN
 2.5B (unified build).
 
 > **About the screenshots.** They were taken from the author's own console.
@@ -91,9 +91,13 @@ theme is mounted), starts the manager on port **8095**, adds the **Themes**
 tile, and shows a notification with the address to open from a phone or
 computer.
 
-**Updating:** replace the `.plugin` file and restart the plugin. A manager
-page that is already open notices the new version and reloads itself. Your
-themes and the applied theme are kept.
+**Updating:** copy the new `.plugin` file over the old one in
+`/data/etaHEN/plugins/`. Within about 10 seconds the running plugin finds it,
+starts it through etaHEN's ELF loader and hands over to it. Your theme stays
+on the screen the whole time, and no Toolbox or restart is needed, which
+matters after rest mode, when etaHEN's Toolbox is often gone. An open manager
+page reloads itself with the new version. (This works from 1.23 on: to get
+1.23 itself from an older version, restart the console once.)
 
 Without etaHEN, any ELF loader works: send `ps5-theme.elf` to port 9021
 after each jailbreak. The theme is then put back only when you load it.
@@ -282,9 +286,15 @@ show what the console is doing and how far it has got:
    theme is read back and checked.
 
 The top bar says **Applying…** until the console confirms the result. The
-same happens after a reboot, when the plugin puts your theme back; the
-console also shows a "putting back" notification. Applying can take up to
-a minute the first time on a firmware, and a few seconds after that.
+same happens after a reboot, when the plugin puts your theme back. Applying
+can take up to a minute the first time on a firmware, and a few seconds after
+that.
+
+The console shows its own notifications too, so you can follow along on the
+TV without the manager open: "Applying 'Name'…" (or "Putting 'Name' back…"
+after a reboot), then for a long apply the current step and percentage, at
+most every 8 seconds so they don't pile up, and finally "'Name' applied (16
+files verified)".
 
 ### Activity
 
@@ -453,10 +463,37 @@ by folder, and checking by overlay. The percentage never goes backwards.
 
 ### Coming back after every start
 
-The selected theme is stored in `/data/ps5-theme/active`. At start the
-plugin removes any overlays left by a previous run (etaHEN's Stop ends a
-plugin at once), then applies the selection again, with a notification on
-the console. **Restore stock** sets the selection to `none`.
+The selected theme is stored in `/data/ps5-theme/active`. After a reboot the
+plugin applies it again at start, with a notification on the console.
+**Restore stock** sets the selection to `none`.
+
+When the plugin itself restarts without a reboot (an update, or etaHEN's
+Stop, which ends a plugin at once), the overlays are still in place. After
+every apply the plugin writes down the theme's target folders and stage
+folders (`/data/ps5-theme/live`), and a new copy carries on with the
+overlays when they are all still there for the selected theme. Nothing is
+taken down, so nothing flashes and nothing an app is using is forced off. If
+anything doesn't match, it applies the theme again as usual.
+
+### Updating in place
+
+Only one copy of the plugin runs at a time: each copy holds a lock file for
+as long as it runs, and the kernel releases it when the process ends.
+
+- Every 10 seconds the running copy looks in etaHEN's plugin folders for a
+  `ps5-theme` plugin file (checked by its header: `etaHEN_PLUGIN`, the title
+  ID `THEM00001`, the version, then an ELF) with a higher version.
+- It sends that file's program to etaHEN's ELF loader on port 9021, the
+  loader etaHEN itself uses, which starts it as a new process.
+- The new copy finds the lock taken, asks the running copy's version, and if
+  it is newer asks it to step aside (`/api/handoff`, accepted only from the
+  console itself). The old copy exits, leaving the overlays, and the new one
+  takes the lock and carries on with them.
+- A copy that isn't newer leaves the running one alone and exits. The new
+  copy names itself `THEM00001`, as etaHEN's loader names plugins.
+
+**Why:** after rest mode etaHEN's Toolbox is often unavailable, and that was
+the only way to restart a plugin without restarting the console.
 
 ### Save and Discard
 
@@ -647,6 +684,7 @@ On the console:
 | `/data/ps5-theme/stock/<firmware>/` | The checked copies of system folders |
 | `/data/ps5-theme/snapshots/<id>/` | Unsaved changes' snapshots |
 | `/data/ps5-theme/stage/` | Stage folders behind the live overlays |
+| `/data/ps5-theme/live` | The applied theme's folders, for a new copy to carry on with |
 | `/data/ps5-theme/logs/` | Log and crash reports |
 | `/data/ps5-theme/dump/` | The asset listing and mount table, for reference |
 
@@ -677,6 +715,15 @@ that moment, but it also forced the old overlay off while those apps were
 using it. **Solution:** a watcher that notices new views as soon as they
 appear and covers them, with nothing taken down. `/api/mounts` returns the
 live mount table, to see what the system made.
+
+#### Updating when the Toolbox is gone
+
+After rest mode, etaHEN's Toolbox often stopped working, and it was the
+only way to restart a plugin, so a new version copied to the console waited
+for a full restart. Restarting the plugin also took the theme down and put it
+back. **Solution:** the plugin updates itself: it notices a newer plugin
+file, starts it through etaHEN's ELF loader and hands over to it, and the new
+copy keeps the overlays already in place.
 
 #### "File name too long"
 
@@ -806,7 +853,7 @@ tests/host/run.sh
 ```
 
 Builds the real plugin sources for Linux with AddressSanitizer and UBSan and
-runs 29 end-to-end tests against a fake console tree in a privileged
+runs 30 end-to-end tests against a fake console tree in a privileged
 container. They cover:
 
 - upload checks and the media policy;
@@ -815,6 +862,8 @@ container. They cover:
 - concurrent requests during an apply, slow and malformed clients;
 - recovery after a hard kill, log rotation and the crash handler;
 - new sandbox views made after a theme is applied (as after rest mode);
+- updating in place: a newer plugin file started through a stand-in for
+  etaHEN's ELF loader, the hand-over, and keeping the overlays;
 - Save and Discard, preview pictures and duplicates;
 - home music made by the browser's encoder, and damaged or wrong-format
   ATRAC9 files;
@@ -870,6 +919,7 @@ on Ubuntu 24.04. The `.plugin` file is the ELF with etaHEN's plugin header:
 |---|---|
 | `src/main.c` | The theme engine: stock copies, staging, overlays, checks, progress, re-apply at start |
 | `src/web.c` | Web server and JSON API: uploads, settings, Save/Discard, previews, status |
+| `src/update.c` | One running copy at a time, finding a newer plugin file and handing over to it |
 | `src/fsguard.c` | The write guard and file helpers (atomic writes, linked copies) |
 | `src/policy.c` | What can be themed, and the checks for each kind of file |
 | `src/verify.c` | Image header parsing |
@@ -911,7 +961,8 @@ on Ubuntu 24.04. The `.plugin` file is the ELF with etaHEN's plugin header:
 The manager listens on port 8095 on your local network and has no password.
 Requests that change anything must carry an `X-PS5-Theme` header, which
 browsers won't send from another site, so web pages opened on the console
-can't drive the API. Every write stays inside `/data/ps5-theme/` and the
+can't drive the API. The hand-over request used by updates is accepted only
+from the console itself. Every write stays inside `/data/ps5-theme/` and the
 tile's folder. The plugin sends nothing over the internet.
 
 ## Removing

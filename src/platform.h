@@ -49,6 +49,9 @@ int      plat_register_tile(const char *title_id);
 /* Registers from a signal handler's ucontext. Async-signal-safe. */
 void     plat_crash_regs(void *ucontext, uint64_t *rip, uint64_t *rsp, uint64_t *rbp);
 
+/* Name this process's main thread, as etaHEN's loader names a plugin. */
+void     plat_set_name(const char *name);
+
 /* Keep writes to a closed peer from raising SIGPIPE. */
 void     plat_socket_nosigpipe(int fd);
 
