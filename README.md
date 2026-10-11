@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="assets/icon0.png" alt="The PS5 Themes icon" width="128">
+  <img src="docs/icon-rounded.png" alt="The PS5 Themes icon" width="128">
 </p>
 
 # PS5 Themes (ps5-theme)
