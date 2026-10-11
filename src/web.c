@@ -977,6 +977,27 @@ api_delete_preview(request_t *req) {
 
 
 /* The shown picture, or the one named by `kind`. */
+/* The live mount table, for diagnosing what the system shows where (read-only). */
+static void
+api_mounts(request_t *req) {
+  static pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
+  const char *path = DUMP_DIR "/mounts-now.txt", *tmp = DUMP_DIR "/mounts-now.txt.tmp";
+  pthread_mutex_lock(&lock);
+  int fd = fs_open_write(tmp);
+  FILE *f = fd < 0 ? NULL : fdopen(fd, "w");
+  if(f) {
+    plat_dump_mounts(f);
+    fclose(f);
+  } else if(fd >= 0) {
+    close(fd);
+  }
+  int ok = f && !fs_rename(tmp, path);
+  if(ok) respond_file(req, path);
+  pthread_mutex_unlock(&lock);
+  if(!ok) respond_error(req->fd, 500, "could not read the mount table");
+}
+
+
 static void
 api_get_preview(request_t *req) {
   char id[128], kind[16], path[PATH_MAX];
@@ -1352,6 +1373,7 @@ route(request_t *req) {
   if(get && !strcmp(p, "/api/crash"))       return api_crash(req);
   if(get && !strcmp(p, "/api/theme/music")) return api_get_music(req);
   if(get && !strcmp(p, "/api/theme/preview")) return api_get_preview(req);
+  if(get && !strcmp(p, "/api/mounts"))      return api_mounts(req);
 
   if((post || put || del) && !req->has_token) {
     return respond_error(req->fd, 403, "missing X-PS5-Theme header");

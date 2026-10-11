@@ -34,6 +34,9 @@ typedef struct plat_view {
 } plat_view_t;
 int      plat_list_views(plat_view_t *out, int max);
 
+/* Number of mounts, cheaply (to notice when the table changes). */
+int      plat_mount_count(void);
+
 /* Write the whole mount table, one mount per line, for diagnostics. */
 void     plat_dump_mounts(FILE *out);
 

@@ -8,7 +8,7 @@ else
 endif
 
 TITLE_ID := THEM00001
-VERSION  := 1.21
+VERSION  := 1.22
 
 ELF    := ps5-theme.elf
 PLUGIN := ps5-theme.plugin

@@ -5,7 +5,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#define PLUGIN_VERSION "1.21"
+#define PLUGIN_VERSION "1.22"
 #define TITLE_ID       "THEM00001"
 #define WEB_PORT       8095
 

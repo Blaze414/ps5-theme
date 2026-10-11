@@ -272,7 +272,7 @@ S = {}  # shared state between ordered tests
 
 def t_startup():
     s = status()
-    assert s["fw"] == "13.42" and s["version"] == "1.21" and s["themes"] == [], s
+    assert s["fw"] == "13.42" and s["version"] == "1.22" and s["themes"] == [], s
     listing = open(f"{BASE}/dump/assets-v2-13.42.txt").read()
     assert f"{VSH}/bg_hub_default.dds.zst" in listing
     assert f"{HOME}/bg.png" in listing and "/mnt/rnps/apps/NPXS40099/a.png" in listing
@@ -282,7 +282,7 @@ def t_startup():
     assert open("/tmp/tile-registered").read().strip() == "THEM00001"
     assert "starting" in log_text()
     notes = open("/tmp/notifications.txt").read()
-    assert "ps5-theme 1.21 starting" in notes and "ps5-theme ready" in notes, notes
+    assert "ps5-theme 1.22 starting" in notes and "ps5-theme ready" in notes, notes
 
 
 def t_ui_and_icon_served():
@@ -552,6 +552,7 @@ def t_overlays_reach_system_views():
         print("      (skipped: needs real mounts)", flush=True)
         return
     box = "/mnt/sandbox/SHELL_000/system_ex"
+    box2 = "/mnt/sandbox/SHELL_001/system_ex"
     dummies = []
     for i in range(80):  # unrelated mounts listed before the one that matters (1,072 on a real PS5)
         src, dst = f"/tmp/dummy-src/{i}", f"/mnt/dummy/{i}"
@@ -578,11 +579,32 @@ def t_overlays_reach_system_views():
         assert os.path.exists(box + "/vsh_asset/bg_hub_default.dds.zst")
         assert seen in open(f"{BASE}/mounts").read()
         assert "SHELL_000" in open(f"{BASE}/dump/mounts.txt").read() or True
+
+        # An app restarts (after rest mode) in a new sandbox, whose view shows
+        # stock: the plugin covers it by itself, without re-applying.
+        os.makedirs(box2, exist_ok=True)
+        subprocess.run(["mount", "--bind", "/system_ex", box2], check=True)
+        seen2 = box2 + HOME[len("/system_ex"):]
+        end = time.time() + 10
+        while crc_file(f"{seen2}/bg.png") != zlib.crc32(S["bg"]):
+            assert time.time() < end, "the new view was not covered"
+            time.sleep(0.2)
+        assert crc_file(f"{seen2}/icon.png") == S["stock_icon"]
+        assert "a view the system made after the theme was applied" in log_text()
+        assert status()["applied"] == "night", "covering a new view must not re-apply"
+        assert len(mounts_on(seen)) == 1 and len(mounts_on(seen2)) == 1
+        code, table = call("GET", "/api/mounts")
+        assert code == 200 and b"SHELL_001" in table, table[:200]
+
         assert call("POST", "/api/apply", {"id": "none"})[0] == 200
         wait_applied("")
         assert crc_file(f"{seen}/bg.png") == S["stock_bg"], "sandbox view still themed after restore"
-        assert not mounts_on(seen)
+        assert crc_file(f"{seen2}/bg.png") == S["stock_bg"], "new view still themed after restore"
+        assert not mounts_on(seen) and not mounts_on(seen2)
+        time.sleep(2)   # the watcher is idle with no theme applied
+        assert not mounts_on(seen2)
     finally:
+        subprocess.run(["umount", box2])
         subprocess.run(["umount", box])
         for d in dummies:
             subprocess.run(["umount", d])

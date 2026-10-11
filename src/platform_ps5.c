@@ -156,6 +156,12 @@ plat_list_views(plat_view_t *out, int max) {
 }
 
 
+int
+plat_mount_count(void) {
+  return getfsstat(NULL, 0, MNT_NOWAIT);
+}
+
+
 void
 plat_dump_mounts(FILE *out) {
   struct statfs *sf = NULL;

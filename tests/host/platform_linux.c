@@ -159,6 +159,18 @@ plat_list_views(plat_view_t *out, int max) {
 }
 
 
+int
+plat_mount_count(void) {
+  char line[4096];
+  int n = 0;
+  FILE *f = fopen("/proc/self/mountinfo", "r");
+  if(!f) return -1;
+  while(fgets(line, sizeof(line), f)) n++;
+  fclose(f);
+  return n;
+}
+
+
 void
 plat_dump_mounts(FILE *out) {
   char line[4096];

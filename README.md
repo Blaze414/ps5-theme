@@ -10,7 +10,7 @@ the plugin stops, and the plugin puts your theme back each time etaHEN starts.
 
 ![The theme library](docs/screenshots/library.png)
 
-Version 1.21. Developed and tested on a PS5 with firmware 13.42 and etaHEN
+Version 1.22. Developed and tested on a PS5 with firmware 13.42 and etaHEN
 2.5B (unified build).
 
 > **About the screenshots.** They were taken from the author's own console.
@@ -369,6 +369,14 @@ mount table, finds every view that shows a themable folder (14 on 13.42 for
 the home screen's assets), and places an overlay on each. The overlays go
 on the real path as well, for anything that reads it directly.
 
+The system can also make new views later. After rest mode, for example,
+some of ShellUI's apps restart in new sandboxes whose views show the stock
+files. While a theme is applied, the plugin notices when the mount table
+changes (it compares the number of mounts every second, which costs almost
+nothing) and overlays any new view from the same stage folders, checks it,
+and logs it. It never takes anything down to do this, so there's no stock
+flash, and nothing is forced off while an app is using it.
+
 ### The 88-character mount point limit
 
 The PS5 kernel keeps a mount point's name in a fixed 88-byte field, as
@@ -659,6 +667,17 @@ real path isn't visible through a view.
 **Solution:** read the full mount table, find every view that shows a
 themable folder, and overlay each one, checking every overlay afterwards.
 
+#### Stock again after rest mode
+
+After rest mode the home screen showed stock, and etaHEN's Toolbox stopped
+working too. The log showed why: two of ShellUI's apps had restarted in new
+sandboxes, and their new views of the system folders had no overlays.
+Re-applying fixed it, because a re-apply covers every view that exists at
+that moment, but it also forced the old overlay off while those apps were
+using it. **Solution:** a watcher that notices new views as soon as they
+appear and covers them, with nothing taken down. `/api/mounts` returns the
+live mount table, to see what the system made.
+
 #### "File name too long"
 
 Some overlays failed with `ENAMETOOLONG`. The PS5 kernel stores a mount
@@ -795,6 +814,7 @@ container. They cover:
 - read-only overlays, sandbox views and symlink containment;
 - concurrent requests during an apply, slow and malformed clients;
 - recovery after a hard kill, log rotation and the crash handler;
+- new sandbox views made after a theme is applied (as after rest mode);
 - Save and Discard, preview pictures and duplicates;
 - home music made by the browser's encoder, and damaged or wrong-format
   ATRAC9 files;
@@ -875,7 +895,11 @@ on Ubuntu 24.04. The `.plugin` file is the ELF with etaHEN's plugin header:
   the theme is put back at start either way.
 - The home music's position is kept by the console (see
   [Music that starts part-way through](#music-that-starts-part-way-through)).
-  What happens after rest mode isn't confirmed.
+- After rest mode, the plugin covers the new views ShellUI's restarted apps
+  make (see [Stock again after rest mode](#stock-again-after-rest-mode)). An
+  app that read its background before the overlay arrived may show stock
+  until it reloads; **Re-apply** brings it back at once. etaHEN's own Toolbox
+  stopping after rest mode is outside this plugin.
 - Background and icon sorting is by file name. Anything it misses is under
   **Other images**.
 - The home screen's colours and layout can't be themed (they are code).

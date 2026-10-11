@@ -842,12 +842,102 @@ stage_folder(stage_t *st, const char *src, const char *mirror, int *skipped) {
 }
 
 
+/* The applied theme's target folders and stage folders. They stay in use
+   after the apply, for the view watcher (main thread only). */
+static char targets[MAX_TARGETS][PATH_MAX];
+static int ntargets;
+static stage_t stages[MAX_JOBS];
+static int live_stages;           /* stages[] behind the live overlays */
+static char live_theme[128];
+
+
+static void
+forget_live(void) {
+  for(int k = 0; k < live_stages; k++) plan_free(&stages[k].plan);
+  live_stages = 0;
+  ntargets = 0;
+  live_theme[0] = 0;
+}
+
+
+/* Every place the system shows a target folder: the real path, plus each
+   nullfs view of it (ShellUI reads the system through its own sandbox views,
+   where a mount on the real path is not visible). One job per mount point;
+   one nested inside another is already covered. `quiet` leaves out the log
+   lines, for the view watcher. */
+static int
+plan_jobs(job_t *jobs, int *failed, int quiet) {
+  /* Every place the system shows a target folder gets an overlay: the real
+     path, plus each nullfs view of it (ShellUI reads the system through its
+     own sandbox views, where a mount on the real path is not visible). */
+  static plat_view_t views[MAX_VIEWS];
+  int nviews = relevant_views(views, MAX_VIEWS);
+  size_t mount_max = plat_mount_path_max();
+  int njobs = 0;
+
+  for(int i = 0; i < ntargets; i++) {
+    for(int v = -1; v < nviews; v++) {
+      const char *from = v < 0 ? "" : views[v].from;
+      const char *on = v < 0 ? "" : views[v].on;
+      size_t flen = strlen(from);
+      if(v >= 0 && strcmp(targets[i], from) &&
+         (strncmp(targets[i], from, flen) || (flen > 1 && targets[i][flen] != '/'))) continue;
+      if(v >= 0 && !strcmp(from, "/")) flen = 0;
+
+      char mount_on[PATH_MAX], real[PATH_MAX], check[PATH_MAX];
+      snprintf(real, sizeof(real), "%s", targets[i]);
+      if(snprintf(mount_on, sizeof(mount_on), "%s%s", on, targets[i] + flen) >= (int)sizeof(mount_on)) continue;
+
+      /* The kernel keeps a mount point's name in a fixed field (88 bytes on the
+         PS5): a longer path is overlaid from the nearest parent that fits. */
+      size_t wanted_len = strlen(mount_on);
+      while(strlen(mount_on) > mount_max) {
+        char *a = strrchr(mount_on, '/'), *b = strrchr(real, '/');
+        if(!a || !b || a == mount_on || b == real) break;
+        *a = 0;
+        *b = 0;
+      }
+      snprintf(check, sizeof(check), "%s/", real);
+      if(strlen(mount_on) > mount_max || !target_allowed(check) ||
+         (v >= 0 && strlen(mount_on) < strlen(on))) {
+        if(!quiet) log_err("skip %s%s: no folder short enough to mount", v >= 0 ? "view " : "", mount_on);
+        if(v < 0) (*failed)++;
+        continue;
+      }
+      if(!quiet && strlen(mount_on) != wanted_len) {
+        log_msg("mounting %s from its parent %s (path length limit)", targets[i], mount_on);
+      }
+      if(njobs == MAX_JOBS) break;
+      snprintf(jobs[njobs].on, PATH_MAX, "%s", mount_on);
+      snprintf(jobs[njobs].real, PATH_MAX, "%s", real);
+      jobs[njobs].view = v >= 0;
+      njobs++;
+    }
+  }
+
+  /* One overlay per mount point; one nested inside another is already covered. */
+  qsort(jobs, njobs, sizeof(*jobs), cmp_job);
+  int kept = 0;
+  for(int i = 0; i < njobs; i++) {
+    if(kept) {
+      size_t plen = strlen(jobs[kept - 1].on);
+      if(!strcmp(jobs[i].on, jobs[kept - 1].on)) continue;
+      if(!strncmp(jobs[i].on, jobs[kept - 1].on, plen) && jobs[i].on[plen] == '/') continue;
+    }
+    if(kept != i) jobs[kept] = jobs[i];
+    kept++;
+  }
+  njobs = kept;
+  return njobs;
+}
+
+
 static int
 apply_theme(const char *name) {
-  static char targets[MAX_TARGETS][PATH_MAX];
   char path[PATH_MAX], files_root[PATH_MAX], fw[16], want_fw[64], title[128];
   int count = 0, mounted = 0, verified = 0, failed = 0, skipped = 0;
 
+  forget_live();   /* the previous theme's overlays are replaced below */
   if(!theme_name_valid(name)) {
     revert_all();
     set_result("Invalid theme name.");
@@ -873,75 +963,17 @@ apply_theme(const char *name) {
   }
 
   snprintf(files_root, sizeof(files_root), "%s/%s/files", THEMES_DIR, name);
-  if(fs_is_dir(files_root) && collect_targets(files_root, "", targets, &count)) {
+  int unreadable = fs_is_dir(files_root) && collect_targets(files_root, "", targets, &count);
+  ntargets = unreadable ? 0 : count;
+  if(unreadable) {
     revert_all();
     set_result("Could not read %s, or it touches more than %d folders.", title, MAX_TARGETS);
     notify("ps5-theme: could not read %s", title);
     return -1;
   }
 
-  /* Every place the system shows a target folder gets an overlay: the real
-     path, plus each nullfs view of it (ShellUI reads the system through its
-     own sandbox views, where a mount on the real path is not visible). */
-  static plat_view_t views[MAX_VIEWS];
-  int nviews = relevant_views(views, MAX_VIEWS);
-  size_t mount_max = plat_mount_path_max();
   static job_t jobs[MAX_JOBS];
-  int njobs = 0;
-
-  for(int i = 0; i < count; i++) {
-    for(int v = -1; v < nviews; v++) {
-      const char *from = v < 0 ? "" : views[v].from;
-      const char *on = v < 0 ? "" : views[v].on;
-      size_t flen = strlen(from);
-      if(v >= 0 && strcmp(targets[i], from) &&
-         (strncmp(targets[i], from, flen) || (flen > 1 && targets[i][flen] != '/'))) continue;
-      if(v >= 0 && !strcmp(from, "/")) flen = 0;
-
-      char mount_on[PATH_MAX], real[PATH_MAX], check[PATH_MAX];
-      snprintf(real, sizeof(real), "%s", targets[i]);
-      if(snprintf(mount_on, sizeof(mount_on), "%s%s", on, targets[i] + flen) >= (int)sizeof(mount_on)) continue;
-
-      /* The kernel keeps a mount point's name in a fixed field (88 bytes on the
-         PS5): a longer path is overlaid from the nearest parent that fits. */
-      size_t wanted_len = strlen(mount_on);
-      while(strlen(mount_on) > mount_max) {
-        char *a = strrchr(mount_on, '/'), *b = strrchr(real, '/');
-        if(!a || !b || a == mount_on || b == real) break;
-        *a = 0;
-        *b = 0;
-      }
-      snprintf(check, sizeof(check), "%s/", real);
-      if(strlen(mount_on) > mount_max || !target_allowed(check) ||
-         (v >= 0 && strlen(mount_on) < strlen(on))) {
-        log_err("skip %s%s: no folder short enough to mount", v >= 0 ? "view " : "", mount_on);
-        if(v < 0) failed++;
-        continue;
-      }
-      if(strlen(mount_on) != wanted_len) {
-        log_msg("mounting %s from its parent %s (path length limit)", targets[i], mount_on);
-      }
-      if(njobs == MAX_JOBS) break;
-      snprintf(jobs[njobs].on, PATH_MAX, "%s", mount_on);
-      snprintf(jobs[njobs].real, PATH_MAX, "%s", real);
-      jobs[njobs].view = v >= 0;
-      njobs++;
-    }
-  }
-
-  /* One overlay per mount point; one nested inside another is already covered. */
-  qsort(jobs, njobs, sizeof(*jobs), cmp_job);
-  int kept = 0;
-  for(int i = 0; i < njobs; i++) {
-    if(kept) {
-      size_t plen = strlen(jobs[kept - 1].on);
-      if(!strcmp(jobs[i].on, jobs[kept - 1].on)) continue;
-      if(!strncmp(jobs[i].on, jobs[kept - 1].on, plen) && jobs[i].on[plen] == '/') continue;
-    }
-    if(kept != i) jobs[kept] = jobs[i];
-    kept++;
-  }
-  njobs = kept;
+  int njobs = plan_jobs(jobs, &failed, 0);
 
   /* Stage each distinct real folder once, while the previous theme (if any)
      is still shown. A folder without a stock mirror yet needs the previous
@@ -949,7 +981,6 @@ apply_theme(const char *name) {
   static unsigned generation;
   char keep[32];
   snprintf(keep, sizeof(keep), "g%u-", ++generation);
-  static stage_t stages[MAX_JOBS];
   static int job_stage[MAX_JOBS];
   int nstages = 0, views_mounted = 0, reverted = 0;
 
@@ -1050,7 +1081,12 @@ apply_theme(const char *name) {
     if(j->view) views_mounted++;
     mounted++;
   }
-  for(int k = 0; k < nstages; k++) plan_free(&stages[k].plan);
+  if(mounted) {   /* kept for the view watcher */
+    live_stages = nstages;
+    snprintf(live_theme, sizeof(live_theme), "%s", name);
+  } else {
+    for(int k = 0; k < nstages; k++) plan_free(&stages[k].plan);
+  }
   log_msg("theme %s: %d overlay(s), %d in system views", name, mounted, views_mounted);
 
   crumb(CRUMB_MAIN, "idle");
@@ -1200,6 +1236,91 @@ write_active(const char *name) {
 }
 
 
+/* ---------------- view watcher ----------------
+
+   The system can make new views of a themed folder after the theme was
+   applied: after rest mode, some of ShellUI's apps restart in new sandboxes,
+   whose views show the stock files. While a theme is applied, the watcher
+   overlays any such view from the same stage folders and checks it, within a
+   second of the mount table changing. It never takes anything down. */
+
+#define WATCH_FULL_SECONDS 30     /* look again even if the mount count is the same */
+#define WATCH_RETRY_SECONDS 60    /* before trying a view that refused the overlay again */
+
+static struct {
+  char on[PATH_MAX];
+  time_t until;
+} watch_refused[16];
+
+static int
+watch_waiting(const char *on, time_t now) {
+  for(size_t i = 0; i < sizeof(watch_refused) / sizeof(*watch_refused); i++) {
+    if(watch_refused[i].until > now && !strcmp(watch_refused[i].on, on)) return 1;
+  }
+  return 0;
+}
+
+static void
+watch_refuse(const char *on, time_t now) {
+  static size_t next;
+  snprintf(watch_refused[next].on, PATH_MAX, "%s", on);
+  watch_refused[next].until = now + WATCH_RETRY_SECONDS;
+  next = (next + 1) % (sizeof(watch_refused) / sizeof(*watch_refused));
+}
+
+static void
+watch_views(int reset) {
+  static int last_count = -1;
+  static time_t last_full;
+  static job_t jobs[MAX_JOBS];
+  time_t now = time(NULL);
+
+  if(reset || !live_stages) {
+    last_count = -1;
+    return;
+  }
+  int count = plat_mount_count();
+  if(count == last_count && now - last_full < WATCH_FULL_SECONDS) return;
+  last_count = count;
+  last_full = now;
+
+  int failed = 0, added = 0;
+  int njobs = plan_jobs(jobs, &failed, 1);
+  for(int i = 0; i < njobs; i++) {
+    job_t *j = &jobs[i];
+    stage_t *st = NULL;
+    for(int k = 0; k < live_stages && !st; k++) {
+      if(!stages[k].state && !strcmp(stages[k].real, j->real)) st = &stages[k];
+    }
+    if(!st || plat_is_our_mount(j->on, STAGE_DIR "/") || watch_waiting(j->on, now)) continue;
+
+    crumb(CRUMB_MAIN, "overlaying a new view %s", j->on);
+    if(plat_mount_ro(st->dir, j->on)) {
+      log_err("new view %s: overlay refused (%s), trying again in %d s", j->on, strerror(errno), WATCH_RETRY_SECONDS);
+      watch_refuse(j->on, now);
+      continue;
+    }
+    if(record_mount(j->on)) log_err("could not record mount %s", j->on);
+    /* Against the stage folder: the theme's own files may have unsaved edits. */
+    if(verify_plan(&st->plan, st->dir, j->on, "new view")) {
+      log_err("new view %s: verification failed, removing overlay", j->on);
+      if(plat_unmount(j->on)) log_err("unmount %s failed: %s", j->on, strerror(errno));
+      watch_refuse(j->on, now);
+      continue;
+    }
+    log_msg("overlaid %s, a view the system made after the theme was applied (%d file(s) verified)",
+            j->on, st->plan.count);
+    added++;
+  }
+  if(added) {
+    log_msg("theme %s: %d new view(s) covered", live_theme, added);
+    dump_mount_table();
+    last_count = plat_mount_count();   /* our own mounts changed the count */
+  }
+  crumb(CRUMB_MAIN, "idle");
+}
+
+
 static atomic_int tile_done;
 
 static void *
@@ -1323,13 +1444,16 @@ main(void) {
         pthread_mutex_unlock(&state_lock);
         set_progress(-1, "%s", "");
       } else {
+        forget_live();
         revert_all();
         set_result("Stock home screen.");
         if(current[0]) notify("ps5-theme: stock theme restored");
       }
       snprintf(current, sizeof(current), "%s", active);
       crumb(CRUMB_MAIN, "idle");
+      watch_views(1);
     }
+    watch_views(0);
     sleep(POLL_SECONDS);
   }
   return 0;
