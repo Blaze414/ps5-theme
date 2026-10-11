@@ -35,6 +35,7 @@ Version 1.23. Developed and tested on a PS5 with firmware 13.42 and etaHEN
 - [Firmware support and known limits](#firmware-support-and-known-limits)
 - [Network access](#network-access)
 - [Removing](#removing)
+- [Development Approach](#development-approach)
 - [Acknowledgements](#acknowledgements)
 - [Licences and trademarks](#licences-and-trademarks)
 
@@ -970,6 +971,27 @@ tile's folder. The plugin sends nothing over the internet.
 1. Choose **Restore stock**.
 2. Delete `/data/etaHEN/plugins/ps5-theme.plugin*` and `/data/ps5-theme/`.
 3. Delete the **Themes** tile from the home screen.
+
+## Development Approach
+
+This project explores AI-assisted development for PS5 homebrew, with an
+emphasis on practical validation rather than accepting generated code at face
+value.
+
+Claude Code was used to assist with implementation, debugging and iterative
+improvements. Development was guided by testing on physical PS5 hardware,
+examining application logs, investigating observed failures and verifying
+fixes on the console.
+
+The project combines hardware testing with host-side automated tests to
+exercise application behaviour, error handling and recovery scenarios. The aim
+is to evaluate how AI-assisted development can be used to build a useful
+console utility while maintaining a focus on reliability, safety and
+reproducibility.
+
+AI assistance does not replace testing or eliminate the need for continued
+review. Firmware compatibility and known limitations are documented
+separately.
 
 ## Acknowledgements
 
