@@ -1,0 +1,2811 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PS5 Themes</title>
+<link rel="icon" href="/icon.png">
+<style>
+/* Visual language modelled on the PS5 system UI: deep navy field, white type,
+   rounded tiles, pill buttons, and a focus state that turns white and lifts. */
+:root {
+  --bg: #060911;
+  --surface: rgba(255, 255, 255, .06);
+  --surface-hover: rgba(255, 255, 255, .10);
+  --surface-strong: rgba(255, 255, 255, .14);
+  --text: #ffffff;
+  --muted: rgba(255, 255, 255, .64);
+  --faint: rgba(255, 255, 255, .40);
+  --blue: #1f7cf0;
+  --ok: #3fcf8e;
+  --warn: #f5b440;
+  --danger: #ff6159;
+  --radius-lg: 20px;
+  --radius: 14px;
+  --ease: cubic-bezier(.2, .8, .2, 1);
+  color-scheme: dark;
+}
+@media (min-width: 1600px) { html { font-size: 18px; } }
+
+* { box-sizing: border-box; }
+html, body { margin: 0; }
+body {
+  min-height: 100vh;
+  color: var(--text);
+  background:
+    radial-gradient(1400px 720px at 88% -18%, rgba(34, 72, 140, .55), rgba(34, 72, 140, 0) 62%),
+    radial-gradient(900px 560px at -12% 112%, rgba(18, 40, 84, .7), rgba(18, 40, 84, 0) 60%),
+    var(--bg);
+  background-attachment: fixed;
+  font: 400 1rem/1.5 "SST", "SST Pro", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  letter-spacing: .005em;
+  -webkit-font-smoothing: antialiased;
+}
+button, input, select { font: inherit; color: inherit; }
+a { color: inherit; }
+img { display: block; }
+:focus { outline: none; }
+[hidden] { display: none !important; }
+/* No text cursor outside the fields: focus moves to the page on navigation,
+   and some browsers draw a caret in plain text then. */
+body { caret-color: transparent; }
+input, textarea, [contenteditable] { caret-color: auto; }
+
+.wrap { max-width: 1520px; margin: 0 auto; padding: 0 16px; }
+@media (min-width: 720px) { .wrap { padding: 0 40px; } }
+
+/* Top bar */
+header {
+  position: sticky; top: 0; z-index: 10;
+  background: linear-gradient(rgba(6, 9, 17, .94), rgba(6, 9, 17, .78));
+  -webkit-backdrop-filter: blur(18px); backdrop-filter: blur(18px);
+}
+.bar { display: flex; align-items: center; gap: 8px 28px; min-height: 72px; flex-wrap: wrap; padding: 10px 0; }
+.brand { display: flex; align-items: center; gap: 12px; font-size: 1.125rem; font-weight: 500; }
+.brand img { width: 30px; height: 30px; border-radius: 8px; }
+nav { display: flex; gap: 6px; order: 3; width: 100%; overflow-x: auto; }
+@media (min-width: 820px) { nav { order: 0; width: auto; } }
+@media (max-width: 719px) { header { position: static; } .toasts { top: 16px !important; } }
+nav a {
+  text-decoration: none; padding: 8px 14px; border-radius: 999px; color: var(--muted);
+  font-size: 1.0625rem; white-space: nowrap; transition: color .15s, background .15s;
+}
+nav a:hover { color: var(--text); }
+nav a[aria-current="page"] { color: var(--text); font-weight: 600; }
+nav a:focus-visible { background: #fff; color: #000; }
+.pills { display: flex; gap: 8px; flex-wrap: wrap; margin-left: auto; }
+.pill { font-size: .8125rem; color: var(--muted); background: var(--surface); border-radius: 999px; padding: 4px 12px; white-space: nowrap; }
+.pill b { color: var(--text); font-weight: 600; }
+
+main { padding: 28px 0 96px; }
+main:focus { outline: none; }
+h1 { font-size: clamp(1.625rem, 2.4vw, 2.25rem); margin: 0; font-weight: 400; letter-spacing: -.01em; }
+h2 { font-size: 1.0625rem; margin: 0; font-weight: 500; }
+.muted { color: var(--muted); }
+.head { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 24px; }
+.head .spacer { flex: 1; }
+
+/* Buttons: pills that go white when focused, as on the console */
+.btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+  min-height: 44px; padding: 0 22px; border-radius: 999px; border: 0;
+  background: var(--surface-strong); color: var(--text); cursor: pointer;
+  font-weight: 500; text-decoration: none; white-space: nowrap;
+  transition: transform .18s var(--ease), background .15s, color .15s, box-shadow .18s;
+}
+.btn:hover { background: rgba(255, 255, 255, .22); }
+.btn.primary { background: #fff; color: #000; }
+.btn.primary:hover { background: rgba(255, 255, 255, .86); }
+.btn.ghost { background: transparent; color: var(--muted); }
+.btn.ghost:hover { background: var(--surface-hover); color: var(--text); }
+.btn.danger { color: var(--danger); }
+.btn.danger.armed { background: var(--danger); color: #fff; }
+.btn:focus-visible {
+  background: #fff; color: #000; transform: scale(1.05);
+  box-shadow: 0 0 0 2px #fff, 0 10px 28px rgba(0, 0, 0, .5);
+}
+.btn.danger:focus-visible { color: #c62f27; }
+.btn[disabled] { opacity: .35; cursor: default; transform: none; }
+.btn.sm { min-height: 36px; padding: 0 14px; font-size: .875rem; }
+
+input[type=text], input[type=search], select {
+  min-height: 44px; padding: 0 18px; border-radius: 999px; border: 0;
+  background: var(--surface-strong); width: 100%; transition: box-shadow .15s;
+}
+/* Our own arrow, inset from the rounded end like the text is. */
+select {
+  -webkit-appearance: none; appearance: none; padding-right: 48px; cursor: pointer;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath d='M1 1.5l5 5 5-5' fill='none' stroke='%23fff' stroke-opacity='.72' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat; background-position: right 20px center; background-size: 12px 8px;
+  text-overflow: ellipsis;
+}
+input::placeholder { color: var(--faint); }
+input:focus-visible, select:focus-visible { box-shadow: 0 0 0 2px #fff; }
+input[type=range] { accent-color: var(--blue); width: 100%; max-width: 280px; }
+label.field { display: grid; gap: 8px; font-size: .875rem; color: var(--muted); }
+
+.tag { font-size: .75rem; font-weight: 600; padding: 3px 10px; border-radius: 999px; white-space: nowrap; background: var(--surface-strong); color: var(--muted); }
+.tag.on { background: var(--blue); color: #fff; }
+.tag.warn { color: var(--danger); }
+
+.banner { border-radius: var(--radius); padding: 12px 16px 12px 36px; background: var(--surface); margin-bottom: 24px; position: relative; font-size: .9375rem; }
+.banner::before { content: ""; position: absolute; left: 16px; top: 20px; width: 8px; height: 8px; border-radius: 50%; background: var(--faint); }
+.banner.ok::before { background: var(--ok); }
+.banner.warn::before { background: var(--warn); }
+.banner.err::before { background: var(--danger); }
+
+/* Library tiles */
+.grid { display: grid; gap: 20px; grid-template-columns: repeat(auto-fill, minmax(min(20rem, 100%), 1fr)); }
+.card {
+  background: var(--surface); border-radius: var(--radius-lg); overflow: hidden;
+  display: flex; flex-direction: column;
+  transition: transform .2s var(--ease), box-shadow .2s, background .2s;
+}
+.card:hover { background: var(--surface-hover); }
+.card:focus-within { transform: scale(1.02); box-shadow: 0 0 0 2px rgba(255, 255, 255, .9), 0 18px 40px rgba(0, 0, 0, .45); }
+.card.current { box-shadow: 0 0 0 2px var(--blue); }
+.card.current:focus-within { box-shadow: 0 0 0 2px #fff, 0 18px 40px rgba(0, 0, 0, .45); }
+.preview {
+  aspect-ratio: 16 / 9; display: flex; gap: 10px; align-items: center; justify-content: center; padding: 18px;
+  background: linear-gradient(160deg, rgba(31, 124, 240, .16), rgba(255, 255, 255, .02));
+}
+.preview.shot { padding: 0; background: #000; }
+.preview.shot img { width: 100%; height: 100%; max-width: none; object-fit: cover; border-radius: 0; }
+.preview img { height: 100%; max-width: 30%; object-fit: contain; border-radius: 8px; }
+.preview .logo { height: 56px; max-width: none; border-radius: 12px; }
+.preview .none { color: var(--faint); font-size: .875rem; }
+.card .body { padding: 16px 18px 18px; display: flex; flex-direction: column; gap: 6px; flex: 1; }
+.card .title { display: flex; align-items: center; gap: 8px; justify-content: space-between; }
+.card .name { font-weight: 500; font-size: 1.125rem; overflow-wrap: anywhere; }
+.card .meta { color: var(--muted); font-size: .875rem; }
+.card .actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px; }
+.card .actions.secondary { margin-top: 0; }
+.card .actions.secondary .btn { padding: 0 10px; }
+.card .actions .danger { margin-left: auto; }
+
+.empty { border-radius: var(--radius-lg); background: var(--surface); padding: 56px 24px; text-align: center; display: grid; gap: 14px; justify-items: center; }
+.empty h2 { font-size: 1.375rem; font-weight: 400; }
+.hint { margin-top: 32px; font-size: .9375rem; color: var(--muted); }
+.hint code { color: var(--text); background: var(--surface-strong); padding: 2px 8px; border-radius: 6px; }
+
+.panel { background: var(--surface); border-radius: var(--radius-lg); padding: 20px; }
+form.create { display: grid; gap: 16px; grid-template-columns: 1fr; margin-bottom: 24px; }
+@media (min-width: 720px) { form.create { grid-template-columns: 2fr 1fr auto; align-items: end; } }
+form.create .row { display: flex; gap: 8px; }
+
+/* Builder */
+.builder-head { display: grid; gap: 14px; grid-template-columns: 1fr; margin-bottom: 20px; }
+@media (min-width: 900px) { .builder-head { grid-template-columns: minmax(0, 2fr) minmax(0, 1fr) minmax(0, 1fr); align-items: end; } }
+.aspects { display: grid; gap: 14px; }
+.cover-panel { display: flex; gap: 20px; align-items: center; flex-wrap: wrap; margin-bottom: 14px; }
+.savebar {
+  position: sticky; bottom: 16px; z-index: 30; display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  margin-top: 20px; padding: 10px 12px 10px 22px; border-radius: 28px;
+  background: rgba(32, 35, 44, .94); backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px);
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, .08), 0 14px 36px rgba(0, 0, 0, .5);
+}
+.savebar .text { flex: 1; min-width: 180px; }
+.savebar .text b { font-weight: 600; }
+.savebar .text span { color: var(--muted); font-size: .875rem; display: block; }
+.cover-panel .cover { width: 240px; max-width: 100%; aspect-ratio: 16 / 9; border-radius: var(--radius); overflow: hidden; flex: none;
+  display: grid; place-items: center; background: rgba(255, 255, 255, .06); color: var(--faint); font-size: .8125rem; text-align: center; padding: 0; }
+.cover-panel .cover img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.cover-panel .text { flex: 1; min-width: 220px; display: grid; gap: 6px; }
+.cover-panel h2 { font-size: 1.125rem; font-weight: 500; }
+.cover-panel .sub { color: var(--muted); font-size: .875rem; }
+.cover-panel .acts { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 6px; }
+.aspect { background: var(--surface); border-radius: var(--radius-lg); overflow: hidden; }
+.aspect-head { display: flex; align-items: center; gap: 16px; padding: 16px 20px; flex-wrap: wrap; }
+.aspect-head .text { flex: 1; min-width: 200px; }
+.aspect-head .sub { color: var(--muted); font-size: .875rem; }
+.aspect-body { padding: 0 20px 20px; display: grid; gap: 14px; }
+.aspect-body[hidden] { display: none; }
+
+.switch {
+  position: relative; width: 52px; height: 30px; flex: none; border: 0; border-radius: 999px; cursor: pointer;
+  background: rgba(255, 255, 255, .22); transition: background .2s, box-shadow .2s, transform .18s var(--ease);
+}
+.switch::after {
+  content: ""; position: absolute; top: 3px; left: 3px; width: 24px; height: 24px; border-radius: 50%;
+  background: #fff; transition: transform .2s var(--ease);
+}
+.switch[aria-checked="true"] { background: var(--blue); }
+.switch[aria-checked="true"]::after { transform: translateX(22px); }
+.switch:focus-visible { box-shadow: 0 0 0 3px #fff; transform: scale(1.06); }
+
+.confirm { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; font-size: .875rem; color: var(--muted); }
+
+.drop-zone {
+  border: 2px dashed rgba(255, 255, 255, .28); border-radius: var(--radius); padding: 22px;
+  display: flex; gap: 16px; align-items: center; flex-wrap: wrap; transition: border-color .15s, background .15s;
+}
+.drop-zone.drag { border-color: #fff; background: var(--surface-hover); }
+.drop-zone .text { flex: 1; min-width: 200px; }
+.drop-zone .title { font-weight: 500; }
+
+.tiles { display: grid; gap: 14px; grid-template-columns: repeat(auto-fill, minmax(9.5rem, 1fr)); }
+.tile {
+  display: grid; gap: 8px; padding: 10px; text-align: left; cursor: pointer; position: relative;
+  background: rgba(255, 255, 255, .04); border: 0; border-radius: var(--radius);
+  transition: transform .18s var(--ease), box-shadow .18s, background .15s;
+}
+.tile:hover { background: var(--surface-hover); }
+.tile:focus-visible, .tile.drag { transform: scale(1.05); box-shadow: 0 0 0 2px #fff, 0 14px 32px rgba(0, 0, 0, .5); z-index: 1; }
+.tile.replaced { box-shadow: 0 0 0 2px var(--blue); }
+.tile.replaced:focus-visible { box-shadow: 0 0 0 2px #fff, 0 14px 32px rgba(0, 0, 0, .5); }
+.tile .file { font-size: .8125rem; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tile .meta { font-size: .75rem; color: var(--faint); }
+.tile .tag { position: absolute; top: 16px; left: 16px; z-index: 1; }
+
+.rows { display: grid; gap: 8px; }
+.row-item {
+  display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 12px; align-items: center;
+  padding: 10px 12px; border-radius: var(--radius); background: rgba(255, 255, 255, .04);
+  transition: box-shadow .15s, background .15s;
+}
+@media (max-width: 600px) { .row-item { grid-template-columns: 1fr; } .row-item .acts { justify-content: flex-start; } }
+.row-item.drag { box-shadow: 0 0 0 2px #fff; background: var(--surface-hover); }
+.row-item.replaced { box-shadow: inset 3px 0 0 var(--blue); }
+.row-item .file { font-weight: 500; font-size: .9375rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.row-item .dir { font-size: .75rem; color: var(--faint); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.row-item .acts { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; align-items: center; }
+audio { height: 36px; max-width: 100%; }
+
+.thumb {
+  width: 100%; aspect-ratio: 1; border-radius: 10px; overflow: hidden; display: grid; place-items: center;
+  background-color: #1a2131;
+  background-image: linear-gradient(45deg, #222b3d 25%, transparent 25%, transparent 75%, #222b3d 75%),
+                    linear-gradient(45deg, #222b3d 25%, transparent 25%, transparent 75%, #222b3d 75%);
+  background-size: 16px 16px; background-position: 0 0, 8px 8px;
+  font-size: .75rem; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: .04em;
+}
+.thumb img { width: 100%; height: 100%; object-fit: contain; }
+.strip { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.strip .thumb { width: 72px; }
+.row-item .strip .thumb { width: 48px; }
+.thumb.replaced { box-shadow: 0 0 0 2px var(--blue); }
+
+.toolbar { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+.toolbar input[type=search] { flex: 1 1 240px; width: auto; }
+.note { font-size: .875rem; color: var(--muted); margin: 0; }
+
+/* Home music: choosing the part of the song that loops */
+.trim { display: grid; gap: 14px; }
+.wave {
+  position: relative; height: 128px; border-radius: var(--radius); overflow: hidden; touch-action: none;
+  background: rgba(255, 255, 255, .04); cursor: pointer; user-select: none; -webkit-user-select: none;
+}
+.wave canvas { position: absolute; top: 0; bottom: 0; left: 16px; width: calc(100% - 32px); height: 100%; }
+.wave .handle {
+  position: absolute; top: 0; bottom: 0; width: 28px; margin-left: -14px; padding: 0; border: 0;
+  background: transparent; cursor: ew-resize; z-index: 1;
+}
+.wave .handle::before { content: ""; position: absolute; left: 13px; top: 0; bottom: 0; width: 2px; background: #fff; }
+.wave .handle::after {
+  content: ""; position: absolute; left: 7px; top: 50%; width: 14px; height: 34px; margin-top: -17px;
+  border-radius: 7px; background: #fff; box-shadow: 0 2px 8px rgba(0, 0, 0, .5); transition: transform .15s var(--ease);
+}
+.wave .handle:focus-visible::after, .wave .handle.active::after { transform: scale(1.25); box-shadow: 0 0 0 3px var(--blue); }
+.wave .handle.loop::before { background: var(--blue); top: 40%; }
+.wave .handle.loop::after { top: auto; bottom: 8px; margin-top: 0; height: 26px; background: var(--blue); }
+.wave .handle.loop:focus-visible::after, .wave .handle.loop.active::after { box-shadow: 0 0 0 3px #fff; }
+.wave .handle.from::before { background: var(--ok); bottom: 55%; }
+.wave .handle.from::after { top: 6px; margin-top: 0; height: 22px; background: var(--ok); }
+.wave .handle.from:focus-visible::after, .wave .handle.from.active::after { box-shadow: 0 0 0 3px #fff; }
+.wave .start-flag {
+  position: absolute; top: 6px; width: 0; height: 0; margin-left: -1px; pointer-events: none;
+  border-top: 7px solid transparent; border-bottom: 7px solid transparent; border-left: 11px solid var(--ok);
+}
+.wave .start-flag[hidden], .wave .handle[hidden] { display: none; }
+.wave .playhead { position: absolute; top: 0; bottom: 0; width: 2px; margin-left: -1px; background: #fff; opacity: .8; pointer-events: none; }
+.legend { display: flex; gap: 6px 14px; align-items: center; flex-wrap: wrap; font-size: .8125rem; color: var(--muted); }
+.legend .key { display: inline-block; width: 22px; height: 4px; border-radius: 2px; margin-right: -8px; }
+.legend .key.music { background: rgba(255, 255, 255, .55); }
+.legend .key.loop { background: var(--blue); }
+.legend .key.start { background: var(--ok); width: 4px; height: 14px; margin-right: -4px; }
+
+.trim-fields { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); }
+.trim-actions { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.trim-actions .spacer { flex: 1; }
+
+pre.log {
+  background: var(--surface); border-radius: var(--radius-lg); padding: 18px 20px; margin: 0;
+  font: .8125rem/1.7 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  white-space: pre-wrap; word-break: break-all; max-height: 70vh; overflow: auto; color: rgba(255, 255, 255, .82);
+}
+.activity { display: grid; gap: 20px; }
+
+.drop { position: fixed; inset: 0; z-index: 50; display: none; place-items: center; background: rgba(6, 9, 17, .72); -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px); }
+.drop.on { display: grid; }
+.drop div { border: 2px dashed rgba(255, 255, 255, .7); border-radius: 24px; padding: 56px 64px; text-align: center; }
+.drop strong { display: block; font-size: 1.5rem; font-weight: 400; margin-bottom: 6px; }
+
+/* Notifications, top right like the console's */
+.toasts { position: fixed; z-index: 60; right: 16px; top: 84px; display: grid; gap: 10px; width: min(400px, calc(100vw - 32px)); }
+.toast .label { white-space: pre-line; }
+.toast {
+  background: rgba(28, 34, 48, .97); border-radius: var(--radius); padding: 14px 16px 14px 34px; position: relative;
+  font-size: .9375rem; box-shadow: 0 12px 32px rgba(0, 0, 0, .45); animation: in .25s var(--ease);
+}
+.toast::before { content: ""; position: absolute; left: 16px; top: 22px; width: 8px; height: 8px; border-radius: 50%; background: var(--faint); }
+.toast.ok::before { background: var(--ok); }
+.toast.err::before { background: var(--danger); }
+@keyframes in { from { opacity: 0; transform: translateY(-8px); } to { opacity: 1; transform: none; } }
+.progress { height: 4px; background: var(--surface-strong); border-radius: 2px; margin-top: 10px; overflow: hidden; }
+.progress i { display: block; height: 100%; background: var(--blue); width: 0; transition: width .2s; }
+
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }
+.visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+</style>
+</head>
+<body>
+<header>
+  <div class="wrap">
+    <div class="bar">
+      <div class="brand"><img src="/icon.png" alt="">Themes</div>
+      <nav aria-label="Sections">
+        <a href="#/library" data-route="library">Library</a>
+        <a href="#/activity" data-route="activity">Activity</a>
+      </nav>
+      <div class="pills" id="pills"></div>
+    </div>
+  </div>
+</header>
+
+<main class="wrap" id="view" tabindex="-1"></main>
+
+<div class="drop" id="drop" aria-hidden="true"><div><strong>Drop to import</strong><span class="muted">A theme .zip or folder</span></div></div>
+<div class="toasts" id="toasts" aria-live="polite"></div>
+<input type="file" id="picker" class="visually-hidden" tabindex="-1">
+
+<script src="atrac9.js"></script>
+<script>
+"use strict";
+
+/* ================================================================ basics */
+
+/* Where a theme .zip keeps its files: the console's themable folders (main.c). */
+const ASSET_ROOTS = ["system_ex/rnps/", "mnt/rnps/", "system_ex/vsh_asset/"];
+const IMAGE_MIME = { png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", webp: "image/webp" };
+const HOME_MUSIC = "/system_ex/vsh_asset/bgm_home.at9";  /* the console's home screen music */
+const MUSIC_RATE = 48000;                                 /* a theme keeps its music source at this rate */
+const MUSIC_SOURCE_MAX_BYTES = 128 * 1048576 - 1024;      /* the plugin's limit for that WAV */
+const BG_RE = /(^|[\/_.\-])(bg|bgs|background|backgrounds|wallpaper|wallpapers|backdrop|home_?bg)([\/_.\-@]|$)/i;
+const ICON_RE = /(^|[\/_.\-])(icon|icons|ico|glyph|glyphs|logo|logos|badge|badges|symbol|symbols)([\/_.\-@]|$)|\/ic_[^\/]*$/i;
+
+const state = {
+  status: { fw: "", ip: "", active: "none", applied: "", result: "", themes: [] },
+  route: "library",
+  editId: "",
+  creating: false,
+  assets: null,          /* all themable system assets, loaded once */
+  assetsError: "",
+  protectedCount: 0,
+  files: new Set(),      /* paths replaced in the theme being edited */
+  fit: localGet("fit") || "cover",
+  confirming: "",        /* aspect waiting for "turn off" confirmation */
+  pages: {},             /* per-aspect page size */
+  filters: {},           /* per-aspect search text */
+  trim: null,            /* home music part being chosen (see openTrim) */
+};
+let stamp = Date.now();  /* busts cached thumbnails after an upload */
+
+const $ = (sel, root = document) => root.querySelector(sel);
+const view = $("#view");
+
+function localGet(k) { try { return localStorage.getItem(k); } catch (e) { return null; } }
+function localSet(k, v) { try { if (v === null) localStorage.removeItem(k); else localStorage.setItem(k, v); } catch (e) {} }
+
+function esc(s) {
+  return String(s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+}
+function q(params) { return Object.entries(params).map(([k, v]) => `${k}=${encodeURIComponent(v)}`).join("&"); }
+function fmtSize(n) {
+  if (n < 1024) return `${n} B`;
+  if (n < 1048576) return `${(n / 1024).toFixed(n < 10240 ? 1 : 0)} KB`;
+  return `${(n / 1048576).toFixed(1)} MB`;
+}
+function fmtTime(s) { s = Math.round(s); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`; }
+function plural(n, word) { return `${n} ${word}${n === 1 ? "" : "s"}`; }
+function ext(path) { const m = /\.([a-z0-9]+)$/i.exec(path); return m ? m[1].toLowerCase() : ""; }
+function baseName(path) { return path.slice(path.lastIndexOf("/") + 1); }
+function dirName(path) { return path.slice(0, path.lastIndexOf("/")); }
+function themeById(id) { return state.status.themes.find(t => t.id === id); }
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+/* Let the page repaint between chunks of long work. A message rather than a
+   timer: timers in background or embedded views can be throttled to one a
+   second, which made encoding 30 times slower. */
+const nextTask = () => new Promise(r => { const ch = new MessageChannel(); ch.port1.onmessage = () => r(); ch.port2.postMessage(0); });
+const isLocal = () => ["127.0.0.1", "localhost"].includes(location.hostname);
+
+const CRC_TABLE = (() => {
+  const t = new Uint32Array(256);
+  for (let n = 0; n < 256; n++) { let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1; t[n] = c >>> 0; }
+  return t;
+})();
+function crc32(bytes) {
+  let c = 0xffffffff;
+  for (let i = 0; i < bytes.length; i++) c = CRC_TABLE[(c ^ bytes[i]) & 0xff] ^ (c >>> 8);
+  return (c ^ 0xffffffff) >>> 0;
+}
+const hex8 = n => n.toString(16).padStart(8, "0");
+
+async function api(method, path, params = {}, body) {
+  const url = path + (Object.keys(params).length ? "?" + q(params) : "");
+  const opts = { method, headers: {} };
+  if (method !== "GET") opts.headers["X-PS5-Theme"] = "1";
+  if (body !== undefined) opts.body = body;
+  let res;
+  for (let attempt = 0; ; attempt++) {
+    res = await fetch(url, opts);
+    if (res.status !== 503 || attempt === 4) break;  /* console busy: retry briefly */
+    await sleep(400 * (attempt + 1));
+  }
+  const type = res.headers.get("Content-Type") || "";
+  const data = type.includes("json") ? await res.json() : await res.text();
+  if (!res.ok) throw new Error((data && data.error) || `HTTP ${res.status}`);
+  return data;
+}
+
+/* Upload with an end-to-end checksum: the console verifies it on receipt and
+   reports what it stored, which must match what we computed. */
+async function uploadVerified(path, params, blob) {
+  const bytes = new Uint8Array(await blob.arrayBuffer());
+  const crc = hex8(crc32(bytes));
+  const r = await api("PUT", path, { ...params, crc }, bytes);
+  if (r.crc32 !== crc || r.size !== bytes.length) throw new Error("the console stored something different from what was sent");
+  return r;
+}
+
+/* ================================================================ toasts */
+
+function toast(msg, kind = "", ms = 4500) {
+  const el = document.createElement("div");
+  el.className = `toast ${kind}`;
+  el.textContent = msg;
+  $("#toasts").append(el);
+  if (ms) setTimeout(() => el.remove(), ms);
+  return el;
+}
+function progressToast(label) {
+  const el = toast("", "", 0);
+  el.innerHTML = `<div class="label"></div><div class="progress"><i></i></div>`;
+  const set = (text, frac) => { $(".label", el).textContent = text; $("i", el).style.width = `${Math.round(frac * 100)}%`; };
+  set(label, 0);
+  return { set, done(msg, kind) { el.remove(); toast(msg, kind, 7000); } };
+}
+
+/* ================================================================ status & routing */
+
+async function refreshStatus() {
+  try {
+    state.status = await api("GET", "/api/status");
+  } catch (e) {
+    $("#pills").innerHTML = `<span class="pill">Console unreachable</span>`;
+    return false;
+  }
+  const s = state.status;
+  /* The plugin was updated while this page stayed open: load the new page,
+     so it never runs code older than the plugin. */
+  if (!state.pageVersion) state.pageVersion = s.version;
+  else if (s.version !== state.pageVersion && !state.reloading) {
+    state.reloading = true;
+    const busy = () => document.querySelector(".toast .progress") || state.trim;
+    toast(`The plugin is now ${s.version}. ${busy() ? "Reload this page when the current task is done." : "Loading the new page…"}`, "", 0);
+    if (!busy()) setTimeout(() => location.reload(), 1500);
+  }
+  const nameOf = id => (themeById(id) || { name: id }).name;
+  $("#pills").innerHTML =
+    `<span class="pill">Firmware <b>${esc(s.fw)}</b></span>` +
+    (s.applying ? `<span class="pill">Applying <b>${esc(nameOf(s.applying))}…</b></span>`
+      : `<span class="pill">Applied <b>${esc(s.applied ? nameOf(s.applied) : "Stock")}</b></span>`);
+  if (state.route === "edit") syncEditorHead();
+  return true;
+}
+
+/* The edit page's Apply and Export follow the theme as files are added or
+   removed (the rest of the page redraws one section at a time). */
+function syncEditorHead() {
+  const t = themeById(state.editId), apply = $("#edit-apply"), exp = $("#edit-export");
+  if (!t || !apply || apply.dataset.id !== t.id) return;
+  const has = !!(t.files || t.music);
+  apply.disabled = !(t.compatible && has);
+  apply.textContent = state.status.applied === t.id ? "Re-apply to console" : "Apply to console";
+  if (exp) exp.disabled = !has;
+  const bar = $("#savebar");
+  if (bar) bar.hidden = !t.unsaved;
+}
+
+async function saveTheme(id) {
+  try { await api("POST", "/api/theme/save", { id }); } catch (e) { return toast(e.message, "err"); }
+  await refreshStatus();
+  toast("Saved.", "ok");
+}
+
+let discardArmed = 0;
+async function discardTheme(id, btn) {
+  if (Date.now() > discardArmed) {   /* first press asks */
+    discardArmed = Date.now() + 4000;
+    btn.textContent = "Discard all changes?";
+    btn.classList.add("danger", "armed");
+    setTimeout(() => { if (btn.isConnected && Date.now() > discardArmed) { btn.textContent = "Discard"; btn.classList.remove("danger", "armed"); } }, 4100);
+    return;
+  }
+  discardArmed = 0;
+  let r;
+  try { r = await api("POST", "/api/theme/discard", { id }); } catch (e) { return toast(e.message, "err"); }
+  stamp = Date.now();
+  await refreshStatus();
+  toast(r.reapplied ? "Changes discarded. The console is being updated to match." : "Changes discarded.", "ok");
+  if (state.route === "edit" && state.editId === id) renderEditor();
+}
+
+function resultBanner() {
+  const s = state.status;
+  if (s.applying) {
+    const pr = s.progress;
+    return `<div class="banner" role="status">Applying ${esc((themeById(s.applying) || { name: s.applying }).name)}` +
+      `${pr ? `: ${esc(pr.text)}… ${pr.percent}%` : "…"}` +
+      `<div class="progress" style="margin-top:10px"><i style="width:${pr ? pr.percent : 0}%"></i></div>` +
+      `<span class="muted" style="font-size:.875rem">The home screen can show the stock look for a moment while it switches.</span></div>`;
+  }
+  const r = s.result;
+  if (!r) return "";
+  const kind = /could not|not applied|is for firmware|Invalid|Could not/.test(r) ? "err"
+    : /partly|skipped/.test(r) ? "warn" : "ok";
+  return `<div class="banner ${kind}" role="status">${esc(r)}</div>`;
+}
+
+function parseRoute() {
+  const parts = location.hash.replace(/^#\/?/, "").split("/");
+  state.route = ["library", "edit", "activity"].includes(parts[0]) ? parts[0] : "library";
+  if (state.route === "edit") state.editId = decodeURIComponent(parts[1] || "") || state.editId;
+  const section = state.route === "edit" ? "library" : state.route;   /* editing is part of the library */
+  document.querySelectorAll("nav a").forEach(a => {
+    if (a.dataset.route === section) a.setAttribute("aria-current", "page");
+    else a.removeAttribute("aria-current");
+  });
+}
+
+async function render() {
+  parseRoute();
+  if (state.route === "library") renderLibrary();
+  else if (state.route === "edit") await renderEditor();
+  else await renderActivity();
+}
+
+/* ================================================================ library */
+
+function cardPreview(t) {
+  if (t.cover) return `<div class="preview shot" data-cover="${esc(t.id)}"><img loading="lazy" alt="${esc(t.name)}" src="${coverUrl(t)}"></div>`;
+  return `<div class="preview" data-cover="${esc(t.id)}">${(t.preview || []).length
+    ? t.preview.map(p => `<img loading="lazy" alt="" src="/api/theme/file?${q({ id: t.id, path: p })}&v=${stamp}">`).join("")
+    : `<span class="none">${t.music ? "Music only" : t.files ? "No preview picture" : "Nothing added yet"}</span>`}</div>`;
+}
+
+function renderLibrary() {
+  const s = state.status;
+  const cards = s.themes.slice().sort((a, b) => a.name.localeCompare(b.name)).map(t => {
+    const on = s.applied === t.id, busy = s.applying === t.id;
+    const meta = [`Firmware ${t.fw || "?"}`, plural(t.files, "file")];
+    if (t.unsaved) meta.push("unsaved changes");
+    if (t.music) meta.push(`music ${fmtTime(t.music)}`);
+    return `
+    <article class="card${on ? " current" : ""}">
+      ${cardPreview(t)}
+      <div class="body">
+        <div class="title"><span class="name">${esc(t.name)}</span>
+          ${busy ? `<span class="tag">Applying…</span>` : on ? `<span class="tag on">Applied</span>` : t.compatible ? "" : `<span class="tag warn">Other firmware</span>`}</div>
+        <div class="meta">${esc(meta.join(" · "))}</div>
+        <div class="actions">
+          <button class="btn primary sm" data-act="apply" data-id="${esc(t.id)}" ${!t.compatible || !(t.files || t.music) ? "disabled" : ""}>${on ? "Re-apply" : "Apply"}</button>
+          <a class="btn sm" href="#/edit/${encodeURIComponent(t.id)}">Edit</a>
+        </div>
+        <div class="actions secondary">
+          <button class="btn ghost sm" data-act="duplicate" data-id="${esc(t.id)}">Duplicate</button>
+          <button class="btn ghost sm" data-act="export" data-id="${esc(t.id)}" ${t.files || t.music ? "" : "disabled"}>Export</button>
+          <button class="btn ghost danger sm" data-act="delete" data-id="${esc(t.id)}" ${on || s.active === t.id ? "disabled" : ""}>Delete</button>
+        </div>
+      </div>
+    </article>`;
+  }).join("");
+
+  const stockOn = !s.applied && !s.applying;
+  view.innerHTML = `
+    <div class="head">
+      <h1>Library</h1><span class="spacer"></span>
+      <button class="btn" data-act="import">Import .zip</button>
+      <button class="btn primary" data-act="new">New theme</button>
+    </div>
+    ${resultBanner()}
+    ${state.creating ? createForm() : ""}
+    ${s.themes.length ? `<div class="grid">
+      <article class="card${stockOn ? " current" : ""}">
+        <div class="preview"><img class="logo" src="/icon.png" alt=""></div>
+        <div class="body">
+          <div class="title"><span class="name">Stock</span>${stockOn ? `<span class="tag on">Applied</span>` : ""}</div>
+          <div class="meta">The console's original home screen. Choosing it also stops a theme from coming back when etaHEN starts.</div>
+          <div class="actions"><button class="btn sm" data-act="apply" data-id="none" ${stockOn ? "disabled" : ""}>Restore stock</button></div>
+        </div>
+      </article>${cards}</div>`
+    : `<div class="empty">
+        <h2>No themes yet</h2>
+        <p class="muted" style="margin:0">Create one and choose what it changes: background, icons, sounds, fonts, music and more. Or drop a theme .zip here.</p>
+        <div style="display:flex;gap:8px"><button class="btn primary" data-act="new">New theme</button><button class="btn" data-act="import">Import .zip</button></div>
+      </div>`}
+    <p class="hint">${isLocal() && s.ip
+      ? `On a computer or phone on the same network, open <code>http://${esc(s.ip)}:8095</code> to attach files and drag in themes. `
+      : ""}The applied theme comes back by itself every time etaHEN starts the plugin, after a reboot or an update too: there is no need to restore stock first. Without the jailbreak the console is stock.</p>`;
+  if (state.creating) $("#new-name").focus();
+  fillMissingPreviews();
+}
+
+function createForm() {
+  return `
+  <form class="panel create" id="create">
+    <label class="field">Theme name<input type="text" id="new-name" maxlength="60" required placeholder="Midnight"></label>
+    <label class="field">Firmware
+      <select id="new-fw">
+        <option value="${esc(state.status.fw)}">This console (${esc(state.status.fw)})</option>
+        <option value="any">Any firmware</option>
+      </select></label>
+    <div class="row"><button class="btn ghost" type="button" data-act="cancel-new">Cancel</button><button class="btn primary" type="submit">Create</button></div>
+  </form>`;
+}
+
+function slug(name) { return name.toLowerCase().replace(/[^a-z0-9_-]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 48) || "theme"; }
+function uniqueId(name) { const base = slug(name); let id = base, n = 2; while (themeById(id)) id = `${base}-${n++}`; return id; }
+function uniqueName(name) {
+  const taken = new Set(state.status.themes.map(t => t.name));
+  let out = name, n = 2;
+  while (taken.has(out)) out = `${name} (${n++})`;
+  return out;
+}
+
+async function createTheme(name, fw) {
+  const id = uniqueId(name);
+  await api("POST", "/api/themes", { id, name, fw });
+  await refreshStatus();
+  return id;
+}
+
+/* Seen on 13.42: the home screen reloads its files after an apply, and can
+   show the stock look for a moment before the theme. */
+const APPLY_WAIT_NOTE = "Give it a few seconds: the home screen may show the stock look for a moment before your theme appears.";
+
+async function applyTheme(id) {
+  try { await api("POST", "/api/apply", { id }); } catch (e) { return toast(e.message, "err"); }
+  const label = id === "none" ? "Restoring stock" : `Applying ${(themeById(id) || { name: id }).name}`;
+  const p = progressToast(`${label}…`);
+  const want = id === "none" ? "" : id;
+  const before = state.status.result;
+  let seen = false;
+  for (let i = 0; i < 160; i++) {
+    await sleep(750);
+    await refreshStatus();
+    const s = state.status;
+    if (s.applying) {
+      seen = seen || s.applying === want;
+      const pr = s.applying === want ? s.progress : null;
+      p.set(pr ? `${label}\n${pr.text}… ${pr.percent}%` : `${label}…`, pr ? pr.percent / 100 : 0);
+      continue;
+    }
+    const settled = s.applied === want && (seen || i > 1 || want === "");
+    const failed = want && s.applied !== want && (seen || (s.result !== before && i > 1));
+    if (settled || failed) {
+      const clean = settled && !/partly/.test(s.result);
+      p.done(s.result || (settled ? "Done." : "Not applied."), clean ? "ok" : settled ? "" : "err");
+      if (settled && want) toast(APPLY_WAIT_NOTE, "", 12000);
+      return render();
+    }
+  }
+  p.done("The console did not confirm the change. Check Activity for details.", "err");
+  render();
+}
+
+const armed = new Map();
+function armDelete(btn, id) {
+  if (armed.get(id)) {
+    armed.delete(id);
+    return api("DELETE", "/api/themes", { id })
+      .then(() => { toast("Theme deleted.", "ok"); localSet(`aspects:${id}`, null); return refreshStatus(); })
+      .then(render)
+      .catch(e => toast(e.message, "err"));
+  }
+  armed.set(id, true);
+  btn.classList.add("armed");
+  btn.textContent = "Confirm delete";
+  setTimeout(() => { armed.delete(id); if (btn.isConnected) { btn.classList.remove("armed"); btn.textContent = "Delete"; } }, 4000);
+}
+
+async function duplicateTheme(id) {
+  const t = themeById(id);
+  const name = uniqueName(`${t.name} copy`);
+  try {
+    await api("POST", "/api/themes/duplicate", { id, new_id: uniqueId(name), name });
+    await refreshStatus();
+    toast(`Created ${name}.`, "ok");
+    renderLibrary();
+  } catch (e) { toast(e.message, "err"); }
+}
+
+/* ================================================================ assets & grouping */
+
+async function loadAssets() {
+  if (state.assets) return;
+  try {
+    const r = await api("GET", "/api/assets", { limit: 5000 });
+    state.assets = r.assets;
+    state.protectedCount = r.protected || 0;
+    state.assetsError = "";
+  } catch (e) {
+    state.assets = null;
+    state.assetsError = e.message;
+  }
+}
+
+async function loadThemeFiles(id) {
+  try {
+    const r = await api("GET", "/api/theme/files", { id });
+    state.files = new Set(r.files.map(f => f.path));
+  } catch (e) { state.files = new Set(); }
+}
+
+/* Resolution variants of one asset share a key: size tokens such as @2x,
+   _4k, _1080 or a /2160/ folder are ignored, so one file fills them all. */
+const SIZE_TOKEN = /(@\d+(?:\.\d+)?x|[_-](?:\d{3,4}p?|[2-8]k|uhd|fhd|qhd|hd|sd|hidpi|retina|small|large|sm|lg|xl|xxl|x[1-4]|[1-4]x))(?=\.[a-z0-9]+$)/i;
+const SIZE_DIR = /\/(?:\d{3,4}p?|[2-8]k|uhd|fhd|qhd|hd|sd|x[1-4]|[1-4]x|@\d+x)(?=\/|$)/gi;
+function groupKey(path) { return dirName(path).replace(SIZE_DIR, "/*") + "/" + baseName(path).replace(SIZE_TOKEN, ""); }
+function groupAssets(list) {
+  const map = new Map();
+  for (const a of list) {
+    const k = groupKey(a.path);
+    if (!map.has(k)) map.set(k, { key: k, name: baseName(k), dir: dirName(a.path), assets: [] });
+    map.get(k).assets.push(a);
+  }
+  return [...map.values()].sort((a, b) => a.name.localeCompare(b.name) || a.key.localeCompare(b.key));
+}
+
+const isImage = a => a.kind === "image" || a.kind === "svg";
+
+/* A readable name for where an asset is used, from its package folder:
+   ".../assets/packages/mini-profile/..." -> "Mini profile". */
+const AREA_SKIP = new Set(["src", "assets", "packages", "modules", "node_modules", "lib", "dist", "images", "img", "screens", "components", "res", "resources"]);
+function areaOf(path) {
+  if (path.includes("/vsh_asset/")) {
+    const f = baseName(path);
+    if (/^bg_hub_default/i.test(f)) return "Home: default background";
+    if (/^library_bg/i.test(f)) return "Home: Game Library";
+    const t = /^bg_(NPXS\d+)/i.exec(f);
+    if (t) return `Home: ${t[1]} tile`;
+    if (/^bg_image_load_error/i.test(f)) return "Image load error placeholder";
+    return "System (VSH)";
+  }
+  const m = /\/apps\/([^/]+)\/(?:assets\/)?(.*)$/.exec(path);
+  if (!m) return "Other";
+  const segs = m[2].split("/").slice(0, -1).filter(x => !AREA_SKIP.has(x) && !x.startsWith("@") && !x.startsWith("."));
+  const raw = segs[0] || m[1];
+  return raw.replace(/[-_]+/g, " ").replace(/^./, c => c.toUpperCase());
+}
+function bgOff() {
+  const saved = localGet(`bg-off:${state.editId}`);
+  if (saved) { try { return new Set(JSON.parse(saved)); } catch (e) { /* fall through to the default */ } }
+  /* Default: only the home screen's own backgrounds, when this firmware has them. */
+  const areas = new Set(aspectAssets(aspectById("background")).map(a => areaOf(a.path)));
+  const home = [...areas].some(a => a.startsWith("Home:"));
+  return new Set(home ? [...areas].filter(a => !a.startsWith("Home:")) : []);
+}
+function setBgOff(set) { localSet(`bg-off:${state.editId}`, JSON.stringify([...set])); }
+const ASPECTS = [
+  { id: "background", title: "Background", mode: "single",
+    sub: "One image for the home screen backgrounds (and any other screens you switch on), encoded to each background's own format and size.",
+    filter: a => (a.kind === "image" || a.kind === "video" || a.kind === "texture") && BG_RE.test(a.path), accept: "image/*,video/*" },
+  { id: "icons", title: "Icons", mode: "tiles",
+    sub: "Replace icons one by one. Each icon's size variants are filled from your one file.",
+    filter: a => isImage(a) && ICON_RE.test(a.path) && !BG_RE.test(a.path), accept: "image/*,.svg" },
+  { id: "music", title: "Home music", mode: "music",
+    sub: "Replaces the music the home screen plays. Any audio file, converted on this device to the console's own format." },
+  { id: "sounds", title: "Sounds", mode: "rows",
+    sub: "System sounds and music clips. Any audio file is converted to each sound's own format (WAV or ATRAC9) and loudness.",
+    filter: a => a.kind === "audio" && a.path !== HOME_MUSIC, accept: "audio/*,.wav,.at9" },
+  { id: "fonts", title: "Fonts", mode: "rows",
+    sub: "A font file per system font, in the same format (TTF, OTF, WOFF and so on).",
+    filter: a => a.kind === "font", accept: ".ttf,.otf,.ttc,.woff,.woff2" },
+  { id: "animations", title: "Animations", mode: "rows",
+    sub: "Animation and data files (JSON). Structure and canvas size must stay the same.",
+    filter: a => a.kind === "json", accept: ".json,application/json" },
+  { id: "video", title: "Video", mode: "rows",
+    sub: "Video clips other than the background, in the same container (MP4 or WebM).",
+    filter: a => a.kind === "video" && !BG_RE.test(a.path), accept: "video/*,.mp4,.webm,.m4v" },
+  { id: "textures", title: "Textures", mode: "rows",
+    sub: "Other system textures (DDS). Any image is encoded to each texture's exact format and size.",
+    filter: a => a.kind === "texture" && !BG_RE.test(a.path), accept: "image/*" },
+  { id: "images", title: "Other images", mode: "tiles",
+    sub: "Every other replaceable image, with search.",
+    filter: a => isImage(a) && !ICON_RE.test(a.path) && !BG_RE.test(a.path), accept: "image/*,.svg" },
+];
+const aspectById = id => ASPECTS.find(a => a.id === id);
+
+function aspectAssets(asp) { return asp.filter ? (state.assets || []).filter(asp.filter) : []; }
+function aspectReplaced(asp) {
+  if (asp.mode === "music") return (themeById(state.editId) || {}).music || state.files.has(HOME_MUSIC) ? 1 : 0;
+  return aspectAssets(asp).filter(a => state.files.has(a.path)).length;
+}
+function aspectFlags() {
+  try { return JSON.parse(localGet(`aspects:${state.editId}`) || "{}"); } catch (e) { return {}; }
+}
+function aspectOn(asp) { return aspectReplaced(asp) > 0 || !!aspectFlags()[asp.id]; }
+function setAspectFlag(asp, on) {
+  const f = aspectFlags();
+  if (on) f[asp.id] = 1; else delete f[asp.id];
+  localSet(`aspects:${state.editId}`, JSON.stringify(f));
+}
+
+/* ================================================================ conversions (verified) */
+
+function loadImage(src) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => resolve(img);
+    img.onerror = () => reject(new Error("could not read the image"));
+    img.src = src;
+  });
+}
+
+/* Re-encode an image to the asset's exact format and pixel size, then decode
+   the result again to prove it. */
+async function imageForAsset(file, assetPath) {
+  const mime = IMAGE_MIME[ext(assetPath)];
+  if (!mime) {
+    if (!/svg/.test(file.type) && !/\.svg$/i.test(file.name)) throw new Error("use an SVG file for this one");
+    return file;
+  }
+  if (!file.type.startsWith("image/") && !/\.(png|jpe?g|webp|gif|bmp|svg)$/i.test(file.name)) throw new Error(`${file.name} is not an image`);
+  const url = URL.createObjectURL(file);
+  let stock, img;
+  try {
+    [stock, img] = await Promise.all([loadImage(`/api/asset?${q({ path: assetPath })}`), loadImage(url)]);
+  } finally { URL.revokeObjectURL(url); }
+  const w = stock.naturalWidth, h = stock.naturalHeight;
+  if (!w || !h) throw new Error("could not read the system image size");
+  if (file.type === mime && img.naturalWidth === w && img.naturalHeight === h) return file;
+
+  const canvas = document.createElement("canvas");
+  canvas.width = w; canvas.height = h;
+  const ctx = canvas.getContext("2d", { colorSpace: "srgb" });  /* sRGB: same look in SDR and HDR */
+  ctx.imageSmoothingQuality = "high";
+  if (mime === "image/jpeg") { ctx.fillStyle = "#000"; ctx.fillRect(0, 0, w, h); }
+  let dw = w, dh = h;
+  if (state.fit !== "stretch") {
+    const s = (state.fit === "cover" ? Math.max : Math.min)(w / img.naturalWidth, h / img.naturalHeight);
+    dw = img.naturalWidth * s; dh = img.naturalHeight * s;
+  }
+  ctx.drawImage(img, (w - dw) / 2, (h - dh) / 2, dw, dh);
+  const blob = await new Promise(r => canvas.toBlob(r, mime, 0.92));
+  if (!blob || blob.type !== mime) throw new Error(`this browser cannot produce ${ext(assetPath).toUpperCase()} images`);
+  const check = URL.createObjectURL(blob);
+  try {
+    const out = await loadImage(check);
+    if (out.naturalWidth !== w || out.naturalHeight !== h) throw new Error("converted image did not verify");
+  } finally { URL.revokeObjectURL(check); }
+  return blob;
+}
+
+function parseWav(buf) {
+  const dv = new DataView(buf);
+  const tag = o => String.fromCharCode(...new Uint8Array(buf, o, 4));
+  if (buf.byteLength < 12 || tag(0) !== "RIFF" || tag(8) !== "WAVE") return null;
+  const info = {};
+  for (let o = 12; o + 8 <= buf.byteLength; ) {
+    const id = tag(o), size = dv.getUint32(o + 4, true);
+    if (id === "fmt ") {
+      info.format = dv.getUint16(o + 8, true); info.channels = dv.getUint16(o + 10, true);
+      info.rate = dv.getUint32(o + 12, true); info.bits = dv.getUint16(o + 22, true);
+    } else if (id === "data") {
+      info.dataOffset = o + 8; info.dataSize = size;
+      break;
+    }
+    o += 8 + size + (size & 1);
+  }
+  return info.format && info.dataOffset ? info : null;
+}
+
+/* Decode any audio the browser supports to `channels` channels at `rate`. */
+async function decodeAudio(file, rate, channels) {
+  const data = await file.arrayBuffer();
+  let decoded;
+  try {
+    decoded = await new OfflineAudioContext(1, 1, rate).decodeAudioData(data.slice(0));
+  } catch (e) { throw new Error(`${file.name} is not audio this browser can read`); }
+  return renderAudio(decoded, rate, channels);
+}
+
+/* Render an AudioBuffer (any rate and layout) with `channels` channels at `rate`. */
+async function renderAudio(buffer, rate, channels) {
+  const frames = Math.max(1, Math.ceil(buffer.duration * rate));
+  const ctx = new OfflineAudioContext(channels, frames, rate);
+  const src = ctx.createBufferSource();
+  src.buffer = buffer;
+  src.connect(ctx.destination);
+  src.start();
+  const out = await ctx.startRendering();
+  return [...Array(channels)].map((_, c) => out.getChannelData(c));
+}
+
+async function resample(chans, from, to) {
+  if (from === to) return chans;
+  const ctx = new OfflineAudioContext(chans.length, 1, from);
+  const buf = ctx.createBuffer(chans.length, chans[0].length, from);
+  chans.forEach((c, i) => buf.copyToChannel(c, i));
+  return renderAudio(buf, to, chans.length);
+}
+
+/* 16-bit PCM WAV from channel data, parsed again to prove its shape. */
+function pcmWav(chans, rate) {
+  const channels = chans.length, frames = chans[0].length;
+  const bytes = 44 + frames * channels * 2;
+  const buf = new ArrayBuffer(bytes);
+  const dv = new DataView(buf);
+  const str = (o, s) => [...s].forEach((c, i) => dv.setUint8(o + i, c.charCodeAt(0)));
+  str(0, "RIFF"); dv.setUint32(4, bytes - 8, true); str(8, "WAVE");
+  str(12, "fmt "); dv.setUint32(16, 16, true); dv.setUint16(20, 1, true); dv.setUint16(22, channels, true);
+  dv.setUint32(24, rate, true); dv.setUint32(28, rate * channels * 2, true); dv.setUint16(32, channels * 2, true);
+  dv.setUint16(34, 16, true); str(36, "data"); dv.setUint32(40, frames * channels * 2, true);
+  let o = 44;
+  for (let i = 0; i < frames; i++) {
+    for (let c = 0; c < channels; c++) {
+      const v = Math.max(-1, Math.min(1, chans[c][i]));
+      dv.setInt16(o, v < 0 ? v * 32768 : v * 32767, true);
+      o += 2;
+    }
+  }
+  const check = parseWav(buf);
+  if (!check || check.rate !== rate || check.channels !== channels || check.bits !== 16 ||
+      check.dataSize !== frames * channels * 2) throw new Error("converted audio did not verify");
+  return new Blob([buf], { type: "audio/wav" });
+}
+
+/* Channel data of a 16-bit PCM WAV. */
+function wavChannels(buf) {
+  const info = parseWav(buf);
+  if (!info || info.format !== 1 || info.bits !== 16) throw new Error("the theme's music is not a 16-bit PCM WAV");
+  const n = Math.floor(info.dataSize / (2 * info.channels));
+  const dv = new DataView(buf, info.dataOffset, n * 2 * info.channels);
+  const chans = [...Array(info.channels)].map(() => new Float32Array(n));
+  for (let i = 0, o = 0; i < n; i++) for (let c = 0; c < info.channels; c++, o += 2) chans[c][i] = dv.getInt16(o, true) / 32768;
+  return { chans, rate: info.rate };
+}
+
+/* Any audio as a 16-bit PCM WAV of the given shape. */
+async function audioToWav(file, rate, channels) {
+  return pcmWav(await decodeAudio(file, rate, channels), rate);
+}
+
+/* ---- ATRAC9: the console's own sounds and home music (atrac9.js) ---- */
+
+const at9Stock = new Map();   /* system .at9 path -> { bytes, file, rms } */
+
+async function stockAt9(path) {
+  if (!at9Stock.has(path)) {
+    const res = await fetch(`/api/asset?${q({ path })}`);
+    if (!res.ok) throw new Error("could not read the system sound");
+    const bytes = new Uint8Array(await res.arrayBuffer());
+    const file = ATRAC9.parseFile(bytes);
+    at9Stock.set(path, { bytes, file, rms: ATRAC9.downmixRms(file) });
+  }
+  return at9Stock.get(path);
+}
+
+/* The longest audio a replacement may hold: the console accepts up to twice
+   the system file's length, and looping music also repeats its opening
+   seconds after the end (see encode in atrac9.js). */
+function at9MaxSamples(stock) {
+  const f = stock.file, cfg = f.config, delay = f.fact ? f.fact[2] : cfg.frameSamples;
+  const tail = f.loop ? ATRAC9.LOOP_TAIL * cfg.rate : 0;
+  return 2 * f.superframes * cfg.superframeSamples - Math.max(delay, cfg.frameSamples) - cfg.superframeSamples - tail;
+}
+
+function trimWithFade(chans, max, rate) {
+  if (chans[0].length <= max) return chans;
+  const fade = Math.min(max, 3 * rate);
+  return chans.map(c => {
+    const out = c.slice(0, max);
+    for (let i = 0; i < fade; i++) out[max - fade + i] *= 1 - (i + 1) / fade;
+    return out;
+  });
+}
+
+/* Scale to the system sound's loudness (RMS of its stereo downmix), offset
+   by gainDb, with a soft limit just below full scale. */
+function matchLoudness(chans, target, gainDb) {
+  let sum = 0, n = 0;
+  for (const c of chans) for (let i = 0; i < c.length; i++) { sum += c[i] * c[i]; n++; }
+  const rms = Math.sqrt(sum / Math.max(n, 1));
+  if (!(rms > 1e-6)) return chans;
+  const g = (target > 0 ? target : 0.1) / rms * 10 ** (gainDb / 20), knee = 0.89;
+  return chans.map(c => c.map(v => {
+    v *= g;
+    const a = Math.abs(v);
+    return a <= knee ? v : Math.sign(v) * (knee + (1 - knee) * Math.tanh((a - knee) / (1 - knee)));
+  }));
+}
+
+/* Run the encoder in a Web Worker (atrac9.js doubles as one); on the page
+   itself, with pauses to repaint, if a worker cannot start. */
+function encodeAt9(stockBytes, left, right, onProgress, intro) {
+  return new Promise((resolve, reject) => {
+    const onPage = async () => {
+      let last = performance.now();
+      try {
+        resolve(await ATRAC9.encode(stockBytes, left, right, async f => {
+          if (onProgress) onProgress(f);
+          if (performance.now() - last > 50) { await nextTask(); last = performance.now(); }
+        }, intro));
+      } catch (e) { reject(e); }
+    };
+    let worker;
+    try { worker = new Worker("atrac9.js"); } catch (e) { onPage(); return; }
+    let started = false;
+    worker.onmessage = e => {
+      const m = e.data;
+      started = true;
+      if (m.progress !== undefined) { if (onProgress) onProgress(m.progress); return; }
+      worker.terminate();
+      if (m.error) reject(new Error(m.error)); else resolve(m.result);
+    };
+    worker.onerror = e => {
+      e.preventDefault();
+      worker.terminate();
+      if (started) reject(new Error("the encoder stopped unexpectedly")); else onPage();
+    };
+    worker.postMessage({ stock: stockBytes, left, right, intro });
+  });
+}
+
+/* Encode audio as a replacement for the system ATRAC9 sound at `path`: same
+   format, matched loudness, decoded again and compared before it is returned.
+   `intro` (seconds) plays once before the part that loops. */
+async function at9For(path, chans, rate, gainDb, onProgress, intro = 0) {
+  const stock = await stockAt9(path);
+  const cfg = stock.file.config;
+  let st = await resample(chans.length === 1 ? [chans[0], chans[0]] : chans.slice(0, 2), rate, cfg.rate);
+  const max = at9MaxSamples(stock), trimmed = st[0].length > max;
+  st = matchLoudness(trimWithFade(st, max, cfg.rate), stock.rms, gainDb);
+  const introSamples = Math.min(Math.round(intro * cfg.rate), Math.max(0, st[0].length - cfg.rate));
+  const res = await encodeAt9(stock.bytes, st[0], st[1], onProgress, introSamples);
+  return { blob: new Blob([res.bytes], { type: "audio/x-at9" }), seconds: res.samples / cfg.rate, trimmed };
+}
+
+async function soundForAsset(file, assetPath) {
+  if (ext(assetPath) === "at9") {
+    if (/\.at9$/i.test(file.name)) return file;  /* made elsewhere: the console checks the exact format */
+    const stock = await stockAt9(assetPath);
+    const chans = await decodeAudio(file, stock.file.config.rate, 2);
+    return (await at9For(assetPath, chans, stock.file.config.rate, 0, attachProgress)).blob;
+  }
+  const stock = parseWav(await (await fetch(`/api/asset?${q({ path: assetPath })}`)).arrayBuffer());
+  if (!stock) throw new Error("could not read the system sound");
+  if (stock.format !== 1 || stock.bits !== 16) {
+    if (!/\.wav$/i.test(file.name)) throw new Error(`attach a WAV in the same format (${stock.rate} Hz, ${stock.bits}-bit)`);
+    return file;  /* the console checks the exact format */
+  }
+  return audioToWav(file, stock.rate, stock.channels);
+}
+
+/* ---- textures: DDS for ShellUI (.dds / .dds.zst) ---- */
+
+const BC7_WEIGHTS = [0, 4, 9, 13, 17, 21, 26, 30, 34, 38, 43, 47, 51, 55, 60, 64];
+
+/* One opaque 4x4 block as BC7 mode 6 (7-bit endpoints + p-bit, 4-bit indices).
+   Endpoints come from the block's principal colour axis; every pixel then
+   takes the exact nearest of the 16 palette colours. */
+function bc7Block(px, out, o) {
+  let mr = 0, mg = 0, mb = 0;
+  for (let i = 0; i < 64; i += 4) { mr += px[i]; mg += px[i + 1]; mb += px[i + 2]; }
+  mr /= 16; mg /= 16; mb /= 16;
+  let rr = 0, rg = 0, rb = 0, gg = 0, gb = 0, bb = 0;
+  for (let i = 0; i < 64; i += 4) {
+    const r = px[i] - mr, g = px[i + 1] - mg, b = px[i + 2] - mb;
+    rr += r * r; rg += r * g; rb += r * b; gg += g * g; gb += g * b; bb += b * b;
+  }
+  let ax = 0.58, ay = 0.58, az = 0.58;
+  for (let k = 0; k < 8; k++) {
+    const nx = rr * ax + rg * ay + rb * az, ny = rg * ax + gg * ay + gb * az, nz = rb * ax + gb * ay + bb * az;
+    const m = Math.max(Math.abs(nx), Math.abs(ny), Math.abs(nz));
+    if (m < 1e-9) break;
+    ax = nx / m; ay = ny / m; az = nz / m;
+  }
+  const len2 = ax * ax + ay * ay + az * az;
+  let tmin = 0, tmax = 0;
+  if (len2 > 1e-12) {
+    tmin = Infinity; tmax = -Infinity;
+    for (let i = 0; i < 64; i += 4) {
+      const t = ((px[i] - mr) * ax + (px[i + 1] - mg) * ay + (px[i + 2] - mb) * az) / len2;
+      if (t < tmin) tmin = t;
+      if (t > tmax) tmax = t;
+    }
+  }
+  /* p-bit 1 on both endpoints keeps alpha at exactly 255 (A0 = A1 = 127). */
+  const q = v => Math.max(0, Math.min(127, Math.round((v - 1) / 2)));
+  let e0 = [q(mr + tmin * ax), q(mg + tmin * ay), q(mb + tmin * az)];
+  let e1 = [q(mr + tmax * ax), q(mg + tmax * ay), q(mb + tmax * az)];
+  const pal = new Int32Array(48);
+  const fill = () => {
+    for (let i = 0; i < 16; i++) {
+      const w = BC7_WEIGHTS[i];
+      for (let c = 0; c < 3; c++) pal[i * 3 + c] = ((64 - w) * ((e0[c] << 1) | 1) + w * ((e1[c] << 1) | 1) + 32) >> 6;
+    }
+  };
+  fill();
+  const idx = new Uint8Array(16);
+  for (let p = 0; p < 16; p++) {
+    const r = px[p * 4], g = px[p * 4 + 1], b = px[p * 4 + 2];
+    let best = 0, bestErr = Infinity;
+    for (let i = 0; i < 16; i++) {
+      const dr = r - pal[i * 3], dg = g - pal[i * 3 + 1], db = b - pal[i * 3 + 2];
+      const e = dr * dr + dg * dg + db * db;
+      if (e < bestErr) { bestErr = e; best = i; }
+    }
+    idx[p] = best;
+  }
+  if (idx[0] >= 8) {  /* the anchor index must fit in 3 bits */
+    [e0, e1] = [e1, e0];
+    for (let p = 0; p < 16; p++) idx[p] = 15 - idx[p];
+  }
+  let bit = 0;
+  out.fill(0, o, o + 16);
+  const put = (v, n) => { for (let i = 0; i < n; i++, bit++) if ((v >> i) & 1) out[o + (bit >> 3)] |= 1 << (bit & 7); };
+  put(64, 7);
+  for (let c = 0; c < 3; c++) { put(e0[c], 7); put(e1[c], 7); }
+  put(127, 7); put(127, 7);
+  put(1, 1); put(1, 1);
+  put(idx[0], 3);
+  for (let p = 1; p < 16; p++) put(idx[p], 4);
+}
+
+/* Mode-6 decoder, used only to check the encoder's own output. */
+function bc7DecodeMode6(src, o, px) {
+  let bit = 0;
+  const get = n => { let v = 0; for (let i = 0; i < n; i++, bit++) v |= ((src[o + (bit >> 3)] >> (bit & 7)) & 1) << i; return v; };
+  if (get(7) !== 64) return false;
+  const e = [[0, 0, 0, 0], [0, 0, 0, 0]];
+  for (let c = 0; c < 4; c++) { e[0][c] = get(7); e[1][c] = get(7); }
+  const p0 = get(1), p1 = get(1);
+  for (let c = 0; c < 4; c++) { e[0][c] = (e[0][c] << 1) | p0; e[1][c] = (e[1][c] << 1) | p1; }
+  for (let p = 0; p < 16; p++) {
+    const w = BC7_WEIGHTS[get(p === 0 ? 3 : 4)];
+    for (let c = 0; c < 4; c++) px[p * 4 + c] = ((64 - w) * e[0][c] + w * e[1][c] + 32) >> 6;
+  }
+  return true;
+}
+
+function b64bytes(s) { return Uint8Array.from(atob(s), c => c.charCodeAt(0)); }
+
+/* Wrap data in a zstd frame of stored (raw) blocks: valid for any decoder. */
+function zstdStored(data) {
+  const BLOCK = 128 * 1024, blocks = Math.max(1, Math.ceil(data.length / BLOCK));
+  const out = new Uint8Array(9 + blocks * 3 + data.length);
+  out.set([0x28, 0xb5, 0x2f, 0xfd, 0xa0]);  /* magic; single segment, 4-byte content size */
+  new DataView(out.buffer).setUint32(5, data.length, true);
+  let o = 9;
+  for (let b = 0; b < blocks; b++) {
+    const start = b * BLOCK, size = Math.min(BLOCK, data.length - start), last = b === blocks - 1 ? 1 : 0;
+    const h = (size << 3) | last;
+    out[o] = h & 255; out[o + 1] = (h >> 8) & 255; out[o + 2] = (h >> 16) & 255;
+    out.set(data.subarray(start, start + size), o + 3);
+    o += 3 + size;
+  }
+  return out;
+}
+
+const textureCache = new Map();
+
+/* Encode an image into exactly the stock texture's format, size and mips,
+   reusing its DDS header verbatim, then check the result. */
+async function textureForAsset(file, assetPath, progress) {
+  const info = await api("GET", "/api/asset/texture", { path: assetPath });
+  const key = `${info.header}|${info.dataLength}|${state.fit}|${file.name}|${file.size}|${file.lastModified}`;
+  if (textureCache.has(key)) return textureCache.get(key);
+  const bc7 = info.dxgi === 98 || info.dxgi === 99;
+  const rgba = info.dxgi === 28 || info.dxgi === 29, bgra = info.dxgi === 87 || info.dxgi === 91;
+  if (!bc7 && !rgba && !bgra) throw new Error(`${info.format} textures are not supported yet`);
+  if (info.array !== 1) throw new Error("texture arrays are not supported");
+  if (!file.type.startsWith("image/") && !/\.(png|jpe?g|webp|gif|bmp)$/i.test(file.name)) throw new Error(`${file.name} is not an image`);
+
+  const url = URL.createObjectURL(file);
+  let img;
+  try { img = await loadImage(url); } finally { URL.revokeObjectURL(url); }
+  const header = b64bytes(info.header);
+  const data = new Uint8Array(info.dataLength);
+  let o = 0, sampleErr = 0, sampled = 0;
+  const totalBlocks = Array.from({ length: info.mips }, (_, m) =>
+    Math.ceil(Math.max(1, info.width >> m) / 4) * Math.ceil(Math.max(1, info.height >> m) / 4)).reduce((a, b) => a + b, 0);
+  let done = 0, lastYield = performance.now();
+
+  for (let m = 0; m < info.mips; m++) {
+    const w = Math.max(1, info.width >> m), h = Math.max(1, info.height >> m);
+    const canvas = document.createElement("canvas");
+    canvas.width = w; canvas.height = h;
+    const ctx = canvas.getContext("2d", { colorSpace: "srgb", willReadFrequently: true });
+    ctx.imageSmoothingQuality = "high";
+    ctx.fillStyle = "#000"; ctx.fillRect(0, 0, w, h);
+    let dw = w, dh = h;
+    if (state.fit !== "stretch") {
+      const sc = (state.fit === "cover" ? Math.max : Math.min)(w / img.naturalWidth, h / img.naturalHeight);
+      dw = img.naturalWidth * sc; dh = img.naturalHeight * sc;
+    }
+    ctx.drawImage(img, (w - dw) / 2, (h - dh) / 2, dw, dh);
+    const pix = ctx.getImageData(0, 0, w, h).data;
+    if (!bc7) {
+      for (let i = 0; i < w * h; i++) {
+        const s = i * 4;
+        if (rgba) { data[o++] = pix[s]; data[o++] = pix[s + 1]; data[o++] = pix[s + 2]; data[o++] = 255; }
+        else { data[o++] = pix[s + 2]; data[o++] = pix[s + 1]; data[o++] = pix[s]; data[o++] = 255; }
+      }
+      continue;
+    }
+    const block = new Uint8ClampedArray(64), check = new Uint8Array(64);
+    const bw = Math.ceil(w / 4), bh = Math.ceil(h / 4);
+    for (let by = 0; by < bh; by++) {
+      for (let bx = 0; bx < bw; bx++) {
+        for (let y = 0; y < 4; y++) {
+          for (let x = 0; x < 4; x++) {
+            const sx = Math.min(w - 1, bx * 4 + x), sy = Math.min(h - 1, by * 4 + y), s = (sy * w + sx) * 4, d = (y * 4 + x) * 4;
+            block[d] = pix[s]; block[d + 1] = pix[s + 1]; block[d + 2] = pix[s + 2]; block[d + 3] = 255;
+          }
+        }
+        bc7Block(block, data, o);
+        if ((bx * 7 + by * 13) % 97 === 0) {  /* re-decode a sample of blocks */
+          if (!bc7DecodeMode6(data, o, check)) throw new Error("texture encoder self-check failed");
+          for (let i = 0; i < 64; i++) { if ((i & 3) !== 3) { const e = check[i] - block[i]; sampleErr += e * e; sampled++; } else if (check[i] !== 255) throw new Error("texture encoder self-check failed"); }
+        }
+        o += 16;
+      }
+      done += bw;
+      if (performance.now() - lastYield > 50) {
+        if (progress) progress(done / totalBlocks);
+        await nextTask();
+        lastYield = performance.now();
+      }
+    }
+  }
+  if (o !== data.length) throw new Error("texture size did not verify");
+  if (sampled) {
+    const psnr = 10 * Math.log10(255 * 255 / Math.max(1e-9, sampleErr / sampled));
+    if (psnr < 24) throw new Error(`texture quality check failed (${psnr.toFixed(1)} dB)`);
+  }
+  const dds = new Uint8Array(header.length + data.length);
+  dds.set(header); dds.set(data, header.length);
+  const out = new Blob([info.zstd ? zstdStored(dds) : dds]);
+  textureCache.set(key, out);
+  return out;
+}
+
+async function fileForAsset(file, asset) {
+  if (asset.kind === "texture") return textureForAsset(file, asset.path, attachProgress);
+  if (isImage(asset)) return imageForAsset(file, asset.path);
+  if (asset.kind === "audio") return soundForAsset(file, asset.path);
+  return file;  /* fonts, JSON, video: the console validates against the stock file */
+}
+
+let attachProgress = null;
+
+/* Put one file onto a set of system assets (for example all size variants). */
+async function attachTo(assets, file, label) {
+  const big = assets.length > 2 || assets.some(a => a.kind === "texture" || ext(a.path) === "at9");
+  const p = big ? progressToast(`Adding ${label}…`) : null;
+  let ok = 0;
+  const errors = [];
+  for (let i = 0; i < assets.length; i++) {
+    const a = assets[i];
+    attachProgress = p ? f => p.set(`Encoding ${baseName(a.path)}… ${Math.round(f * 100)}%`, (i + f) / assets.length) : null;
+    try {
+      const blob = await fileForAsset(file, a);
+      await uploadVerified("/api/theme/file", { id: state.editId, path: a.path }, blob);
+      state.files.add(a.path);
+      ok++;
+    } catch (e) { errors.push(`${baseName(a.path)}: ${e.message}`); }
+    if (p) p.set(`Adding ${label}… ${i + 1}/${assets.length}`, (i + 1) / assets.length);
+  }
+  stamp = Date.now();
+  const msg = errors.length
+    ? `${label}: ${ok} of ${assets.length} added and verified. ${errors.slice(0, 2).join("; ")}`
+    : `${label} added and verified${assets.length > 1 ? ` at ${plural(ok, "size")}` : ""}. Apply the theme to use it.`;
+  const kind = errors.length ? (ok ? "" : "err") : "ok";
+  if (p) p.done(msg, kind); else toast(msg, kind, errors.length ? 9000 : 4500);
+  await refreshStatus();
+  return ok;
+}
+
+async function removeMusic() {
+  await api("DELETE", "/api/theme/music", { id: state.editId }).catch(() => {});
+  await resetAssets([{ path: HOME_MUSIC }]);
+}
+
+async function resetAssets(assets) {
+  const hadBackground = backgroundFile([...state.files]);
+  for (const a of assets.filter(x => state.files.has(x.path))) {
+    try { await api("DELETE", "/api/theme/file", { id: state.editId, path: a.path }); state.files.delete(a.path); }
+    catch (e) { toast(e.message, "err"); }
+  }
+  stamp = Date.now();
+  /* No background left: neither is the picture made from it. */
+  if (hadBackground && !backgroundFile([...state.files])) await removePreview(state.editId, "background");
+  else await refreshStatus();
+}
+
+/* ================================================================ preview pictures
+
+   Each theme can have a picture for its library card: one made from its
+   background when the background is added (kind "background"), and one the
+   user chooses (kind "picture"), which is shown instead. */
+
+const PREVIEW_W = 1280, PREVIEW_H = 720;
+
+const PREVIEW_FILES = [["background", "preview.jpg"], ["picture", "picture.jpg"]];   /* in a theme .zip */
+const coverUrl = t => `/api/theme/preview?${q({ id: t.id })}&v=${t.coverTime}-${stamp}`;
+
+/* A 16:9 JPEG of an image, video frame or canvas, fitted as `fit`. */
+async function previewJpeg(src, w, h, fit) {
+  const c = document.createElement("canvas");
+  c.width = PREVIEW_W; c.height = PREVIEW_H;
+  const ctx = c.getContext("2d");
+  ctx.imageSmoothingQuality = "high";
+  ctx.fillStyle = "#000"; ctx.fillRect(0, 0, c.width, c.height);
+  let dw = c.width, dh = c.height;
+  if (fit !== "stretch") {
+    const sc = (fit === "contain" ? Math.min : Math.max)(c.width / w, c.height / h);
+    dw = w * sc; dh = h * sc;
+  }
+  ctx.drawImage(src, (c.width - dw) / 2, (c.height - dh) / 2, dw, dh);
+  const blob = await new Promise(resolve => c.toBlob(resolve, "image/jpeg", 0.85));
+  if (!blob) throw new Error("this browser could not make the picture");
+  await loadImage(URL.createObjectURL(blob)).then(img => URL.revokeObjectURL(img.src));  /* check it reads back */
+  return blob;
+}
+
+/* A frame from a little way into a video (backgrounds often fade in). */
+function videoFrame(url) {
+  return new Promise((resolve, reject) => {
+    const v = document.createElement("video");
+    const timer = setTimeout(() => reject(new Error("could not read the video")), 10000);
+    v.muted = true; v.playsInline = true; v.preload = "auto";
+    v.onloadedmetadata = () => { v.currentTime = Math.min(1, (v.duration || 0) / 3); };
+    v.onseeked = () => { clearTimeout(timer); resolve(v); };
+    v.onerror = () => { clearTimeout(timer); reject(new Error("could not read the video")); };
+    v.src = url;
+  });
+}
+
+async function previewSource(url, isVideo) {
+  if (isVideo) { const v = await videoFrame(url); return [v, v.videoWidth, v.videoHeight]; }
+  const img = await loadImage(url);
+  return [img, img.naturalWidth, img.naturalHeight];
+}
+
+async function savePreview(id, kind, blob) {
+  await uploadVerified("/api/theme/preview", { id, kind }, blob);
+  stamp = Date.now();
+  await refreshStatus();
+  if (state.route === "edit" && state.editId === id && $("#cover-panel")) $("#cover-panel").innerHTML = coverPanel(themeById(id));
+}
+
+async function removePreview(id, kind) {
+  await api("DELETE", "/api/theme/preview", { id, kind }).catch(() => {});
+  stamp = Date.now();
+  await refreshStatus();
+  if (state.route === "edit" && state.editId === id && $("#cover-panel")) $("#cover-panel").innerHTML = coverPanel(themeById(id));
+}
+
+/* After a background is added: the same picture, fitted as the background was. */
+async function previewFromFile(id, file, isVideo) {
+  const url = URL.createObjectURL(file);
+  try {
+    const [src, w, h] = await previewSource(url, isVideo);
+    await savePreview(id, "background", await previewJpeg(src, w, h, state.fit));
+  } catch (e) {
+    console.warn("preview picture:", e);
+  } finally { URL.revokeObjectURL(url); }
+}
+
+/* ---- reading a theme's own background back (themes made before previews) */
+
+/* The content of a zstd frame made of raw and RLE blocks, which is how this
+   builder stores textures. Compressed blocks are not read. */
+function unzstdStored(b) {
+  if (b[0] !== 0x28 || b[1] !== 0xb5 || b[2] !== 0x2f || b[3] !== 0xfd) throw new Error("not zstd");
+  const fhd = b[4], single = (fhd >> 5) & 1, fcs = [single ? 1 : 0, 2, 4, 8][fhd >> 6];
+  let o = 5 + (single ? 0 : 1) + [0, 1, 2, 4][fhd & 3] + fcs;
+  const parts = [];
+  for (;;) {
+    if (o + 3 > b.length) throw new Error("truncated zstd");
+    const h = b[o] | (b[o + 1] << 8) | (b[o + 2] << 16), type = (h >> 1) & 3, size = h >>> 3;
+    o += 3;
+    if (type === 0) { parts.push(b.subarray(o, o + size)); o += size; }
+    else if (type === 1) { parts.push(new Uint8Array(size).fill(b[o])); o += 1; }
+    else throw new Error("compressed zstd");
+    if (h & 1) break;
+  }
+  const out = new Uint8Array(parts.reduce((n, x) => n + x.length, 0));
+  let w = 0;
+  for (const x of parts) { out.set(x, w); w += x.length; }
+  return out;
+}
+
+/* The top level of a DDS texture as a canvas: BC7 (as this builder encodes
+   it), RGBA8 or BGRA8. */
+async function ddsCanvas(bytes) {
+  const d = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  if (d.getUint32(0, true) !== 0x20534444) throw new Error("not a DDS texture");
+  const h = d.getUint32(12, true), w = d.getUint32(16, true);
+  const fourcc = d.getUint32(84, true), dx10 = fourcc === 0x30315844;
+  let dxgi = dx10 ? d.getUint32(128, true) : 0;
+  if (!dx10 && d.getUint32(88, true) === 32) dxgi = d.getUint32(92, true) === 0xff ? 28 : d.getUint32(92, true) === 0xff0000 ? 87 : 0;
+  const data = bytes.subarray(dx10 ? 148 : 128);
+  if (!w || !h || w > 8192 || h > 8192) throw new Error("unexpected texture size");
+  const c = document.createElement("canvas");
+  c.width = w; c.height = h;
+  const ctx = c.getContext("2d");
+  const img = ctx.createImageData(w, h), px = img.data;
+  if (dxgi === 98 || dxgi === 99) {
+    const bw = Math.ceil(w / 4), bh = Math.ceil(h / 4), block = new Uint8Array(64);
+    if (data.length < bw * bh * 16) throw new Error("texture is truncated");
+    let last = performance.now();
+    for (let by = 0; by < bh; by++) {
+      for (let bx = 0; bx < bw; bx++) {
+        if (!bc7DecodeMode6(data, (by * bw + bx) * 16, block)) throw new Error("texture uses BC7 modes this preview can't read");
+        for (let y = 0; y < 4 && by * 4 + y < h; y++) {
+          for (let x = 0; x < 4 && bx * 4 + x < w; x++) {
+            const s = (y * 4 + x) * 4, t = ((by * 4 + y) * w + bx * 4 + x) * 4;
+            px[t] = block[s]; px[t + 1] = block[s + 1]; px[t + 2] = block[s + 2]; px[t + 3] = 255;
+          }
+        }
+      }
+      if (performance.now() - last > 50) { await nextTask(); last = performance.now(); }
+    }
+  } else if (dxgi === 28 || dxgi === 29 || dxgi === 87 || dxgi === 91) {
+    if (data.length < w * h * 4) throw new Error("texture is truncated");
+    const bgra = dxgi === 87 || dxgi === 91;
+    for (let i = 0; i < w * h * 4; i += 4) {
+      px[i] = data[i + (bgra ? 2 : 0)]; px[i + 1] = data[i + 1]; px[i + 2] = data[i + (bgra ? 0 : 2)]; px[i + 3] = 255;
+    }
+  } else throw new Error("texture format not readable here");
+  ctx.putImageData(img, 0, 0);
+  return c;
+}
+
+/* The theme's home background, preferring the default home screen one. */
+function backgroundFile(paths) {
+  const bgs = paths.filter(p => BG_RE.test(p));
+  const rank = p => areaOf(p) === "Home: default background" ? 0 : areaOf(p).startsWith("Home:") ? 1 : 2;
+  return bgs.sort((a, b) => rank(a) - rank(b))[0] || null;
+}
+
+async function previewFromTheme(id) {
+  const { files } = await api("GET", "/api/theme/files", { id });
+  const path = backgroundFile(files.map(f => f.path));
+  if (!path) return false;
+  const url = `/api/theme/file?${q({ id, path })}`;
+  let src, w, h;
+  if (/\.dds(\.zst)?$/i.test(path)) {
+    const res = await fetch(url);
+    if (!res.ok) throw new Error("could not read the background");
+    let bytes = new Uint8Array(await res.arrayBuffer());
+    if (/\.zst$/i.test(path)) bytes = unzstdStored(bytes);
+    src = await ddsCanvas(bytes); w = src.width; h = src.height;
+  } else {
+    [src, w, h] = await previewSource(url, /\.(mp4|webm|m4v)$/i.test(path));
+  }
+  await savePreview(id, "background", await previewJpeg(src, w, h, "stretch"));
+  return true;
+}
+
+/* Themes made before preview pictures: make one from the background, once
+   per visit. Quietly does nothing when it can't. */
+const previewTried = new Set();
+let previewFilling = false;
+async function fillMissingPreviews() {
+  if (previewFilling) return;
+  previewFilling = true;
+  try {
+    for (const t of state.status.themes) {
+      if (t.cover || !t.files || previewTried.has(t.id)) continue;
+      previewTried.add(t.id);
+      try {
+        const el = await previewFromTheme(t.id) && document.querySelector(`[data-cover="${CSS.escape(t.id)}"]`);
+        if (el && themeById(t.id)) el.outerHTML = cardPreview(themeById(t.id));
+      } catch (e) { console.warn(`preview picture for ${t.id}:`, e); }
+    }
+  } finally { previewFilling = false; }
+}
+
+function coverPanel(t) {
+  const text = t.cover === "picture"
+    ? "Your picture, shown on this theme's card in the library. Remove it to show the background instead."
+    : t.cover === "background"
+      ? "Made from the background and shown on this theme's card in the library. You can choose another picture, such as a photo of your home screen with the theme applied."
+      : "Shown on this theme's card in the library, so you can tell your themes apart. It's made from the background when you add one, or choose any picture.";
+  return `
+    <div class="cover">${t.cover ? `<img alt="Preview of ${esc(t.name)}" src="${coverUrl(t)}">` : "No picture yet"}</div>
+    <div class="text"><h2>Preview picture</h2><div class="sub">${esc(text)}</div>
+      <div class="acts"><button class="btn sm" data-act="choose-cover">Choose picture</button>
+        ${t.cover === "picture" ? `<button class="btn sm ghost danger" data-act="remove-cover">Remove picture</button>` : ""}</div></div>`;
+}
+
+async function chooseCover() {
+  const id = state.editId;
+  const file = await pickFile("image/*");
+  if (!file) return;
+  const url = URL.createObjectURL(file);
+  try {
+    const [img, w, h] = await previewSource(url, false);
+    await savePreview(id, "picture", await previewJpeg(img, w, h, "cover"));
+    toast("Preview picture set.", "ok");
+  } catch (e) {
+    toast(e.message, "err");
+  } finally { URL.revokeObjectURL(url); }
+}
+
+/* ================================================================ editor (theme builder) */
+
+async function renderEditor() {
+  const themes = state.status.themes;
+  if (!themes.length) {
+    view.innerHTML = `<div class="empty"><h2>Nothing to edit yet</h2>
+      <p class="muted" style="margin:0">Create a theme first, then choose what it changes.</p>
+      <button class="btn primary" data-act="new-from-editor">New theme</button></div>`;
+    return;
+  }
+  if (!themeById(state.editId)) state.editId = themes[0].id;
+  const t = themeById(state.editId);
+  view.innerHTML = `<p class="muted">Loading…</p>`;
+  await Promise.all([loadAssets(), loadThemeFiles(t.id)]);
+  const on = state.status.applied === t.id;
+  const fwAny = t.fw === "any";
+
+  view.innerHTML = `
+    <div class="head">
+      <h1>Edit</h1>
+      <select id="theme-select" aria-label="Theme" style="width:auto">${themes.map(x =>
+        `<option value="${esc(x.id)}" ${x.id === t.id ? "selected" : ""}>${esc(x.name)}</option>`).join("")}</select>
+      <span class="spacer"></span>
+      <button class="btn ghost" data-act="export" data-id="${esc(t.id)}" id="edit-export" ${t.files || t.music ? "" : "disabled"}>Export</button>
+      <button class="btn primary" data-act="apply" data-id="${esc(t.id)}" id="edit-apply" ${t.compatible && (t.files || t.music) ? "" : "disabled"}>${on ? "Re-apply to console" : "Apply to console"}</button>
+    </div>
+    ${on ? resultBanner() : ""}
+    ${isLocal() && /PlayStation/i.test(navigator.userAgent)
+      ? `<div class="banner">Attaching files is easiest from a computer or phone: open <b>http://${esc(state.status.ip)}:8095</b>.</div>` : ""}
+    <div class="panel builder-head">
+      <label class="field">Name<input type="text" id="theme-name" maxlength="60" value="${esc(t.name)}"></label>
+      <label class="field">Firmware
+        <select id="theme-fw">
+          <option value="${esc(state.status.fw)}" ${!fwAny ? "selected" : ""}>This console (${esc(state.status.fw)})</option>
+          <option value="any" ${fwAny ? "selected" : ""}>Any firmware</option>
+        </select></label>
+      <label class="field">How images are fitted
+        <select id="fit">${[["cover", "Fill (crop edges)"], ["contain", "Fit (keep all)"], ["stretch", "Stretch"]]
+          .map(([v, l]) => `<option value="${v}" ${state.fit === v ? "selected" : ""}>${l}</option>`).join("")}</select></label>
+    </div>
+    <section class="panel cover-panel" id="cover-panel">${coverPanel(t)}</section>
+    ${state.assetsError ? `<div class="banner err">${esc(state.assetsError)}. Restart the plugin once with the stock theme to list the system assets.</div>` : ""}
+    <div class="aspects">${ASPECTS.map(a => `<section class="aspect" id="aspect-${a.id}"></section>`).join("")}</div>
+    <div class="savebar" id="savebar" role="region" aria-label="Unsaved changes" ${t.unsaved ? "" : "hidden"}>
+      <div class="text"><b>Unsaved changes</b><span>Save to keep them, or discard them to go back to the last save.</span></div>
+      <button class="btn ghost" data-act="discard" data-id="${esc(t.id)}" id="discard-btn">Discard</button>
+      <button class="btn primary" data-act="save" data-id="${esc(t.id)}">Save</button>
+    </div>
+    <p class="note" style="margin-top:18px">Only media can be themed. ${state.protectedCount ? `${plural(state.protectedCount, "system file")} (code and libraries) are protected and never changed. ` : ""}Every file is checked against the system file it replaces, on upload and again when the theme is applied.</p>`;
+  ASPECTS.forEach(renderAspect);
+}
+
+function renderAspect(asp) {
+  const el = $(`#aspect-${asp.id}`);
+  if (!el) return;
+  const on = aspectOn(asp);
+  const replaced = aspectReplaced(asp);
+  let summary;
+  if (asp.mode === "music") {
+    const t = themeById(state.editId);
+    summary = state.files.has(HOME_MUSIC) ? `${t.music ? fmtTime(t.music) + " · " : ""}${gainLabel(t.gain || 0)}`
+      : t.music ? "Not converted to home music yet" : "No music yet";
+  } else {
+    const total = aspectAssets(asp).length;
+    summary = total ? `${replaced} of ${plural(total, "file")} replaced` : "None on this firmware";
+  }
+  const confirming = state.confirming === asp.id;
+  el.innerHTML = `
+    <div class="aspect-head">
+      <button class="switch" role="switch" aria-checked="${on}" aria-label="${esc(asp.title)}" data-act="toggle" data-aspect="${asp.id}"></button>
+      <div class="text"><h2>${esc(asp.title)}</h2><div class="sub">${esc(on ? summary : asp.sub)}</div></div>
+      ${confirming ? `<div class="confirm">Remove ${asp.mode === "music" ? "the music" : plural(replaced, "replaced file")}?
+        <button class="btn sm danger armed" data-act="confirm-off" data-aspect="${asp.id}">Remove</button>
+        <button class="btn sm ghost" data-act="cancel-off" data-aspect="${asp.id}">Keep</button></div>` : ""}
+    </div>
+    <div class="aspect-body" ${on ? "" : "hidden"}>${on ? aspectBody(asp) : ""}</div>`;
+  if (asp.mode === "music" && state.trim) setupTrim();
+}
+
+function dropZone(asp, title, detail) {
+  return `<div class="drop-zone" data-drop="${asp.id}">
+      <div class="text"><div class="title">${esc(title)}</div><div class="note">${esc(detail)}</div></div>
+      <button class="btn" data-act="attach-aspect" data-aspect="${asp.id}">Choose file</button>
+    </div>`;
+}
+
+function thumbFor(a) {
+  const rep = state.files.has(a.path);
+  if (!isImage(a)) return `<div class="thumb${rep ? " replaced" : ""}"><span>${esc(a.kind === "texture" ? "DDS" : ext(a.path) || "file")}</span></div>`;
+  const src = rep ? `/api/theme/file?${q({ id: state.editId, path: a.path })}&v=${stamp}` : `/api/asset?${q({ path: a.path })}`;
+  return `<div class="thumb${rep ? " replaced" : ""}"><img loading="lazy" alt="" src="${esc(src)}"></div>`;
+}
+
+function aspectBody(asp) {
+  if (asp.mode === "music") return musicBody();
+  if (!state.assets) return `<p class="note">The system asset list is not available yet.</p>`;
+  const all = aspectAssets(asp);
+  if (!all.length) return `<p class="note">This firmware has no ${esc(asp.title.toLowerCase())} that can be themed. Anything else replaceable is under Other images.</p>`;
+
+  if (asp.mode === "single") {
+    const off = bgOff();
+    const areas = new Map();
+    for (const a of all) {
+      const k = areaOf(a.path);
+      if (!areas.has(k)) areas.set(k, []);
+      areas.get(k).push(a);
+    }
+    const chosen = all.filter(a => !off.has(areaOf(a.path)));
+    const replaced = all.filter(a => state.files.has(a.path)).length;
+    return `${dropZone(asp, "Drop an image or video here",
+        chosen.length ? `Goes to ${plural(chosen.length, "file")} in the areas switched on below, each at its own size.` : "Switch on at least one area below.")}
+      <p class="note">Choose where your background is used:</p>
+      <div class="rows">${[...areas.entries()].sort((a, b) => a[0].localeCompare(b[0])).map(([name, list]) => {
+        const on = !off.has(name), rep = list.filter(a => state.files.has(a.path)).length;
+        return `<div class="row-item${rep ? " replaced" : ""}">
+          <div class="info" style="display:flex;gap:14px;align-items:center;min-width:0">
+            <button class="switch" role="switch" aria-checked="${on}" aria-label="${esc(name)}" data-act="toggle-area" data-area="${esc(name)}"></button>
+            <div style="min-width:0"><div class="file">${esc(name)}${rep ? ` <span class="tag on">Replaced</span>` : ""}</div>
+              <div class="dir">${plural(list.length, "file")}</div></div>
+          </div>
+          <div class="strip">${list.slice(0, 4).map(thumbFor).join("")}</div>
+        </div>`;
+      }).join("")}</div>
+      ${replaced ? `<div><button class="btn sm ghost danger" data-act="reset-aspect" data-aspect="${asp.id}">Reset background</button></div>` : ""}`;
+  }
+
+  const groupsAll = groupAssets(all);
+  const filter = (state.filters[asp.id] || "").toLowerCase();
+  const groups = filter ? groupsAll.filter(g => g.key.toLowerCase().includes(filter)) : groupsAll;
+  const page = state.pages[asp.id] || 48;
+  const shown = groups.slice(0, page);
+  const search = groupsAll.length > 12
+    ? `<div class="toolbar"><input type="search" data-filter-aspect="${asp.id}" placeholder="Search ${esc(asp.title.toLowerCase())}" value="${esc(state.filters[asp.id] || "")}" aria-label="Search ${esc(asp.title)}"></div>` : "";
+  const more = groups.length > page ? `<div><button class="btn sm" data-act="more" data-aspect="${asp.id}">Show more (${groups.length - page})</button></div>` : "";
+  if (!groups.length) return `${search}<p class="note">Nothing matches.</p>`;
+
+  if (asp.mode === "tiles") {
+    return `${search}<p class="note">Click an item to attach a file, or drop one on it.</p>
+      <div class="tiles">${shown.map(g => {
+        const rep = g.assets.filter(a => state.files.has(a.path)).length;
+        return `<button class="tile${rep ? " replaced" : ""}" data-group="${esc(g.key)}" data-aspect="${asp.id}" title="${esc(g.key)}">
+          ${rep ? `<span class="tag on">Replaced</span>` : ""}
+          ${thumbFor(g.assets.find(a => state.files.has(a.path)) || g.assets[0])}
+          <div class="file">${esc(g.name)}</div>
+          <div class="meta">${g.assets.length > 1 ? plural(g.assets.length, "size") : fmtSize(g.assets[0].size)}</div>
+        </button>`;
+      }).join("")}</div>${more}
+      ${all.some(a => state.files.has(a.path)) ? `<div><button class="btn sm ghost danger" data-act="reset-aspect" data-aspect="${asp.id}">Reset all ${esc(asp.title.toLowerCase())}</button></div>` : ""}`;
+  }
+
+  return `${search}<div class="rows">${shown.map(g => {
+      const rep = g.assets.filter(a => state.files.has(a.path)).length;
+      const a0 = g.assets[0];
+      const play = asp.id === "sounds" && ext(a0.path) === "wav"
+        ? `<audio controls preload="none" src="${esc(rep ? `/api/theme/file?${q({ id: state.editId, path: a0.path })}&v=${stamp}` : `/api/asset?${q({ path: a0.path })}`)}"></audio>` : "";
+      return `<div class="row-item${rep ? " replaced" : ""}" data-drop-group="${esc(g.key)}" data-aspect="${asp.id}">
+        <div class="info"><div class="file">${esc(g.name)}${rep ? ` <span class="tag on">Replaced</span>` : ""}</div>
+          <div class="dir">${esc(g.dir)}${g.assets.length > 1 ? ` · ${plural(g.assets.length, "variant")}` : ""}</div></div>
+        <div class="acts">${play}
+          <button class="btn sm" data-act="attach-group" data-group="${esc(g.key)}" data-aspect="${asp.id}">${rep ? "Replace" : "Attach"}</button>
+          ${rep ? `<button class="btn sm ghost danger" data-act="reset-group" data-group="${esc(g.key)}" data-aspect="${asp.id}">Reset</button>` : ""}
+        </div></div>`;
+    }).join("")}</div>${more}`;
+}
+
+const gainLabel = g => (g ? `${g > 0 ? "+" : "−"}${Math.abs(g)} dB` : "same loudness as the console's music");
+
+function musicBody() {
+  const t = themeById(state.editId);
+  if (state.assets && !state.assets.some(a => a.path === HOME_MUSIC)) {
+    return `<p class="note">This firmware has no home music file (bgm_home.at9) to replace.</p>`;
+  }
+  if (state.trim && state.trim.id === t.id) return trimBody();
+  const converted = state.files.has(HOME_MUSIC);
+  if (!t.music && !converted) {
+    return dropZone(aspectById("music"), "Drop a music file here",
+      "MP3, M4A, OGG, WAV, FLAC and more. Choose the part that loops; it is encoded on this device to the console's home music format (ATRAC9) at the same loudness, then decoded again and checked before upload.");
+  }
+  const status = !converted ? "Added with an earlier version. Convert it to make it the home music."
+    : "Checking the home music file…";
+  if (converted) checkHomeMusic(t.id);
+  return `<div class="row-item replaced">
+      <div class="info"><div class="file">Home music${t.music ? ` · ${esc(partLabel(t))}` : ""}</div>
+        <div class="dir" id="home-music-status">${esc(status)}</div>
+        ${t.music ? `<audio controls preload="none" src="/api/theme/music?${q({ id: t.id })}&v=${stamp}"></audio>` : ""}</div>
+      <div class="acts">
+        ${t.music && !converted ? `<button class="btn sm primary" data-act="convert-music">Convert</button>` : ""}
+        <button class="btn sm primary" data-act="convert-music" id="home-music-fix" hidden>Encode again</button>
+        ${t.music ? `<button class="btn sm" data-act="choose-part">Choose part</button>` : ""}
+        <button class="btn sm" data-act="attach-aspect" data-aspect="music">Replace</button>
+        <button class="btn sm ghost danger" data-act="remove-music">Remove</button>
+      </div></div>
+    ${t.music ? `<label class="field">Loudness <span id="gain-label">${esc(gainLabel(t.gain || 0))}</span>
+      <input type="range" min="-12" max="12" step="1" value="${t.gain || 0}" id="music-gain"></label>` : ""}
+    ${converted ? `<p class="note">${esc(MUSIC_PLACE_NOTE)}</p>` : ""}`;
+}
+
+/* ---- Home music: the music part, the loop part and their order ---- */
+
+const LOOP_CHOICES = [
+  ["crossfade", 1000, "Crossfade, 1 s"], ["crossfade", 2000, "Crossfade, 2 s"], ["crossfade", 4000, "Crossfade, 4 s"],
+  ["fade", 1000, "Fade out and in"], ["cut", 0, "Straight cut"],
+];
+const ORDERS = [
+  ["music", "Repeat the music part"],
+  ["loop-first", "Loop part first, then the music part repeats"],
+  ["alternate", "Loop part and music part take turns"],
+  ["music-first", "Music part once, then the loop part repeats"],
+];
+const MIN_PART = 3;          /* seconds */
+/* Seen on 13.42: the home screen's player keeps its place in time. It carries
+   on after a game, and when the music changes under it (a theme is applied)
+   it carries on in the new music from the same point. */
+const MUSIC_PLACE_NOTE = "The home screen keeps its place in the music: after a game it carries on where it stopped. When you apply a theme, the new music carries on from about where the old music had got to, so the first time it can start part-way through instead of at the beginning.";
+const SNAP = 0.25;           /* seconds: a loop edge this close to the music's edge joins it */
+
+/* A theme's music settings, in seconds: the music part (end 0 = to the end
+   of the song), the loop part (null = none), their order and the joints. */
+function themePart(t) {
+  const loop = t.musicLoopStart >= 0 && t.musicLoopEnd >= 0;
+  return {
+    start: (t.musicStart || 0) / 1000, end: (t.musicEnd || 0) / 1000,
+    playFrom: t.musicPlayFrom >= 0 ? t.musicPlayFrom / 1000 : null,
+    loopStart: loop ? t.musicLoopStart / 1000 : null, loopEnd: loop ? t.musicLoopEnd / 1000 : null,
+    order: loop ? t.musicOrder || "music" : "music",
+    loop: t.musicLoop || "crossfade", blend: (t.musicBlend == null ? 2000 : t.musicBlend) / 1000,
+  };
+}
+
+function fmtClock(sec) {
+  const s = Math.max(0, sec), m = Math.floor(s / 60);
+  return `${m}:${(s - m * 60).toFixed(1).padStart(4, "0")}`;
+}
+
+function parseClock(text) {
+  const m = /^\s*(?:(\d+):)?(\d+(?:\.\d*)?)\s*$/.exec(text);
+  return m ? (+(m[1] || 0)) * 60 + +m[2] : NaN;
+}
+
+/* The order things play in: segments [from, to] of the song (seconds), and
+   where the repeating starts (in segment `seg`, at song time `at`). The home
+   screen starts at the beginning of the first segment. */
+function playPlan(p) {
+  const M = [p.start, p.end], L = [p.loopStart, p.loopEnd];
+  const later = p.playFrom !== null && p.playFrom !== undefined && p.playFrom > p.start + 0.05 && p.playFrom < (p.end || Infinity);
+  switch (p.order) {
+    case "loop-first": return { segs: [L, M], seg: 1, at: M[0] };
+    case "alternate": return { segs: [L, M], seg: 0, at: L[0] };
+    case "music-first":
+      if (Math.abs(L[1] - M[1]) < 1e-6 && L[0] >= M[0] && L[0] < M[1]) return { segs: [M], seg: 0, at: L[0] };
+      return { segs: [M, L], seg: 1, at: L[0] };
+    default: return later ? { segs: [[p.playFrom, p.end], M], seg: 1, at: M[0] } : { segs: [M], seg: 0, at: M[0] };
+  }
+}
+
+// "0:10.0 to 0:40.0" for a segment; `songEnd` resolves an end of 0.
+const span = ([a, b], songEnd) => `${fmtClock(a)} to ${fmtClock(b || songEnd)}`;
+
+// From the beginning of the home music, in plain words.
+function describePlan(p, songEnd) {
+  const plan = playPlan(p), M = [p.start, p.end], L = [p.loopStart, p.loopEnd];
+  switch (p.order) {
+    case "loop-first": return `Plays ${span(L, songEnd)} once, then repeats ${span(M, songEnd)}.`;
+    case "alternate": return `Plays ${span(L, songEnd)}, then ${span(M, songEnd)}, over and over.`;
+    case "music-first": return `Plays ${span(M, songEnd)} once, then repeats ${span(L, songEnd)}.`;
+    default: return plan.segs.length > 1
+      ? `Plays ${span(plan.segs[0], songEnd)} once, then repeats ${span(M, songEnd)}.`
+      : `Repeats ${span(M, songEnd)}.`;
+  }
+}
+
+function partLabel(t) {
+  const part = themePart(t);
+  if (part.order === "music" && !part.start && !part.end && part.playFrom === null) return fmtTime(t.music);
+  return describePlan({ ...part, end: part.end || t.music, loopEnd: part.loopEnd || t.music }, t.music).replace(/\.$/, "");
+}
+
+/* What the home screen plays, cut from the theme's music in the chosen
+   order. `intro` is where the repeating starts in the result. Every joint (a
+   part into the next, and the jump back) is blended so it makes no click: a
+   crossfade leads the sound before the joint into the sound just before
+   where it continues (at the very start of the song, a fade instead); a fade
+   dips the sound on both sides; a cut leaves it as it is. */
+function buildHomeMusic(chans, rate, part) {
+  const n = chans[0].length, at = v => Math.max(0, Math.min(n, Math.round(v * rate)));
+  const p = { ...part };
+  if (p.order !== "music" && (p.loopStart === null || p.loopStart === undefined)) p.order = "music";
+  const plan = playPlan(p);
+  const segs = plan.segs.map(([a, b]) => {
+    const from = Math.min(at(a), n - 1);
+    return [from, b > 0 ? Math.max(from + 1, at(b)) : n];
+  });
+  const shortest = Math.min(...segs.map(([a, b]) => b - a));
+  const c = p.loop === "cut" ? 0 : Math.min(Math.round(p.blend * rate), Math.floor(shortest / 3));
+  let target = Math.max(segs[plan.seg][0], Math.min(at(plan.at), segs[plan.seg][1] - 1));
+  // A crossfade needs the sound before the loop start: at the very start of
+  // the song, the repeating starts that much later instead.
+  if (p.loop === "crossfade" && c > 0 && target < c && target + c < segs[plan.seg][1]) target += c;
+  const offsets = [];
+  let total = 0;
+  for (const [a, b] of segs) { offsets.push(total); total += b - a; }
+  const intro = offsets[plan.seg] + (target - segs[plan.seg][0]);
+  // Joints: [position in the result, song position the sound continues from,
+  // position in the result where that continuation sits].
+  const joints = segs.slice(1).map(([a], i) => [offsets[i + 1], a, offsets[i + 1]]);
+  joints.push([total, target, intro]);
+  const out = chans.slice(0, 2).map(x => {
+    const y = new Float32Array(total);
+    segs.forEach(([a, b], i) => y.set(x.subarray(a, b), offsets[i]));
+    for (const [end, from, landing] of joints) {
+      if (p.loop === "crossfade" && c > 0 && from >= c) {
+        for (let i = 0; i < c; i++) {
+          const ang = (i + 0.5) / c * Math.PI / 2;
+          y[end - c + i] = y[end - c + i] * Math.cos(ang) + x[from - c + i] * Math.sin(ang);
+        }
+      } else if (p.loop !== "cut" && c > 0) {
+        for (let i = 0; i < c; i++) {
+          const g = (i + 0.5) / c;
+          y[end - 1 - i] *= g;
+          y[landing + i] *= g;
+        }
+      }
+    }
+    return y;
+  });
+  // Where a sample of the result came from in the song (for the playhead).
+  const source = i => {
+    let k = segs.length - 1;
+    while (k > 0 && i < offsets[k]) k--;
+    return segs[k][0] + (i - offsets[k]);
+  };
+  return { chans: out, intro, source, joint: segs.length > 1 ? offsets[1] : -1 };
+}
+
+/* Open the part editor. `chans` is the music at `rate`; `fresh` means it has
+   not been saved to the theme yet. */
+async function openTrim(id, chans, rate, part, fresh) {
+  const stock = await stockAt9(HOME_MUSIC);
+  const duration = chans[0].length / rate;
+  const max = at9MaxSamples(stock) / stock.file.config.rate;      /* the whole result, which can be longer than the song */
+  const peaks = new Float32Array(2048);
+  const per = chans[0].length / (peaks.length / 2);
+  for (let b = 0; b < peaks.length / 2; b++) {
+    let lo = 0, hi = 0;
+    for (let i = Math.floor(b * per), stop = Math.min(chans[0].length, Math.floor((b + 1) * per)); i < stop; i++) {
+      const v = (chans[0][i] + chans[1][i]) / 2;
+      if (v < lo) lo = v; else if (v > hi) hi = v;
+    }
+    peaks[2 * b] = lo;
+    peaks[2 * b + 1] = hi;
+  }
+  const end = part.end > part.start ? Math.min(part.end, duration) : duration;
+  const hasLoop = part.loopStart !== null && part.loopStart !== undefined;
+  state.trim = {
+    id, chans, rate, duration, max, peaks, fresh, start: part.start, end, order: hasLoop ? part.order : "music",
+    playFrom: part.playFrom !== null && part.playFrom !== undefined ? part.playFrom : part.start,
+    loopStart: hasLoop ? part.loopStart : 0, loopEnd: hasLoop ? (part.loopEnd > 0 ? Math.min(part.loopEnd, duration) : duration) : 0,
+    loop: part.loop, blend: part.blend,
+  };
+  if (!hasLoop) defaultLoop(state.trim);
+  clampTrim("end");
+  setAspectFlag(aspectById("music"), true);
+  renderAspect(aspectById("music"));
+}
+
+// A starting loop part for an order: the second half of the music part for
+// "music part once", otherwise up to 30 seconds from its middle.
+function defaultLoop(t) {
+  const len = t.end - t.start;
+  if (t.order === "music-first") {
+    t.loopStart = t.start + len / 2;
+    t.loopEnd = t.end;
+  } else {
+    t.loopStart = t.start + len * 0.4;
+    t.loopEnd = Math.min(t.end, t.loopStart + Math.max(MIN_PART, Math.min(30, len * 0.3)));
+  }
+}
+
+function trimBody() {
+  const t = state.trim, loopOn = t.order !== "music";
+  const choice = LOOP_CHOICES.findIndex(([l, ms]) => l === t.loop && (l === "cut" || ms === Math.round(t.blend * 1000)));
+  const handle = (id, label, v, loop) => `<button class="handle${loop ? " loop" : ""}" id="${id}" role="slider" aria-label="${label}"
+      aria-valuemin="0" aria-valuemax="${t.duration.toFixed(1)}" aria-valuenow="${v.toFixed(1)}" aria-valuetext="${fmtClock(v)}" ${loop && !loopOn ? "hidden" : ""}></button>`;
+  const field = (id, label, v) => `<label class="field">${label}<input type="text" id="${id}" value="${fmtClock(v)}" inputmode="decimal" autocomplete="off"></label>`;
+  return `<div class="trim">
+      <p class="note">Choose the music part, and if you like a loop part and the order they play in. Drag the handles, move a selected handle with the arrow keys, or type the times.</p>
+      <div class="wave" id="wave"><canvas id="wave-canvas"></canvas>
+        ${handle("trim-start", "Music part start", t.start)}${handle("trim-end", "Music part end", t.end)}
+        ${handle("trim-lstart", "Loop part start", t.loopStart, true)}${handle("trim-lend", "Loop part end", t.loopEnd, true)}
+        <button class="handle from" id="trim-from" role="slider" aria-label="Begins at" aria-valuemin="0"
+          aria-valuemax="${t.duration.toFixed(1)}" aria-valuenow="${t.playFrom.toFixed(1)}" aria-valuetext="${fmtClock(t.playFrom)}" ${loopOn ? "hidden" : ""}></button>
+        <div class="start-flag" id="trim-flag" ${loopOn ? "" : "hidden"}></div>
+        <div class="playhead" id="trim-playhead" hidden></div></div>
+      <div class="legend"><span class="key start"></span>Begins here<span class="key music"></span>Music part${loopOn ? `<span class="key loop"></span>Loop part` : ""}</div>
+      <div class="trim-fields">${field("trim-start-time", "Music part starts", t.start)}${field("trim-end-time", "Music part ends", t.end)}
+        ${loopOn ? "" : field("trim-from-time", "Begins at", t.playFrom)}</div>
+      <div class="trim-fields">
+        <label class="field">Play order
+          <select id="trim-order">${ORDERS.map(([v, label]) => `<option value="${v}" ${v === t.order ? "selected" : ""}>${label}</option>`).join("")}</select></label>
+      </div>
+      ${loopOn ? `<div class="trim-fields">${field("trim-lstart-time", "Loop part starts", t.loopStart)}${field("trim-lend-time", "Loop part ends", t.loopEnd)}</div>` : ""}
+      <div class="trim-fields">
+        <label class="field">How the joints sound
+          <select id="trim-loop">${LOOP_CHOICES.map(([, , label], i) => `<option value="${i}" ${i === (choice < 0 ? 1 : choice) ? "selected" : ""}>${label}</option>`).join("")}</select></label>
+      </div>
+      <p class="note" id="trim-summary"></p>
+      <p class="note">${esc(MUSIC_PLACE_NOTE)}</p>
+      <div class="trim-actions">
+        <button class="btn sm" data-act="trim-play" id="trim-play">Play</button>
+        <button class="btn sm" data-act="trim-seam">Hear where it loops</button>
+        <button class="btn sm" data-act="trim-joint" id="trim-joint" ${playPlan(trimPart(t)).segs.length > 1 ? "" : "hidden"}>Hear the change of part</button>
+        <span class="spacer"></span>
+        <button class="btn sm ghost" data-act="trim-cancel">Cancel</button>
+        <button class="btn sm primary" data-act="trim-save">Use this</button>
+      </div>
+    </div>`;
+}
+
+const trimPart = t => ({
+  start: t.start, end: t.end, loop: t.loop, blend: t.blend, order: t.order,
+  playFrom: t.order === "music" && t.playFrom > t.start + 0.05 ? t.playFrom : null,
+  loopStart: t.order === "music" ? null : t.loopStart, loopEnd: t.order === "music" ? null : t.loopEnd,
+});
+
+// Length of what the home music file holds, in seconds.
+function trimLength(t) {
+  return playPlan(trimPart(t)).segs.reduce((n, [a, b]) => n + (b - a), 0);
+}
+
+// Keep both parts valid: each at least MIN_PART long, within the song, and
+// together within the console's length limit. `moved` names the edge that
+// changed (start, end, lstart, lend).
+function clampTrim(moved) {
+  const t = state.trim, d = t.duration, min = Math.min(MIN_PART, d);
+  const range = (a, b, movedA) => {
+    t[a] = Math.max(0, Math.min(t[a], d - min));
+    t[b] = Math.max(min, Math.min(t[b], d));
+    if (t[b] - t[a] < min) { if (movedA) t[a] = t[b] - min; else t[b] = t[a] + min; }
+  };
+  const musicFirst = t.order === "music-first";
+  range("start", "end", moved === "start");
+  const keepFrom = () => {
+    if (moved === "from" && t.playFrom - t.start < SNAP) t.playFrom = t.start;
+    t.playFrom = Math.max(t.start, Math.min(t.playFrom, t.end - 1));
+  };
+  keepFrom();
+  if (t.order !== "music") {
+    if (musicFirst && (moved === "lend" || moved === "end") && Math.abs(t.loopEnd - t.end) < SNAP + (moved === "end" ? 0.5 : 0)) t.loopEnd = t.end;
+    if (musicFirst && moved === "lstart" && Math.abs(t.loopStart - t.start) < SNAP) t.loopStart = t.start;
+    range("loopStart", "loopEnd", moved === "lstart");
+  }
+  for (let pass = 0; pass < 4; pass++) {
+    const over = trimLength(t) - t.max;
+    if (over <= 1e-6) break;
+    const shrinkLoop = (moved === "lstart" || moved === "lend") && t.order !== "music" && playPlan(trimPart(t)).segs.length > 1;
+    if (shrinkLoop && moved === "lstart") t.loopStart += over;
+    else if (shrinkLoop) t.loopEnd -= over;
+    else if (moved === "start") t.start += over;
+    else if (moved !== "from") t.end -= over;
+    if (moved === "from") t.playFrom += over;
+    range("start", "end", moved === "start");
+    keepFrom();
+    if (t.order !== "music") range("loopStart", "loopEnd", moved === "lstart");
+    moved = pass ? (moved === "end" ? "lend" : "end") : moved;
+  }
+}
+
+function drawTrim() {
+  const t = state.trim, canvas = $("#wave-canvas");
+  if (!t || !canvas) return;
+  const w = canvas.clientWidth, h = canvas.clientHeight, dpr = window.devicePixelRatio || 1;
+  canvas.width = Math.round(w * dpr);
+  canvas.height = Math.round(h * dpr);
+  const ctx = canvas.getContext("2d");
+  ctx.scale(dpr, dpr);
+  const loopOn = t.order !== "music";
+  const X = v => v / t.duration * w, cols = t.peaks.length / 2;
+  const x0 = X(t.start), x1 = X(t.end), l0 = loopOn ? X(t.loopStart) : -1, l1 = loopOn ? X(t.loopEnd) : -1;
+  let peak = 1e-6;
+  for (const v of t.peaks) peak = Math.max(peak, Math.abs(v));
+  ctx.fillStyle = "rgba(255, 255, 255, .07)";
+  ctx.fillRect(x0, 0, x1 - x0, h);
+  if (loopOn) {
+    ctx.fillStyle = "rgba(31, 124, 240, .22)";
+    ctx.fillRect(l0, 0, l1 - l0, h);
+  }
+  const wave = h - 14;
+  for (let x = 0; x < w; x++) {
+    let lo = 0, hi = 0;
+    for (let b = Math.floor(x / w * cols); b < Math.max(Math.floor((x + 1) / w * cols), Math.floor(x / w * cols) + 1); b++) {
+      lo = Math.min(lo, t.peaks[2 * b]);
+      hi = Math.max(hi, t.peaks[2 * b + 1]);
+    }
+    const y0 = wave / 2 - hi / peak * wave * 0.45, y1 = wave / 2 - lo / peak * wave * 0.45;
+    ctx.fillStyle = (x >= x0 && x <= x1) || (x >= l0 && x <= l1) ? "rgba(255, 255, 255, .92)" : "rgba(255, 255, 255, .2)";
+    ctx.fillRect(x, y0, 1, Math.max(1, y1 - y0));
+  }
+  ctx.fillStyle = "rgba(255, 255, 255, .55)";
+  ctx.fillRect(x0, h - 12, x1 - x0, 3);
+  if (loopOn) {
+    ctx.fillStyle = "#1f7cf0";
+    ctx.fillRect(l0, h - 6, l1 - l0, 4);
+  }
+  const first = playPlan(trimPart(t)).segs[0][0];
+  ctx.fillStyle = "#3fcf8e";
+  ctx.fillRect(X(first) - 1, 0, 2, h);
+  $("#trim-flag").style.left = `${canvas.offsetLeft + X(first)}px`;
+  for (const [id, v] of [["#trim-start", t.start], ["#trim-end", t.end], ["#trim-lstart", t.loopStart], ["#trim-lend", t.loopEnd], ["#trim-from", t.playFrom]]) {
+    const el = $(id);
+    el.style.left = `${canvas.offsetLeft + X(v)}px`;
+    el.setAttribute("aria-valuenow", v.toFixed(1));
+    el.setAttribute("aria-valuetext", fmtClock(v));
+  }
+  for (const [id, v] of [["#trim-start-time", t.start], ["#trim-end-time", t.end], ["#trim-lstart-time", t.loopStart], ["#trim-lend-time", t.loopEnd], ["#trim-from-time", t.playFrom]]) {
+    const field = $(id);
+    if (field && document.activeElement !== field) field.value = fmtClock(v);
+  }
+  const total = trimLength(t);
+  const limit = total > t.max * 0.8 || t.duration > t.max ? ` In all ${fmtClock(total)}; the console allows up to ${fmtClock(t.max)}.` : "";
+  $("#trim-summary").textContent = describePlan(trimPart(t), t.duration) + limit;
+  const joint = $("#trim-joint");
+  if (joint) joint.hidden = playPlan(trimPart(t)).segs.length < 2;
+}
+
+const HANDLES = { start: "#trim-start", end: "#trim-end", lstart: "#trim-lstart", lend: "#trim-lend", from: "#trim-from" };
+const EDGE_KEY = { start: "start", end: "end", lstart: "loopStart", lend: "loopEnd", from: "playFrom" };
+
+function trimFromPointer(e, which) {
+  const t = state.trim, r = $("#wave-canvas").getBoundingClientRect();
+  t[EDGE_KEY[which]] = Math.max(0, Math.min(1, (e.clientX - r.left) / r.width)) * t.duration;
+  clampTrim(which);
+  drawTrim();
+}
+
+// Wire up the editor after it is rendered.
+function setupTrim() {
+  const wave = $("#wave");
+  if (!wave || wave.dataset.ready) return;
+  wave.dataset.ready = "1";
+  let dragging = null;
+  wave.addEventListener("pointerdown", e => {
+    const t = state.trim, r = $("#wave-canvas").getBoundingClientRect(), v = (e.clientX - r.left) / r.width * t.duration;
+    dragging = Object.keys(HANDLES).find(k => e.target.id === HANDLES[k].slice(1));
+    if (!dragging) {
+      // Nearest edge. The lower band of the waveform belongs to the loop part,
+      // and with "repeat the music part" the upper band to the start point.
+      const y = (e.clientY - r.top) / r.height;
+      const lane = t.order !== "music" && y > 0.6 ? ["lstart", "lend"] : t.order === "music" && y < 0.3 ? ["from"] : ["start", "end"];
+      dragging = lane.reduce((a, b) => (Math.abs(v - t[EDGE_KEY[a]]) <= Math.abs(v - t[EDGE_KEY[b]]) ? a : b));
+    }
+    $(HANDLES[dragging]).classList.add("active");
+    wave.setPointerCapture(e.pointerId);
+    trimFromPointer(e, dragging);
+    e.preventDefault();
+  });
+  wave.addEventListener("pointermove", e => { if (dragging) trimFromPointer(e, dragging); });
+  const stop = () => {
+    if (!dragging) return;
+    $(HANDLES[dragging]).classList.remove("active");
+    $(HANDLES[dragging]).focus();
+    dragging = null;
+  };
+  wave.addEventListener("pointerup", stop);
+  wave.addEventListener("pointercancel", stop);
+  requestAnimationFrame(drawTrim);
+}
+
+/* ---- preview (the processed music, looping as the console loops it) ---- */
+
+let preview = null;
+
+function stopPreview() {
+  if (!preview) return;
+  cancelAnimationFrame(preview.frame);
+  clearTimeout(preview.timer);
+  try { preview.src.stop(); } catch (e) { /* already stopped */ }
+  preview.ctx.close();
+  preview = null;
+  const head = $("#trim-playhead"), play = $("#trim-play");
+  if (head) head.hidden = true;
+  if (play) play.textContent = "Play";
+}
+
+/* `around`: "loop" plays the seconds around the jump back, "joint" those
+   around the change of part; otherwise from the beginning. */
+function playPreview(around) {
+  stopPreview();
+  const t = state.trim;
+  const built = buildHomeMusic(t.chans, t.rate, trimPart(t));
+  const [L, R] = built.chans;
+  const Ctx = window.AudioContext || window.webkitAudioContext;
+  if (!Ctx) return toast("This browser cannot play audio previews.", "err");
+  const ctx = new Ctx(), buf = ctx.createBuffer(2, L.length, t.rate);
+  buf.copyToChannel(L, 0);
+  buf.copyToChannel(R, 1);
+  const src = ctx.createBufferSource();
+  src.buffer = buf;
+  src.loop = true;
+  src.loopStart = built.intro / t.rate;
+  src.loopEnd = buf.duration;
+  src.connect(ctx.destination);
+  const offset = around === "loop" ? Math.max(0, buf.duration - 4)
+    : around === "joint" && built.joint > 0 ? Math.max(0, built.joint / t.rate - 4) : 0;
+  src.start(0, offset);
+  preview = { ctx, src, offset, began: ctx.currentTime, frame: 0, timer: 0 };
+  if (around) preview.timer = setTimeout(stopPreview, 8000);
+  const play = $("#trim-play");
+  if (play && !around) play.textContent = "Stop";
+  const head = $("#trim-playhead"), intro = built.intro / t.rate, len = buf.duration;
+  const tick = () => {
+    if (!preview || !head) return;
+    let pos = preview.offset + preview.ctx.currentTime - preview.began;
+    if (pos >= len) pos = intro + (pos - intro) % (len - intro);
+    const canvas = $("#wave-canvas");
+    head.hidden = false;
+    if (canvas) head.style.left = `${canvas.offsetLeft + built.source(Math.floor(pos * t.rate)) / t.rate / t.duration * canvas.clientWidth}px`;
+    preview.frame = requestAnimationFrame(tick);
+  };
+  tick();
+}
+
+async function saveTrim() {
+  const t = state.trim;
+  stopPreview();
+  const part = trimPart(t);
+  const toEnd = v => (v >= t.duration - 0.05 ? 0 : Math.round(v * 1000));
+  const p = progressToast("Saving the music…");
+  try {
+    if (t.fresh) await uploadVerified("/api/theme/music", { id: t.id }, pcmWav(t.chans, t.rate));
+    await api("POST", "/api/theme/settings", {
+      id: t.id, start: Math.round(part.start * 1000), end: toEnd(part.end),
+      play_from: part.playFrom === null ? -1 : Math.round(part.playFrom * 1000),
+      loop_start: part.loopStart === null ? -1 : Math.round(part.loopStart * 1000),
+      loop_end: part.loopEnd === null ? -1 : toEnd(part.loopEnd),
+      order: part.order, loop: part.loop, blend: Math.round(part.blend * 1000),
+    });
+    await refreshStatus();
+    const r = await convertHomeMusic(t.id, buildHomeMusic(t.chans, t.rate, part), t.rate, themeById(t.id).gain || 0, p);
+    state.trim = null;
+    stamp = Date.now();
+    await refreshStatus();
+    p.done(`Home music set and verified (${fmtClock(r.seconds)}). Apply the theme to hear it.`, "ok");
+  } catch (e) {
+    await refreshStatus();
+    p.done(e.message, "err");
+  }
+  renderAspect(aspectById("music"));
+}
+
+function findGroup(asp, key) { return groupAssets(aspectAssets(asp)).find(g => g.key === key); }
+
+async function attachToAspect(asp, file) {
+  if (asp.mode === "music") return attachMusic(file);
+  const isVideo = file.type.startsWith("video/") || /\.(mp4|webm|m4v)$/i.test(file.name);
+  const off = bgOff();
+  const targets = aspectAssets(asp).filter(a => (isVideo ? a.kind === "video" : a.kind !== "video") && !off.has(areaOf(a.path)));
+  if (!targets.length) return toast(`No ${isVideo ? "video" : "image"} backgrounds in the areas switched on.`, "err");
+  const ok = await attachTo(targets, file, asp.title);
+  renderAspect(asp);
+  if (asp.id === "background" && ok) await previewFromFile(state.editId, file, isVideo);
+}
+
+async function attachToGroup(asp, key, file) {
+  const g = findGroup(asp, key);
+  if (!g) return;
+  await attachTo(g.assets, file, g.name);
+  renderAspect(asp);
+}
+
+/* Ask the console whether the theme's home music file still passes its
+   checks. Files from versions 1.10-1.12 do not: they fill unused space with
+   zeros, which the console's decoder plays as ticks or silence. */
+async function checkHomeMusic(id) {
+  let r;
+  try { r = await api("GET", "/api/theme/check", { id, path: HOME_MUSIC }); } catch (e) { return; }
+  const el = $("#home-music-status"), fix = $("#home-music-fix"), t = themeById(id);
+  if (!el || state.editId !== id) return;
+  if (r.ok) {
+    el.textContent = t && t.music ? "Encoded and verified" : "Home music file from an imported theme";
+  } else {
+    const m = /^the console cannot play this sound: it (.*?)\. Encode it again/.exec(r.error);
+    el.textContent = `The console cannot play this file: ${m ? `it ${m[1]}` : r.error}. ${t && t.music ? "Encode it again." : "Replace it."}`;
+    if (fix && t && t.music) fix.hidden = false;
+  }
+}
+
+/* Encode music (built by buildHomeMusic) into the theme's home music and
+   upload it. */
+async function convertHomeMusic(id, built, rate, gain, p) {
+  const r = await at9For(HOME_MUSIC, built.chans, rate, gain, f => p.set(`Encoding home music… ${Math.round(f * 100)}%`, 0.2 + f * 0.7),
+                         built.intro / rate);
+  p.set("Uploading home music…", 0.92);
+  await uploadVerified("/api/theme/file", { id, path: HOME_MUSIC }, r.blob);
+  if (id === state.editId) state.files.add(HOME_MUSIC);
+  return r;
+}
+
+/* A new song opens the part editor; nothing is saved until "Use this part".
+   The theme keeps the whole song (48 kHz WAV, up to about 11 minutes) so the
+   part and loudness can be changed later. */
+async function attachMusic(file) {
+  const id = state.editId;
+  const p = progressToast("Reading music…");
+  try {
+    let chans = await decodeAudio(file, MUSIC_RATE, 2);
+    const keep = Math.floor(MUSIC_SOURCE_MAX_BYTES / 4);
+    const long = chans[0].length > keep;
+    if (long) chans = trimWithFade(chans, keep, MUSIC_RATE);
+    await openTrim(id, chans, MUSIC_RATE, { start: 0, end: 0, loop: "crossfade", blend: 2 }, true);
+    p.done(long ? `Only the first ${fmtTime(keep / MUSIC_RATE)} of the song can be kept. Choose the part to use.`
+      : "Choose the part of the song to use.", "");
+    const handle = $("#trim-start");
+    if (handle) handle.focus();
+  } catch (e) { p.done(e.message, "err"); }
+}
+
+async function openThemePart(id) {
+  const p = progressToast("Reading the theme's music…");
+  try {
+    const res = await fetch(`/api/theme/music?${q({ id })}`);
+    if (!res.ok) throw new Error("this theme has no music");
+    const { chans, rate } = wavChannels(await res.arrayBuffer());
+    await openTrim(id, chans.length === 1 ? [chans[0], chans[0]] : chans, rate, themePart(themeById(id)), false);
+    p.done("Choose the part of the song to use.", "");
+  } catch (e) { p.done(e.message, "err"); }
+}
+
+/* Encode the theme's stored music again (new loudness, or music from before
+   version 1.10, which the plugin played itself). */
+async function reencodeMusic(id, gain) {
+  const p = progressToast("Reading the theme's music…");
+  try {
+    const res = await fetch(`/api/theme/music?${q({ id })}`);
+    if (!res.ok) throw new Error("this theme has no music to convert");
+    const { chans, rate } = wavChannels(await res.arrayBuffer());
+    const stereo = chans.length === 1 ? [chans[0], chans[0]] : chans;
+    const r = await convertHomeMusic(id, buildHomeMusic(stereo, rate, themePart(themeById(id))), rate, gain, p);
+    stamp = Date.now();
+    await refreshStatus();
+    p.done(`Home music encoded and verified (${fmtTime(r.seconds)}). Apply the theme to hear it.`, "ok");
+  } catch (e) { p.done(e.message, "err"); }
+}
+
+function pickFile(accept) {
+  return new Promise(resolve => {
+    const picker = $("#picker");
+    picker.value = "";
+    picker.accept = accept || "";
+    picker.onchange = () => resolve(picker.files[0] || null);
+    picker.click();
+  });
+}
+
+/* ================================================================ activity */
+
+async function renderActivity() {
+  view.innerHTML = `
+    <div class="head"><h1>Activity</h1><span class="spacer"></span>
+      <button class="btn" data-act="refresh-log">Refresh</button></div>
+    <div class="activity"><div id="crashes"></div><pre class="log" id="log">Loading…</pre></div>`;
+  await loadLog();
+}
+async function loadLog() {
+  const el = $("#log");
+  try {
+    const text = await api("GET", "/api/log");
+    el.textContent = text || "Nothing logged yet.";
+    el.scrollTop = el.scrollHeight;
+  } catch (e) { el.textContent = e.message; }
+  try {
+    const { crashes } = await api("GET", "/api/crashes");
+    $("#crashes").innerHTML = crashes.length ? `<div class="panel"><h2 style="margin-bottom:12px">Crash reports</h2>
+      <div class="rows">${crashes.sort().reverse().map(c => {
+        const when = new Date(parseInt(c.slice(6), 10) * 1000).toLocaleString();
+        return `<div class="row-item"><div class="info"><div class="file">${esc(when)}</div><div class="dir">${esc(c)}</div></div>
+          <div class="acts"><button class="btn sm" data-act="view-crash" data-name="${esc(c)}">View</button></div></div>`;
+      }).join("")}</div></div>` : "";
+  } catch (e) { $("#crashes").innerHTML = ""; }
+}
+
+/* ================================================================ zip import / export */
+
+async function readZip(file) {
+  const buf = new Uint8Array(await file.arrayBuffer());
+  const dv = new DataView(buf.buffer);
+  let eocd = -1;
+  for (let i = buf.length - 22; i >= Math.max(0, buf.length - 65557); i--) {
+    if (dv.getUint32(i, true) === 0x06054b50) { eocd = i; break; }
+  }
+  if (eocd < 0) throw new Error("Not a zip file");
+  const count = dv.getUint16(eocd + 10, true);
+  let p = dv.getUint32(eocd + 16, true);
+  const dec = new TextDecoder();
+  const entries = [];
+  for (let n = 0; n < count; n++) {
+    if (dv.getUint32(p, true) !== 0x02014b50) throw new Error("Damaged zip file");
+    const flags = dv.getUint16(p + 8, true), method = dv.getUint16(p + 10, true);
+    const crc = dv.getUint32(p + 16, true), size = dv.getUint32(p + 20, true);
+    const nameLen = dv.getUint16(p + 28, true), extraLen = dv.getUint16(p + 30, true), commentLen = dv.getUint16(p + 32, true);
+    const local = dv.getUint32(p + 42, true);
+    const name = dec.decode(buf.subarray(p + 46, p + 46 + nameLen));
+    p += 46 + nameLen + extraLen + commentLen;
+    if (name.endsWith("/")) continue;
+    if (flags & 1) throw new Error("Encrypted zip files are not supported");
+    const start = local + 30 + dv.getUint16(local + 26, true) + dv.getUint16(local + 28, true);
+    const data = buf.subarray(start, start + size);
+    entries.push({
+      path: name,
+      blob: async () => {
+        let blob;
+        if (method === 0) blob = new Blob([data]);
+        else if (method === 8) {
+          if (typeof DecompressionStream === "undefined") throw new Error("This browser cannot unzip; use a current Chrome, Edge, Firefox or Safari");
+          blob = await new Response(new Blob([data]).stream().pipeThrough(new DecompressionStream("deflate-raw"))).blob();
+        } else throw new Error(`${name}: unsupported compression`);
+        if (crc32(new Uint8Array(await blob.arrayBuffer())) !== crc) throw new Error(`${name} is damaged (checksum mismatch)`);
+        return blob;
+      },
+    });
+  }
+  return entries;
+}
+
+function makeZip(files) {
+  const enc = new TextEncoder();
+  const parts = [], central = [];
+  let offset = 0;
+  for (const f of files) {
+    const name = enc.encode(f.path), crc = crc32(f.data), size = f.data.length;
+    const lh = new DataView(new ArrayBuffer(30));
+    lh.setUint32(0, 0x04034b50, true); lh.setUint16(4, 20, true); lh.setUint16(6, 0x0800, true);
+    lh.setUint16(12, 33, true); lh.setUint32(14, crc, true); lh.setUint32(18, size, true); lh.setUint32(22, size, true);
+    lh.setUint16(26, name.length, true);
+    parts.push(lh, name, f.data);
+    const ch = new DataView(new ArrayBuffer(46));
+    ch.setUint32(0, 0x02014b50, true); ch.setUint16(4, 20, true); ch.setUint16(6, 20, true); ch.setUint16(8, 0x0800, true);
+    ch.setUint16(14, 33, true); ch.setUint32(16, crc, true); ch.setUint32(20, size, true); ch.setUint32(24, size, true);
+    ch.setUint16(28, name.length, true); ch.setUint32(42, offset, true);
+    central.push(ch, name);
+    offset += 30 + name.length + size;
+  }
+  const cdSize = central.reduce((n, x) => n + x.byteLength, 0);
+  const end = new DataView(new ArrayBuffer(22));
+  end.setUint32(0, 0x06054b50, true); end.setUint16(8, files.length, true); end.setUint16(10, files.length, true);
+  end.setUint32(12, cdSize, true); end.setUint32(16, offset, true);
+  return new Blob([...parts, ...central, end], { type: "application/zip" });
+}
+
+async function exportTheme(id) {
+  const t = themeById(id);
+  const p = progressToast(`Exporting ${t.name}…`);
+  try {
+    const { files } = await api("GET", "/api/theme/files", { id });
+    const out = [{ path: "theme.ini", data: new TextEncoder().encode(`name=${t.name}\nfw=${t.fw}\nmusic_gain=${t.gain || 0}\n` +
+      `music_start=${t.musicStart || 0}\nmusic_end=${t.musicEnd || 0}\n` +
+      `music_loop_start=${t.musicLoopStart == null ? -1 : t.musicLoopStart}\nmusic_loop_end=${t.musicLoopEnd == null ? -1 : t.musicLoopEnd}\n` +
+      `music_order=${t.musicOrder || "music"}\nmusic_play_from=${t.musicPlayFrom == null ? -1 : t.musicPlayFrom}\n` +
+      `music_loop=${t.musicLoop || "crossfade"}\nmusic_blend=${t.musicBlend == null ? 2000 : t.musicBlend}\n`) }];
+    const total = files.length + (t.music ? 1 : 0);
+    for (let i = 0; i < files.length; i++) {
+      const res = await fetch(`/api/theme/file?${q({ id, path: files[i].path })}`);
+      if (!res.ok) throw new Error(`Could not read ${files[i].path}`);
+      out.push({ path: "files" + files[i].path, data: new Uint8Array(await res.arrayBuffer()) });
+      p.set(`Exporting ${t.name}…`, (i + 1) / total);
+    }
+    if (t.music) {
+      const res = await fetch(`/api/theme/music?${q({ id })}`);
+      if (!res.ok) throw new Error("Could not read the music");
+      out.push({ path: "music.wav", data: new Uint8Array(await res.arrayBuffer()) });
+    }
+    for (const [kind, name] of PREVIEW_FILES) {
+      const res = await fetch(`/api/theme/preview?${q({ id, kind })}`);
+      if (res.ok) out.push({ path: name, data: new Uint8Array(await res.arrayBuffer()) });
+    }
+    const zip = makeZip(out);
+    const back = await readZip(new File([zip], "check.zip"));   /* verify before handing it over */
+    if (back.length !== out.length) throw new Error("export did not verify");
+    for (const e of back) await e.blob();
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(zip);
+    a.download = `${id}.zip`;
+    document.body.append(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 10000);
+    const mb = (zip.size / 1048576).toFixed(zip.size < 10485760 ? 1 : 0);
+    p.done(`Saved ${id}.zip: ${describeFiles(files.map(f => f.path)) || "no theme files"}` +
+      `${t.music ? ", the song" : ""}, ${mb} MB, verified.`, "ok");
+  } catch (e) { p.done(e.message, "err"); }
+}
+
+/* "15 backgrounds, the home music and 2 other files", for export and import. */
+function describeFiles(paths) {
+  const bg = paths.filter(x => BG_RE.test(x)).length, music = paths.includes(HOME_MUSIC);
+  const other = paths.length - bg - (music ? 1 : 0);
+  const parts = [bg ? plural(bg, "background") : "", music ? "the home music" : "", other ? plural(other, "other file") : ""].filter(Boolean);
+  return parts.length > 1 ? `${parts.slice(0, -1).join(", ")} and ${parts[parts.length - 1]}` : parts[0] || "";
+}
+
+function parseIni(text) {
+  const out = {};
+  text.split(/\r?\n/).forEach(l => { const i = l.indexOf("="); if (i > 0) out[l.slice(0, i).trim()] = l.slice(i + 1).trim(); });
+  return out;
+}
+
+async function importEntries(entries, fallbackName) {
+  const ini = entries.filter(e => /(^|\/)theme\.ini$/.test(e.path)).sort((a, b) => a.path.length - b.path.length)[0];
+  const meta = ini ? parseIni(await (await ini.blob()).text()) : {};
+  const prefix = ini ? ini.path.slice(0, -"theme.ini".length) : "";
+  const music = entries.find(e => e.path === prefix + "music.wav");
+  const pictures = PREVIEW_FILES.map(([kind, name]) => [kind, entries.find(e => e.path === prefix + name)]).filter(([, e]) => e);
+  /* Everything under the theme's files/ folder (the console decides what it
+     accepts); without a theme.ini, anything under a themable folder. */
+  const files = [];
+  const root = prefix + "files/";
+  for (const e of entries) {
+    if (ini && e.path.startsWith(root)) { files.push({ asset: "/" + e.path.slice(root.length), blob: e.blob }); continue; }
+    if (ini) continue;
+    const idx = Math.min(...ASSET_ROOTS.map(r => { const i = e.path.indexOf(r); return i < 0 ? Infinity : i; }));
+    if (idx !== Infinity && (idx === 0 || e.path[idx - 1] === "/")) files.push({ asset: "/" + e.path.slice(idx), blob: e.blob });
+  }
+  if (!files.length && !music) throw new Error("No theme files found. Expected theme.ini with files/system_ex/rnps/… or music.wav.");
+
+  const name = uniqueName(meta.name || fallbackName.replace(/\.zip$/i, ""));
+  const id = await createTheme(name, meta.fw || state.status.fw);
+  const gain = Math.max(-12, Math.min(12, parseInt(meta.music_gain, 10) || 0));
+  const settings = { id, gain };
+  for (const [key, param] of [["music_start", "start"], ["music_end", "end"], ["music_loop_start", "loop_start"],
+                              ["music_loop_end", "loop_end"], ["music_order", "order"], ["music_play_from", "play_from"],
+                              ["music_loop", "loop"], ["music_blend", "blend"]]) {
+    if (meta[key] !== undefined && meta[key] !== "") settings[param] = meta[key];
+  }
+  await api("POST", "/api/theme/settings", settings).catch(() => {});
+  await refreshStatus();
+  const p = progressToast(`Importing ${name}…`);
+  let ok = 0, skipped = 0;
+  const added = [], why = [];
+  const convert = music && !files.some(f => f.asset === HOME_MUSIC);   /* exported before 1.10 */
+  const total = files.length + (music ? 1 : 0) + (convert ? 1 : 0);
+  for (let i = 0; i < files.length; i++) {
+    try { await uploadVerified("/api/theme/file", { id, path: files[i].asset }, await files[i].blob()); ok++; added.push(files[i].asset); }
+    catch (e) { skipped++; why.push(`${baseName(files[i].asset)}: ${e.message}`); }
+    p.set(`Importing ${name}… ${i + 1}/${total}`, (i + 1) / total);
+  }
+  if (music) {
+    try {
+      const blob = await music.blob();
+      await uploadVerified("/api/theme/music", { id }, blob);
+      ok++;
+      if (convert) {
+        const { chans, rate } = wavChannels(await blob.arrayBuffer());
+        const stereo = chans.length === 1 ? [chans[0], chans[0]] : chans;
+        await convertHomeMusic(id, buildHomeMusic(stereo, rate, themePart(themeById(id) || {})), rate, gain, p);
+        ok++;
+        added.push(HOME_MUSIC);
+      }
+    } catch (e) { skipped++; why.push(`music: ${e.message}`); }
+  }
+  for (const [kind, e] of pictures) {
+    try { await uploadVerified("/api/theme/preview", { id, kind }, await e.blob()); } catch (err) { /* optional */ }
+  }
+  await api("POST", "/api/theme/save", { id }).catch(() => {});   /* an imported theme starts saved */
+  await refreshStatus();
+  const got = describeFiles(added) || "no theme files";
+  p.done(skipped
+    ? `Imported ${name}: ${got}, verified. ${skipped} skipped (not on this firmware or not valid here): ${why.slice(0, 2).join("; ")}`
+    : `Imported ${name}: ${got}, all verified.`, skipped ? "" : "ok");
+  if (state.route === "library") render();
+}
+
+function readDirEntry(entry) {
+  return new Promise(resolve => {
+    const reader = entry.createReader(), all = [];
+    const next = () => reader.readEntries(batch => { if (!batch.length) return resolve(all); all.push(...batch); next(); }, () => resolve(all));
+    next();
+  });
+}
+async function walk(entry, out) {
+  if (entry.isFile) out.push({ path: entry.fullPath.replace(/^\//, ""), blob: () => new Promise((res, rej) => entry.file(res, rej)) });
+  else if (entry.isDirectory) for (const child of await readDirEntry(entry)) await walk(child, out);
+}
+async function importDrop(dt) {
+  const roots = Array.from(dt.items || []).filter(i => i.kind === "file")
+    .map(i => i.webkitGetAsEntry && i.webkitGetAsEntry()).filter(Boolean);
+  try {
+    if (roots.some(r => r.isDirectory)) {
+      for (const root of roots.filter(r => r.isDirectory)) {
+        const entries = [];
+        await walk(root, entries);
+        await importEntries(entries, root.name);
+      }
+      return;
+    }
+    for (const file of Array.from(dt.files)) await importFile(file);
+  } catch (e) { toast(e.message, "err", 9000); }
+}
+async function importFile(file) {
+  if (!/\.zip$/i.test(file.name)) throw new Error(`${file.name} is not a .zip theme`);
+  await importEntries(await readZip(file), file.name);
+}
+
+/* ================================================================ events */
+
+document.addEventListener("click", async e => {
+  const el = e.target.closest("[data-act], .tile");
+  if (!el || el.disabled) return;
+
+  if (el.classList.contains("tile")) {
+    const asp = aspectById(el.dataset.aspect);
+    const file = await pickFile(asp.accept);
+    if (file) attachToGroup(asp, el.dataset.group, file);
+    return;
+  }
+  const id = el.dataset.id;
+  const asp = el.dataset.aspect && aspectById(el.dataset.aspect);
+  switch (el.dataset.act) {
+    case "apply": return applyTheme(id);
+    case "export": return exportTheme(id);
+    case "duplicate": return duplicateTheme(id);
+    case "save": return saveTheme(id);
+    case "discard": return discardTheme(id, el);
+    case "delete": return armDelete(el, id);
+    case "new": state.creating = true; return renderLibrary();
+    case "new-from-editor": state.creating = true; location.hash = "#/library"; return;
+    case "cancel-new": state.creating = false; return renderLibrary();
+    case "import": {
+      const file = await pickFile(".zip,application/zip");
+      if (file) importFile(file).catch(err => toast(err.message, "err", 9000));
+      return;
+    }
+    case "toggle": {
+      if (aspectOn(asp)) {
+        if (aspectReplaced(asp)) { state.confirming = asp.id; renderAspect(asp); return; }
+        setAspectFlag(asp, false);
+      } else {
+        setAspectFlag(asp, true);
+      }
+      renderAspect(asp);
+      $(`#aspect-${asp.id} .switch`).focus();
+      return;
+    }
+    case "confirm-off":
+      state.confirming = "";
+      if (asp.mode === "music") await removeMusic();
+      else await resetAssets(aspectAssets(asp));
+      await refreshStatus();
+      setAspectFlag(asp, false);
+      toast(`${asp.title} is back to stock in this theme.`, "ok");
+      return renderAspect(asp);
+    case "cancel-off": state.confirming = ""; return renderAspect(asp);
+    case "attach-aspect": {
+      const file = await pickFile(asp.mode === "music" ? "audio/*" : asp.accept);
+      if (file) attachToAspect(asp, file);
+      return;
+    }
+    case "attach-group": {
+      const file = await pickFile(asp.accept);
+      if (file) attachToGroup(asp, el.dataset.group, file);
+      return;
+    }
+    case "reset-group": {
+      const g = findGroup(asp, el.dataset.group);
+      if (g) { await resetAssets(g.assets); renderAspect(asp); }
+      return;
+    }
+    case "reset-aspect": await resetAssets(aspectAssets(asp)); return renderAspect(asp);
+    case "remove-music":
+      await removeMusic();
+      toast("Home music is back to stock in this theme.", "ok");
+      return renderAspect(aspectById("music"));
+    case "convert-music":
+      await reencodeMusic(state.editId, themeById(state.editId).gain || 0);
+      return renderAspect(aspectById("music"));
+    case "choose-part": return openThemePart(state.editId);
+    case "choose-cover": return chooseCover();
+    case "remove-cover": return removePreview(state.editId, "picture");
+    case "trim-play": return preview && !preview.timer ? stopPreview() : playPreview("");
+    case "trim-seam": return playPreview("loop");
+    case "trim-joint": return playPreview("joint");
+    case "trim-cancel":
+      stopPreview();
+      state.trim = null;
+      return renderAspect(aspectById("music"));
+    case "trim-save": return saveTrim();
+    case "more": state.pages[asp.id] = (state.pages[asp.id] || 48) + 96; return renderAspect(asp);
+    case "toggle-area": {
+      const off = bgOff();
+      if (off.has(el.dataset.area)) off.delete(el.dataset.area); else off.add(el.dataset.area);
+      setBgOff(off);
+      renderAspect(aspectById("background"));
+      const again = document.querySelector(`[data-act="toggle-area"][data-area="${CSS.escape(el.dataset.area)}"]`);
+      if (again) again.focus();
+      return;
+    }
+    case "refresh-log": return loadLog();
+    case "view-crash":
+      try { $("#log").textContent = await api("GET", "/api/crash", { name: el.dataset.name }); }
+      catch (err) { toast(err.message, "err"); }
+      return;
+  }
+});
+
+document.addEventListener("submit", async e => {
+  if (e.target.id !== "create") return;
+  e.preventDefault();
+  const name = $("#new-name").value.trim();
+  if (!name) return;
+  try {
+    const id = await createTheme(name, $("#new-fw").value);
+    state.creating = false;
+    location.hash = `#/edit/${encodeURIComponent(id)}`;
+  } catch (err) { toast(err.message, "err"); }
+});
+
+let filterTimer = 0;
+document.addEventListener("input", e => {
+  const aspId = e.target.dataset && e.target.dataset.filterAspect;
+  if (aspId) {
+    state.filters[aspId] = e.target.value;
+    state.pages[aspId] = 48;
+    clearTimeout(filterTimer);
+    filterTimer = setTimeout(() => {
+      renderAspect(aspectById(aspId));
+      const input = $(`[data-filter-aspect="${aspId}"]`);
+      if (input) { input.focus(); input.setSelectionRange(input.value.length, input.value.length); }
+    }, 250);
+  }
+  if (e.target.id === "music-gain") $("#gain-label").textContent = gainLabel(+e.target.value);
+  const timeField = { "trim-start-time": "start", "trim-end-time": "end", "trim-lstart-time": "lstart", "trim-lend-time": "lend",
+                      "trim-from-time": "from" }[e.target.id];
+  if (timeField && state.trim) {
+    const v = parseClock(e.target.value);
+    if (!isNaN(v)) { state.trim[EDGE_KEY[timeField]] = v; clampTrim(timeField); drawTrim(); }
+  }
+});
+
+document.addEventListener("change", async e => {
+  const t = e.target;
+  if (t.id === "theme-select") { location.hash = `#/edit/${encodeURIComponent(t.value)}`; return; }
+  if (t.id === "fit") { state.fit = t.value; localSet("fit", state.fit); return; }
+  try {
+    if (t.id === "theme-name" && t.value.trim()) {
+      await api("POST", "/api/theme/settings", { id: state.editId, name: t.value.trim() });
+      await refreshStatus();
+      $("#theme-select").querySelector(`option[value="${CSS.escape(state.editId)}"]`).textContent = t.value.trim();
+      toast("Name saved.", "ok");
+    }
+    if (t.id === "theme-fw") {
+      await api("POST", "/api/theme/settings", { id: state.editId, fw: t.value });
+      await refreshStatus();
+      toast("Firmware saved.", "ok");
+    }
+    if (t.id === "trim-loop" && state.trim) {
+      const [loop, ms] = LOOP_CHOICES[+t.value];
+      Object.assign(state.trim, { loop, blend: ms / 1000 });
+      if (preview) stopPreview();
+      return;
+    }
+    if (t.id === "trim-order" && state.trim) {
+      const tr = state.trim, was = tr.order;
+      stopPreview();
+      tr.order = t.value;
+      if (was === "music" || (t.value === "music-first") !== (was === "music-first")) defaultLoop(tr);
+      clampTrim("lend");
+      renderAspect(aspectById("music"));
+      $("#trim-order").focus();
+      return;
+    }
+    if (/^trim-(l?(start|end)|from)-time$/.test(t.id) && state.trim) { drawTrim(); return; }
+    if (t.id === "music-gain") {
+      const id = state.editId;
+      await api("POST", "/api/theme/settings", { id, gain: t.value });
+      await refreshStatus();
+      await reencodeMusic(id, +t.value);
+      renderAspect(aspectById("music"));
+    }
+  } catch (err) { toast(err.message, "err"); }
+});
+
+/* Drag and drop: onto a drop zone, tile or row attaches a file; elsewhere in
+   the Library it imports a theme. */
+const drop = $("#drop");
+let dragDepth = 0;
+const hasFiles = e => Array.from(e.dataTransfer?.types || []).includes("Files");
+const dropTarget = e => e.target.closest && e.target.closest("[data-drop], .tile, [data-drop-group]");
+window.addEventListener("dragenter", e => {
+  if (!hasFiles(e)) return;
+  dragDepth++;
+  if (state.route === "library") drop.classList.add("on");
+});
+window.addEventListener("dragleave", e => {
+  if (!hasFiles(e)) return;
+  dragDepth = Math.max(0, dragDepth - 1);
+  if (!dragDepth) drop.classList.remove("on");
+});
+window.addEventListener("dragover", e => {
+  if (!hasFiles(e)) return;
+  e.preventDefault();
+  document.querySelectorAll(".drag").forEach(el => el.classList.remove("drag"));
+  const target = dropTarget(e);
+  if (target) target.classList.add("drag");
+  e.dataTransfer.dropEffect = state.route === "edit" && !target ? "none" : "copy";
+});
+window.addEventListener("drop", e => {
+  if (!hasFiles(e)) return;
+  e.preventDefault();
+  dragDepth = 0;
+  drop.classList.remove("on");
+  document.querySelectorAll(".drag").forEach(el => el.classList.remove("drag"));
+  const target = dropTarget(e);
+  const file = e.dataTransfer.files[0];
+  if (target && file) {
+    const asp = aspectById(target.dataset.drop || target.dataset.aspect);
+    if (target.dataset.drop) attachToAspect(asp, file);
+    else attachToGroup(asp, target.dataset.group || target.dataset.dropGroup, file);
+  } else if (state.route === "library") {
+    importDrop(e.dataTransfer);
+  }
+});
+
+window.addEventListener("hashchange", () => {
+  const left = state.route === "edit" ? themeById(state.editId) : null;
+  state.confirming = "";
+  stopPreview();
+  state.trim = null;
+  render();
+  view.focus({ preventScroll: true });
+  if (left && left.unsaved && !(state.route === "edit" && state.editId === left.id)) {
+    toast(`${left.name} has unsaved changes. Open it again to save or discard them.`, "", 7000);
+  }
+});
+
+/* Handles of the part editor: arrow keys move by 0.1 s (Shift: 1 s), Page keys
+   by 10 s, Home/End to the limits. A PS5 controller's D-pad sends arrows. */
+document.addEventListener("keydown", e => {
+  const which = Object.keys(HANDLES).find(k => HANDLES[k].slice(1) === e.target.id);
+  if (!state.trim || !which) return;
+  const t = state.trim, key = EDGE_KEY[which];
+  const step = { ArrowLeft: -0.1, ArrowDown: -0.1, ArrowRight: 0.1, ArrowUp: 0.1, PageDown: -10, PageUp: 10 }[e.key];
+  if (step !== undefined) t[key] += step * (e.shiftKey && Math.abs(step) < 1 ? 10 : 1);
+  else if (e.key === "Home") t[key] = 0;
+  else if (e.key === "End") t[key] = t.duration;
+  else return;
+  e.preventDefault();
+  clampTrim(which);
+  drawTrim();
+});
+window.addEventListener("resize", () => { if (state.trim) drawTrim(); });
+
+(async () => {
+  if (!location.hash) history.replaceState(null, "", "#/library");
+  await refreshStatus();
+  render();
+  let tick = 0;
+  setInterval(async () => {
+    tick++;
+    if (document.hidden || state.route !== "library" || state.creating) return;
+    if (!state.status.applying && tick % 4) return;   /* every second while a theme is being applied */
+    const before = JSON.stringify(state.status);
+    if (await refreshStatus() && JSON.stringify(state.status) !== before) renderLibrary();
+  }, 1000);
+})();
+</script>
+</body>
+</html>

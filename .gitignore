@@ -1,0 +1,5 @@
+build/
+build-host/
+*.elf
+*.plugin
+.DS_Store
