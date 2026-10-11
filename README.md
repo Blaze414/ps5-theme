@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="assets/icon0.png" alt="The PS5 Themes icon" width="128">
+</p>
+
 # PS5 Themes (ps5-theme)
 
 Custom home-screen themes for jailbroken PS5 consoles on firmware 13.60 and
