@@ -987,9 +987,11 @@ api_handoff(request_t *req) {
      ntohl(peer.sin_addr.s_addr) != INADDR_LOOPBACK) {
     return respond_error(req->fd, 403, "only the console itself can ask for this");
   }
+  char pid[16] = "";
+  get_param(req->query, "pid", pid, sizeof(pid));
   log_msg("a newer copy of the plugin asked to take over");
   respond_ok(req->fd);
-  request_handoff();
+  request_handoff(atoi(pid));
 }
 
 

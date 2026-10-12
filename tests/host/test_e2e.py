@@ -261,6 +261,21 @@ def mounts_on(point):
         return [l for l in f if l.split()[4] == point]
 
 
+def stage_records(name):
+    """Stage folders recorded in BASE/live (the applied theme's) or BASE/spare."""
+    try:
+        lines = open(f"{BASE}/{name}").read().splitlines()
+    except FileNotFoundError:
+        return []
+    return [l.split("\t")[2] for l in lines if l.startswith("stage\t")]
+
+
+def live_stage(real):
+    """The applied theme's stage folder for the system folder `real`."""
+    lines = open(f"{BASE}/live").read().splitlines()
+    return next(l.split("\t")[2] for l in lines if l.startswith("stage\t") and l.split("\t")[3] == real)
+
+
 def log_text():
     with open(LOG) as f:
         return f.read()
@@ -273,7 +288,7 @@ S = {}  # shared state between ordered tests
 
 def t_startup():
     s = status()
-    assert s["fw"] == "13.42" and s["version"] == "1.24" and s["themes"] == [], s
+    assert s["fw"] == "13.42" and s["version"] == "1.30" and s["themes"] == [], s
     listing = open(f"{BASE}/dump/assets-v2-13.42.txt").read()
     assert f"{VSH}/bg_hub_default.dds.zst" in listing
     assert f"{HOME}/bg.png" in listing and "/mnt/rnps/apps/NPXS40099/a.png" in listing
@@ -283,7 +298,7 @@ def t_startup():
     assert open("/tmp/tile-registered").read().strip() == "THEM00001"
     assert "starting" in log_text()
     notes = open("/tmp/notifications.txt").read()
-    assert "ps5-theme 1.24 starting" in notes and "ps5-theme ready" in notes, notes
+    assert "ps5-theme 1.30 starting" in notes and "ps5-theme ready" in notes, notes
 
 
 def t_ui_and_icon_served():
@@ -394,10 +409,13 @@ def t_stock_mirror_and_linked_staging():
     assert os.path.exists(mark), "no stock copy was kept"
     stage = [d for d in os.listdir(f"{BASE}/stage")]
     assert len(stage) >= 1 and all(d.startswith("g") for d in stage), stage
-    staged = next(f"{BASE}/stage/{d}" for d in stage if os.path.exists(f"{BASE}/stage/{d}/icon.png"))
-    # Untouched files are links to the stock copy; replaced ones are separate files.
+    staged = live_stage(HOME)
+    # Untouched files are links to the stock copy; replaced ones are links to
+    # the theme's own files, nothing is copied.
+    theme = f"{BASE}/themes/night/files{HOME}"
     assert os.stat(f"{staged}/icon.png").st_ino == os.stat(f"{mirror}/icon.png").st_ino
     assert os.stat(f"{staged}/bg.png").st_ino != os.stat(f"{mirror}/bg.png").st_ino
+    assert os.stat(f"{staged}/bg.png").st_ino == os.stat(f"{theme}/bg.png").st_ino
     assert crc_file(f"{mirror}/bg.png") == S["stock_bg"], "the stock copy changed"
     assert crc_file(f"{mirror}/icon.png") == S["stock_icon"]
     assert status()["applying"] == ""
@@ -430,8 +448,122 @@ def t_stock_mirror_and_linked_staging():
     assert all(text for _, text in seen), seen
     assert crc_file(f"{mirror}/bg.png") == S["stock_bg"], "stock copy taken from the theme"
     assert crc_file(f"{HOME}/bg.png") == zlib.crc32(S["bg"])
+    # Re-applying with nothing changed: no file is checked again, and the
+    # overlays are confirmed without re-reading the files.
+    before = len(applies())
+    assert "0 file(s) compared by content" in applies()[-1], applies()[-1]
+    assert call("POST", "/api/apply", {"id": "night"})[0] == 200
+    end = time.time() + 30
+    while len(applies()) == before:
+        assert time.time() < end, "the re-apply did not finish"
+        time.sleep(0.2)
+    last = applies()[-1]
+    assert "3 check(s) remembered, 0 file(s) compared by content" in last, last
+    wait_applied("night")
     assert len(mounts_on(HOME)) == 1 and open(f"{BASE}/mounts").read() == f"{HOME}\n"
     assert all(d.startswith("g") for d in os.listdir(f"{BASE}/stage"))
+
+
+def applies():
+    """The summary line each apply logs."""
+    return [l for l in log_text().splitlines() if "folder(s) reused" in l]
+
+
+def progress_during(action):
+    """(percent, text) pairs the manager shows while `action` runs."""
+    seen, stop = [], threading.Event()
+
+    def sample():
+        while not stop.is_set():
+            p = status()["progress"]
+            if p is not None and (not seen or seen[-1] != (p["percent"], p["text"])):
+                seen.append((p["percent"], p["text"]))
+            time.sleep(0.005)
+    sampler = threading.Thread(target=sample)
+    sampler.start()
+    try:
+        action()
+    finally:
+        stop.set()
+        sampler.join()
+    return seen
+
+
+def apply_and_wait(theme):
+    before = len(applies())
+    assert call("POST", "/api/apply", {"id": theme})[0] == 200
+    end = time.time() + 60
+    while len(applies()) == before:
+        assert time.time() < end, "the apply did not finish"
+        time.sleep(0.2)
+    wait_applied(theme)
+    return applies()[-1]
+
+
+def reboot_console():
+    """Like a reboot: the plugin stops and every overlay is gone."""
+    S["plugin"].kill()
+    for on in reversed(open(f"{BASE}/mounts").read().split()):
+        if EMULATED:
+            os.unlink(on)
+            os.rename(on + ".ps5theme-under", on)
+        else:
+            subprocess.run(["umount", on], check=True)
+
+
+def t_stage_folders_reused_without_links():
+    """Where hard links don't work (the console's /data), stage folders hold
+    copies, and are reused while nothing changed: on re-apply and after a reboot."""
+    S["plugin"].term()
+    S["plugin"] = Plugin(env={"PS5THEME_TEST_NO_LINKS": "1"})
+    wait_applied("night")
+    # A changed file: the folder is built again, with copies.
+    assert put_file("night", f"{HOME}/bg.png", S["bg"] + b"")[0] == 200   # same bytes, a new file
+    last = apply_and_wait("night")
+    assert "0 of 1 folder(s) reused" in last, last
+    assert "hard links aren't available here" in log_text()
+    staged = live_stage(HOME)
+    assert os.stat(f"{staged}/bg.png").st_ino != os.stat(f"{BASE}/themes/night/files{HOME}/bg.png").st_ino, "not a copy"
+
+    # Nothing changed: reused, and no file read again.
+    last = apply_and_wait("night")
+    assert "1 of 1 folder(s) reused" in last and "0 file(s) compared by content" in last, last
+    assert crc_file(f"{HOME}/bg.png") == zlib.crc32(S["bg"])
+
+    # After a reboot the overlays are gone, but the stage folder is kept and reused.
+    reboot_console()
+    S["plugin"] = Plugin(env={"PS5THEME_TEST_NO_LINKS": "1"})
+    s = wait_applied("night")
+    last = applies()[-1]
+    assert "1 of 1 folder(s) reused" in last and "0 file(s) compared by content" in last, last
+    assert len(mounts_on(HOME)) == 1 and crc_file(f"{HOME}/bg.png") == zlib.crc32(S["bg"])
+    # No leftovers: the applied theme's folder, and the one from before the
+    # edit kept as a spare.
+    kept = stage_records("live") + stage_records("spare")
+    assert len(kept) == 2 and sorted(f"{BASE}/stage/{d}" for d in os.listdir(f"{BASE}/stage")) == sorted(kept), kept
+
+    # A large folder that has to be copied says how far the copy has got.
+    assert call("POST", "/api/themes", {"id": "big"})[0] == 200
+    assert put_file("big", f"{BULK}/hero.png", png(100, 100, (9, 9, 99)))[0] == 200
+    night = live_stage(HOME)
+    seen = progress_during(lambda: apply_and_wait("big"))
+    copying = [t for _, t in seen if re.fullmatch(r"Preparing the theme: \d+ of 7\d MB", t)]
+    assert copying, seen
+    percents = [p for p, _ in seen]
+    assert percents == sorted(percents), seen
+    assert stage_records("spare") == [night] and not mounts_on(HOME), "the previous theme's folder was not kept"
+
+    # Switching back reuses the previous theme's folder: nothing is copied.
+    big = live_stage(BULK)
+    last = apply_and_wait("night")
+    assert "1 of 1 folder(s) reused" in last and "0 file(s) compared by content" in last, last
+    assert crc_file(f"{HOME}/bg.png") == zlib.crc32(S["bg"]) and not mounts_on(BULK)
+    assert stage_records("spare") == [big] and len(os.listdir(f"{BASE}/stage")) == 2, os.listdir(f"{BASE}/stage")
+    assert call("DELETE", "/api/themes", {"id": "big"})[0] == 200
+
+    S["plugin"].term()
+    S["plugin"] = Plugin()
+    wait_applied("night")
 
 
 def t_firmware_mismatch_is_refused():
@@ -495,12 +627,23 @@ def t_concurrent_requests_during_apply():
 
 
 def t_restore_stock_cleans_up():
+    bulk = live_stage(BULK)
     assert call("POST", "/api/apply", {"id": "none"})[0] == 200
     s = wait_applied("")
     assert s["result"] == "Stock home screen.", s
     assert not mounts_on(HOME) and not mounts_on(BULK)
     assert crc_file(f"{HOME}/bg.png") == S["stock_bg"]
-    assert os.listdir(f"{BASE}/stage") == [] and not os.path.exists(f"{BASE}/mounts")
+    assert not os.path.exists(f"{BASE}/mounts") and not os.path.exists(f"{BASE}/live")
+    # Only the folder of the theme that was shown is kept, unmounted, for
+    # going back to it.
+    assert stage_records("spare") == [bulk], stage_records("spare")
+    assert [f"{BASE}/stage/{d}" for d in os.listdir(f"{BASE}/stage")] == [bulk], os.listdir(f"{BASE}/stage")
+    last = apply_and_wait("bulk")
+    assert "1 of 1 folder(s) reused" in last, last
+    bulk = live_stage(BULK)
+    assert call("POST", "/api/apply", {"id": "none"})[0] == 200
+    wait_applied("")
+    assert not mounts_on(BULK) and stage_records("spare") == [bulk]
 
 
 def t_recovers_after_hard_kill():
@@ -540,13 +683,15 @@ def plain_elf(version, binary=ASAN):
     return data[:marker.start()] + f"PS5THEME-VERSION:{version}:THEM00001".encode() + data[marker.end():]
 
 
-def take_over(path, data, version):
+def take_over(path, data, version, boot=False):
     """Put a newer copy at `path` and let a stand-in for the ELF loader on port
     9021 run what the plugin sends it. Returns what the loader received, once
-    the new copy has taken over and the old one has exited."""
-    s = wait_applied("night")
-    assert not s["applying"], s
-    old, received, started = S["plugin"], [], threading.Event()
+    the new copy has taken over and the old one has exited. With `boot`, the
+    old copy is started only then, as etaHEN does after a restart."""
+    if not boot:
+        s = wait_applied("night")
+        assert not s["applying"], s
+    received, started = [], threading.Event()
     srv = socket.socket()
     srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     srv.bind(("127.0.0.1", 9021))
@@ -574,6 +719,9 @@ def take_over(path, data, version):
     write(path + ".tmp", data)
     os.rename(path + ".tmp", path)
     try:
+        if boot:
+            S["plugin"] = Plugin()
+        old = S["plugin"]
         assert started.wait(45), "the newer copy was not started"
         end = time.time() + 30
         while old.alive():
@@ -654,8 +802,60 @@ def t_update_hands_over():
             assert conn.getresponse().status == 403
             conn.close()
         assert S["plugin"].alive()
+
+        # A copy that asked to take over but has gone since is not handed
+        # over to: stepping aside then would leave nothing running.
+        gone = subprocess.Popen(["true"])
+        gone.wait()
+        assert call("POST", "/api/handoff", {"pid": str(gone.pid)})[0] == 200
+        end = time.time() + 10
+        while "is gone; this copy carries on" not in log_text():
+            assert time.time() < end, "the request of a copy that is gone was not noticed"
+            time.sleep(0.2)
+        time.sleep(1.5)
+        assert S["plugin"].alive() and status()["applied"] == "night"
     finally:
         shutil.rmtree("/data/etaHEN", ignore_errors=True)
+
+
+def t_failed_write_closes_its_file():
+    """A settings write that fails at fsync closes its file, leaves no temp file
+    and keeps the old theme.ini; the next write works."""
+    ini = f"{BASE}/themes/night/theme.ini"
+    before_ini = open(ini, "rb").read()
+    fds = lambda: len(os.listdir(f"/proc/{S['plugin'].proc.pid}/fd"))
+    before = fds()
+    write("/tmp/ps5-theme-fail-fsync", b"")
+    try:
+        for _ in range(25):
+            assert call("POST", "/api/theme/settings", {"id": "night", "gain": "-3"})[0] == 500
+    finally:
+        os.unlink("/tmp/ps5-theme-fail-fsync")
+    time.sleep(0.5)
+    assert fds() <= before + 3, f"file descriptors leaked: {before} -> {fds()}"
+    assert not os.path.exists(ini + ".tmp") and open(ini, "rb").read() == before_ini
+    assert call("POST", "/api/theme/settings", {"id": "night", "gain": "0"})[0] == 200
+    assert call("POST", "/api/theme/save", {"id": "night"})[0] == 200
+
+
+def t_update_at_boot():
+    """After a restart etaHEN starts the old copy while a newer one waits in the
+    update folder. The old copy starts it and steps aside before doing anything
+    else; the newer copy puts the theme back. Something is running throughout."""
+    wait_applied("night")
+    reboot_console()
+    start = len(log_text())
+    try:
+        take_over(f"{BASE}/update/ps5-theme.elf", plain_elf("9.96"), "9.96", boot=True)
+    finally:
+        os.unlink(f"{BASE}/update/ps5-theme.elf")
+    s = wait_applied("night")
+    assert S["plugin"].alive() and len(mounts_on(HOME)) == 1, s
+    assert crc_file(f"{HOME}/bg.png") == zlib.crc32(S["bg"])
+    text = log_text()[start:]
+    assert "the running copy did not hand over" not in text, text
+    assert "carrying on with" not in text, "the old copy applied before handing over"
+    assert text.index("handing over to the new copy") < text.index("putting 'Night' back"), text
 
 
 def raw(data, read=True):
@@ -812,6 +1012,8 @@ def t_media_policy():
         ("sounds/move.wav", wav(44100, 1, 0.1, 3000), 422, "48000 Hz"),
         ("sounds/move.wav", wav(48000, 2, 0.1, 3000), 422, "channel"),
         ("sounds/move.wav", b"RIFFnope", 422, "valid WAV"),
+        # A chunk size near 4 GB once made the chunk walk loop forever.
+        ("sounds/move.wav", b"RIFF\x30\x00\x00\x00WAVE" + b"LIST\xf7\xff\xff\xff" + bytes(28), 422, "valid WAV"),
         ("fonts/ui.ttf", b"\x00\x01\x00\x00" + b"\1" * 80, 200, None),
         ("fonts/ui.ttf", b"wOFF" + b"\0" * 80, 422, "same format"),
         ("anim/spinner.json", b'{"v":"5.7","w":100,"h":100,"layers":[{"ty":4}]}', 200, None),
@@ -1054,6 +1256,9 @@ def t_home_background_textures():
     for bad, needle in [(zstd_stored(dds_bc7(128, 128)), "exactly like the system file"),
                         (zstd_stored(mine[:-16]), "not a valid DDS"),
                         (b"\x28\xb5\x2f\xfd" + b"\xff" * 40, "zstd"),
+                        # 25 bytes claiming to unpack to 200 MB: refused without unpacking
+                        (b"\x28\xb5\x2f\xfd\xa0" + struct.pack("<I", 200 << 20) + b"\x51\x00\x00" + bytes(10),
+                         "larger than the system texture"),
                         (mine, "zstd-compressed like the system file")]:
         code, r = put_file("wall", stock_path, bad)
         assert code == 422 and needle in r["error"], (needle, code, r)
@@ -1237,9 +1442,9 @@ def t_privilege_failure_exits_cleanly():
 
 TESTS = [t_startup, t_ui_and_icon_served, t_mutations_need_token, t_create_theme_rules, t_asset_search,
          t_upload_is_verified, t_apply_verifies_and_is_read_only, t_reapply_picks_up_edits,
-         t_stock_mirror_and_linked_staging,
+         t_stock_mirror_and_linked_staging, t_stage_folders_reused_without_links,
          t_firmware_mismatch_is_refused, t_delete_rules, t_concurrent_requests_during_apply,
-         t_restore_stock_cleans_up, t_overlays_reach_system_views, t_recovers_after_hard_kill, t_update_from_payload_manager, t_update_from_plain_elf, t_update_hands_over, t_survives_malformed_and_abusive_requests,
+         t_restore_stock_cleans_up, t_overlays_reach_system_views, t_recovers_after_hard_kill, t_update_from_payload_manager, t_update_from_plain_elf, t_update_hands_over, t_update_at_boot, t_failed_write_closes_its_file, t_survives_malformed_and_abusive_requests,
          t_slow_clients_do_not_block_others, t_log_rotates, t_media_policy, t_music, t_settings_and_duplicate, t_preview_pictures, t_save_and_discard,
          t_home_background_textures, t_home_music_at9, t_long_mount_paths_use_parent_folder, t_system_is_byte_identical_afterwards, t_crash_is_reported_and_recovered,
          t_privilege_failure_exits_cleanly]

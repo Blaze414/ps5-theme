@@ -5,7 +5,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#define PLUGIN_VERSION "1.24"
+#define PLUGIN_VERSION "1.30"
 #define TITLE_ID       "THEM00001"
 #define WEB_PORT       8095
 
@@ -77,6 +77,7 @@ int         asset_kind(const char *path);
 const char *asset_kind_name(int kind);
 uint64_t    asset_size_limit(int kind);
 int         asset_validate(const char *candidate, const char *stock, char *why, size_t len);
+int         asset_checks_remembered(void);   /* results reused since the last call */
 int         wav_probe(const char *path, wav_info_t *out);
 
 
@@ -180,9 +181,10 @@ int   my_version(void);
 int   instance_lock(int wait_ms);          /* 0 once this copy holds the lock */
 int   running_version(void);               /* of the copy answering locally, or -1 */
 int   ask_handoff(void);
-void  request_handoff(void);
+void  request_handoff(int pid);            /* pid of the newer copy, or 0 if it didn't say */
 int   handoff_requested(void);
-void  update_check(void);
+int   handoff_due(void);                   /* asked, and the newer copy is still there */
+int   update_check(void);                  /* 1 if a newer copy was started */
 
 
 /* web.c, tile.c */

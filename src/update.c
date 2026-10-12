@@ -19,6 +19,7 @@
 #include <fcntl.h>
 #include <limits.h>
 #include <netinet/in.h>
+#include <signal.h>
 #include <stdatomic.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -41,7 +42,7 @@
 #define RETRY_SECONDS    600         /* before starting the same file again */
 #define PLDMGR_PAYLOADS  "/data/pldmgr/payloads"   /* PS5 Payload Manager's payloads */
 
-static atomic_int handoff;
+static atomic_int handoff, handoff_pid;
 
 /* In every build, so a plain .elf of the plugin shows which version it is. */
 #define MARKER "PS5THEME-VERSION:"
@@ -122,15 +123,44 @@ running_version(void) {
 }
 
 
+/* The pid lets the running copy check that this one is still waiting when
+   it gets round to stepping aside. */
 int
 ask_handoff(void) {
-  char reply[1024];
-  return local_request("POST", "/api/handoff", reply, sizeof(reply));
+  char reply[1024], path[64];
+  snprintf(path, sizeof(path), "/api/handoff?pid=%d", (int)getpid());
+  return local_request("POST", path, reply, sizeof(reply));
 }
 
 
-void request_handoff(void) { atomic_store(&handoff, 1); }
-int  handoff_requested(void) { return atomic_load(&handoff); }
+void
+request_handoff(int pid) {
+  atomic_store(&handoff_pid, pid > 0 ? pid : 0);
+  atomic_store(&handoff, 1);
+}
+
+
+int handoff_requested(void) { return atomic_load(&handoff); }
+
+
+/* Step aside only for a newer copy that is still there: one that gave up
+   waiting (this copy was busy applying for longer than it waits) has
+   exited, and stepping aside then would leave nothing running. A request
+   without a pid (from 1.23 to 1.28) is taken as it is. */
+int
+handoff_due(void) {
+  if(!atomic_load(&handoff)) return 0;
+  int pid = atomic_load(&handoff_pid);
+  /* "No such process" counts only where this copy can see other processes
+     at all (the first process, pid 1, always runs). */
+  int visible = !kill(1, 0) || errno != ESRCH;
+  if(pid > 0 && visible && kill(pid, 0) && errno == ESRCH) {
+    atomic_store(&handoff, 0);
+    log_msg("the newer copy that asked to take over (pid %d) is gone; this copy carries on", pid);
+    return 0;
+  }
+  return 1;
+}
 
 
 /* The version in a ps5-theme plugin file's header, or -1. */
@@ -245,8 +275,12 @@ start_elf(const char *path, off_t offset, off_t size) {
     left -= n;
   }
   shutdown(fd, SHUT_WR);
+  /* The loader may keep the connection as the new copy's output: don't wait
+     on it, so a hand-over request is answered at once. */
+  struct timeval brief = { .tv_sec = 1 };
+  setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &brief, sizeof(brief));
   char sink[256];
-  while(recv(fd, sink, sizeof(sink), 0) > 0) { /* the loader's output, until it closes */ }
+  while(recv(fd, sink, sizeof(sink), 0) > 0) { /* what the loader says, briefly */ }
   close(fd);
   ret = left ? -1 : 0;
   if(ret) log_err("update: sending %s to the ELF loader failed", path);
@@ -303,8 +337,8 @@ consider_dir(const char *dirpath, candidate_t *best) {
 
 /* A newer copy of ps5-theme where people keep payloads: etaHEN's plugin
    folders, UPDATE_DIR, and PS5 Payload Manager's payload folders (one level
-   of subfolders). Start the newest. */
-void
+   of subfolders). Start the newest; 1 if it was started. */
+int
 update_check(void) {
   static const char *const dirs[] = { "/data/etaHEN/plugins", "/data/etahen/plugins", UPDATE_DIR, PLDMGR_PAYLOADS };
   static char tried[PATH_MAX];
@@ -326,10 +360,10 @@ update_check(void) {
   int best_version = best.version;
   off_t best_size = best.size, best_offset = best.offset;
   time_t best_mtime = best.mtime;
-  if(!best_path[0]) return;
+  if(!best_path[0]) return 0;
 
   time_t now = time(NULL);
-  if(!strcmp(best_path, tried) && best_mtime == tried_mtime && now - tried_at < RETRY_SECONDS) return;
+  if(!strcmp(best_path, tried) && best_mtime == tried_mtime && now - tried_at < RETRY_SECONDS) return 0;
   snprintf(tried, sizeof(tried), "%s", best_path);
   tried_mtime = best_mtime;
   tried_at = now;
@@ -338,7 +372,8 @@ update_check(void) {
   if(start_elf(best_path, best_offset, best_size)) {
     notify("ps5-theme: found version %d.%02d but could not start it. Restart the console to update.",
            best_version / 100, best_version % 100);
-    return;
+    return 0;
   }
   notify("ps5-theme: updating to %d.%02d...", best_version / 100, best_version % 100);
+  return 1;
 }

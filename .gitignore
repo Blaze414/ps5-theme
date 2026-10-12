@@ -3,3 +3,4 @@ build-host/
 *.elf
 *.plugin
 .DS_Store
+tests/fuzz/out/

@@ -44,6 +44,8 @@
 #define STAGE_SIZE_LIMIT (512ull * 1024 * 1024)
 #define POLL_SECONDS     1
 #define UPDATE_CHECK_SECONDS 10
+#define HANDOFF_ASK_SECONDS  30    /* for a newer copy this one started to ask to take over */
+#define HANDOFF_WAIT_MS  180000    /* for an older copy to step aside (it may be applying) */
 #define WEB_STACK_SIZE   (1024 * 1024)
 
 /* Themable folders: ShellUI's React Native apps and its own VSH assets
@@ -335,22 +337,26 @@ read_ini_value(const char *path, const char *key, char *out, size_t size) {
 
 static uint8_t copy_buf[64 * 1024];  /* owned by the main thread */
 
-/* Progress of a long copy (the stock mirror), reported every few MB. */
-static struct {
+/* Progress of a long copy (the stock mirror, or a stage folder where hard
+   links aren't available), reported every few MB. */
+typedef struct {
   uint64_t done, total, next;
-  int lo, hi, on;                     /* on: only while a stock mirror is copied */
-} copy_meter;                         /* owned by the main thread */
+  int lo, hi;
+  char label[96];
+} copy_meter_t;
+static copy_meter_t mirror_meter, stage_meter;   /* owned by the main thread */
+static copy_meter_t *copy_meter;                 /* the one counting now, if any */
 
 static void
 copy_meter_add(uint64_t n) {
-  if(!copy_meter.on || !copy_meter.total) return;
-  copy_meter.done += n;
-  if(copy_meter.done < copy_meter.next) return;
-  copy_meter.next = copy_meter.done + (4u << 20);
-  uint64_t done = copy_meter.done < copy_meter.total ? copy_meter.done : copy_meter.total;
-  set_progress(copy_meter.lo + (int)((copy_meter.hi - copy_meter.lo) * done / copy_meter.total),
-               "Keeping a copy of the system's files (first time only): %llu of %llu MB",
-               (unsigned long long)(done >> 20), (unsigned long long)(copy_meter.total >> 20));
+  copy_meter_t *m = copy_meter;
+  if(!m || m->total < (4u << 20)) return;   /* small copies are quick */
+  m->done += n;
+  if(m->done < m->next) return;
+  m->next = m->done + (4u << 20);
+  uint64_t done = m->done < m->total ? m->done : m->total;
+  set_progress(m->lo + (int)((m->hi - m->lo) * done / m->total), "%s: %llu of %llu MB", m->label,
+               (unsigned long long)(done >> 20), (unsigned long long)(m->total >> 20));
 }
 
 static int
@@ -405,6 +411,20 @@ copy_file(const char *src, const char *dst, uint64_t *budget) {
 }
 
 
+/* A hard link, or a copy where the filesystem can't link (said once). */
+static int
+link_or_copy(const char *from, const char *to, uint64_t *budget) {
+  static int warned;
+  if(!fs_link(from, to)) return 0;
+  if(!warned) {
+    warned = 1;
+    log_msg("hard links aren't available here (%s); stage folders hold copies, reused while unchanged",
+            strerror(errno));
+  }
+  return copy_file(from, to, budget);
+}
+
+
 /* Recursively copy a stock system folder (to its mirror, or a mirror into the
    stage). Symlinks are part of the stock layout and are copied as links; the
    write guard makes sure no later write can travel through one. With
@@ -442,7 +462,7 @@ copy_tree(const char *src, const char *dst, uint64_t *budget, int use_links) {
       struct stat old;   /* a mirror made again over an older one */
       ret = !lstat(t, &old) && (S_ISDIR(old.st_mode) || fs_unlink(t)) ? -1 : fs_symlink(link, t);
     } else if(S_ISREG(st.st_mode)) {
-      ret = use_links && !fs_link(s, t) ? 0 : copy_file(s, t, budget);
+      ret = use_links ? link_or_copy(s, t, budget) : copy_file(s, t, budget);
     }
     if(ret) log_err("copy failed: %s -> %s (%s)", s, t, strerror(errno));
   }
@@ -534,7 +554,21 @@ plan_files(const char *theme_dir, const char *stock_dir, const char *stock_real,
 }
 
 
-/* Checksum every planned theme file against its copy under other_dir. */
+/* Is `b` the very file `a` is (seen through a link or an overlay)? The same
+   inode, size and modification time: an overlay passes those through, and a
+   system file sharing all of them with a theme file does not happen. */
+static int
+same_file(const char *a, const char *b) {
+  struct stat sa, sb;
+  return !stat(a, &sa) && !stat(b, &sb) && S_ISREG(sa.st_mode) && S_ISREG(sb.st_mode) &&
+         sa.st_ino == sb.st_ino && sa.st_size == sb.st_size &&
+         sa.st_mtim.tv_sec == sb.st_mtim.tv_sec && sa.st_mtim.tv_nsec == sb.st_mtim.tv_nsec;
+}
+
+static int verified_by_content;   /* files that needed a full comparison (main thread) */
+
+/* Every planned theme file must be what other_dir shows: the same file, or
+   if not, the same bytes (checksum and size). */
 static int
 verify_plan(const plan_t *p, const char *theme_dir, const char *other_dir, const char *what) {
   for(int i = 0; i < p->count; i++) {
@@ -543,6 +577,8 @@ verify_plan(const plan_t *p, const char *theme_dir, const char *other_dir, const
     uint64_t sa, sb;
     snprintf(a, sizeof(a), "%s%s", theme_dir, p->rel[i]);
     snprintf(b, sizeof(b), "%s%s", other_dir, p->rel[i]);
+    if(same_file(a, b)) continue;
+    verified_by_content++;
     if(fs_crc32_file(a, &ca, &sa) || fs_crc32_file(b, &cb, &sb) || ca != cb || sa != sb) {
       log_err("verify (%s): %s does not match %s", what, b, a);
       return -1;
@@ -554,8 +590,15 @@ verify_plan(const plan_t *p, const char *theme_dir, const char *other_dir, const
 
 /* ---------------- mounts ---------------- */
 
+/* Stage folders to keep through a revert, so a later apply can reuse them:
+   the applied theme's (after a reboot) and the spares of the theme shown
+   before it. Main thread only. */
+static char kept_stages[64][PATH_MAX];
+static int nkept_stages;
+
 /* Take every overlay down. Stage folders go too, except those whose name
-   starts with `keep` (the theme being applied, staged before this runs). */
+   starts with `keep` (the theme being applied, staged before this runs) and
+   those in kept_stages. */
 static void
 revert_mounts(const char *keep) {
   static char lines[MAX_TARGETS * 4 + 64][PATH_MAX];
@@ -594,18 +637,15 @@ revert_mounts(const char *keep) {
       if(keep && !strncmp(e->d_name, keep, strlen(keep))) continue;
       char p[PATH_MAX];
       snprintf(p, sizeof(p), "%s/%s", STAGE_DIR, e->d_name);
+      int kept = 0;
+      for(int k = 0; k < nkept_stages && !kept; k++) kept = !strcmp(kept_stages[k], p);
+      if(kept) continue;
       if(plat_is_our_mount(p, "")) continue;  /* never delete under a live mount */
       fs_rm_rf_under(STAGE_DIR, p);
     }
     closedir(d);
   }
   if(count) log_msg("reverted %d mount(s)", count);
-}
-
-
-static void
-revert_all(void) {
-  revert_mounts(NULL);
 }
 
 
@@ -671,7 +711,17 @@ typedef struct stage {
   plan_t plan;
   int    state;           /* 0 staged and verified, -1 failed */
   int    counted;
+  unsigned long long fp_inputs;   /* the stock copy and the theme files it was built from */
+  unsigned long long fp_staged;   /* the theme files as they are in dir */
 } stage_t;
+
+/* A stage folder of an earlier apply, which may be reused: the applied
+   theme's (live) or the one shown before it (a spare). */
+typedef struct prev_stage {
+  char dir[PATH_MAX], real[PATH_MAX];
+  unsigned long long fp_inputs, fp_staged;
+  int live, used;         /* used: reused by this apply */
+} prev_stage_t;
 
 
 /* Does a view of `from` show part of a themable folder? True when `from` is
@@ -817,9 +867,9 @@ ensure_mirror(const char *real, char *dir, size_t size) {
   if(covered_by_us(real)) return 1;
   crumb(CRUMB_MAIN, "keeping a copy of %s", real);
   log_msg("keeping a verified copy of %s (once per firmware)", real);
-  copy_meter.on = 1;
+  copy_meter = &mirror_meter;
   int copied = !copy_tree(real, dir, &budget, 0);
-  copy_meter.on = 0;
+  copy_meter = NULL;
   if(!copied || same_tree(real, dir, 0)) {
     log_err("could not keep a verified copy of %s", real);
     return -1;
@@ -831,10 +881,51 @@ ensure_mirror(const char *real, char *dir, size_t size) {
 }
 
 
+/* Fingerprints of the files a stage folder holds or was built from: each
+   planned file's name and identity (inode, size, modification time). Theme,
+   stock and stage files are only ever replaced, never changed in place, so an
+   equal fingerprint means the very same files. */
+static unsigned long long
+fp_mix(unsigned long long h, const void *data, size_t n) {
+  const unsigned char *b = data;
+  while(n--) {
+    h ^= *b++;
+    h *= 1099511628211ull;
+  }
+  return h;
+}
+
+static unsigned long long
+fp_file(unsigned long long h, const char *path) {
+  struct stat st;
+  if(stat(path, &st)) return fp_mix(h, "missing", 7);
+  unsigned long long v[4] = { st.st_ino, (unsigned long long)st.st_size,
+                              (unsigned long long)st.st_mtim.tv_sec, (unsigned long long)st.st_mtim.tv_nsec };
+  return fp_mix(h, v, sizeof(v));
+}
+
+static unsigned long long
+plan_fp(const plan_t *p, const char *base, const char *also) {
+  unsigned long long h = 14695981039346656037ull;
+  char path[PATH_MAX];
+  if(also) h = fp_file(h, also);
+  for(int i = 0; i < p->count; i++) {
+    h = fp_mix(h, p->rel[i], strlen(p->rel[i]) + 1);
+    snprintf(path, sizeof(path), "%s%s", base, p->rel[i]);
+    h = fp_file(h, path);
+  }
+  return h;
+}
+
+static int stages_reused;   /* this apply (main thread) */
+
 /* The stock folder (from its mirror) plus the theme's checked files, in
-   st->dir, verified. */
+   st->dir, verified. An earlier stage folder for the same folder, built
+   from the very same files and unchanged since, is reused instead (renamed
+   to st->dir): nothing is copied or read again. */
 static int
-stage_folder(stage_t *st, const char *src, const char *mirror, int *skipped) {
+stage_folder(stage_t *st, const char *src, const char *mirror, const char *mark, int *skipped,
+             prev_stage_t *prev, int nprev) {
   uint64_t budget = STAGE_SIZE_LIMIT;
   char mirror_real[PATH_MAX];
 
@@ -847,19 +938,39 @@ stage_folder(stage_t *st, const char *src, const char *mirror, int *skipped) {
     log_err("nothing usable for %s", st->real);
     return -1;
   }
+  st->fp_inputs = plan_fp(&st->plan, src, mark);
+  for(int k = 0; k < nprev; k++) {
+    prev_stage_t *pv = &prev[k];
+    if(pv->used || strcmp(pv->real, st->real) || pv->fp_inputs != st->fp_inputs || !pv->fp_staged ||
+       !fs_is_dir(pv->dir) || plan_fp(&st->plan, pv->dir, NULL) != pv->fp_staged) {
+      continue;
+    }
+    if(strcmp(pv->dir, st->dir) && fs_rename(pv->dir, st->dir)) break;
+    pv->used = 1;
+    st->fp_staged = pv->fp_staged;
+    stages_reused++;
+    return 0;
+  }
   fs_rm_rf_under(STAGE_DIR, st->dir);
+  stage_meter.total = tree_size(mirror, 0) + tree_size(src, 0);   /* counts only if copied */
+  copy_meter = &stage_meter;
   int ok = !copy_tree(mirror, st->dir, &budget, 1);
+  /* The theme's files are linked in too (they are only ever replaced, never
+     changed in place); copied where the filesystem can't link. */
   for(int k = 0; ok && k < st->plan.count; k++) {
     char from[PATH_MAX], to[PATH_MAX];
     snprintf(from, sizeof(from), "%s%s", src, st->plan.rel[k]);
     snprintf(to, sizeof(to), "%s%s", st->dir, st->plan.rel[k]);
-    ok = !copy_file(from, to, &budget);
+    if(!access(to, F_OK) && fs_unlink(to)) ok = 0;
+    else ok = !link_or_copy(from, to, &budget);
   }
+  copy_meter = NULL;
   if(!ok || verify_plan(&st->plan, src, st->dir, "staged copy")) {
     log_err("staging failed for %s", st->real);
     fs_rm_rf_under(STAGE_DIR, st->dir);
     return -1;
   }
+  st->fp_staged = plan_fp(&st->plan, st->dir, NULL);
   return 0;
 }
 
@@ -873,15 +984,17 @@ static int live_stages;           /* stages[] behind the live overlays */
 static char live_theme[128];
 
 
-#define LIVE_FILE BASE_DIR "/live"   /* the applied theme's targets and stages */
+#define LIVE_FILE BASE_DIR "/live"     /* the applied theme's targets and stages */
+#define SPARE_FILE BASE_DIR "/spare"   /* stage folders of the theme shown before it */
 
+/* Drop the applied theme's state; with `drop_record`, LIVE_FILE too. */
 static void
-forget_live(void) {
+forget_live(int drop_record) {
   for(int k = 0; k < live_stages; k++) plan_free(&stages[k].plan);
   live_stages = 0;
   ntargets = 0;
   live_theme[0] = 0;
-  if(!access(LIVE_FILE, F_OK)) fs_unlink(LIVE_FILE);
+  if(drop_record && !access(LIVE_FILE, F_OK)) fs_unlink(LIVE_FILE);
 }
 
 
@@ -916,11 +1029,110 @@ save_live(void) {
   fprintf(f, "theme\t%s\n", live_theme);
   for(int i = 0; i < ntargets; i++) fprintf(f, "target\t%s\n", targets[i]);
   for(int k = 0; k < live_stages; k++) {
-    fprintf(f, "stage\t%d\t%s\t%s\n", stages[k].state, stages[k].dir, stages[k].real);
+    fprintf(f, "stage\t%d\t%s\t%s\t%llx\t%llx\n", stages[k].state, stages[k].dir, stages[k].real,
+            stages[k].fp_inputs, stages[k].fp_staged);
     for(int r = 0; r < stages[k].plan.count; r++) fprintf(f, "file\t%s\n", stages[k].plan.rel[r]);
   }
   int ok = !ferror(f);
   if(fclose(f) || !ok || fs_rename(tmp, LIVE_FILE)) fs_unlink(tmp);
+}
+
+
+/* Stage records ("stage\t0\t<dir>\t<real>\t<fp_inputs>\t<fp_staged>") from
+   `file`, added to prev[n..max) and to kept_stages. */
+static int
+read_stage_records(const char *file, int live, prev_stage_t *prev, int n, int max) {
+  char line[PATH_MAX * 2 + 96];
+  FILE *f = fopen(file, "r");
+  if(!f) return n;
+  while(n < max && fgets(line, sizeof(line), f)) {
+    line[strcspn(line, "\n")] = 0;
+    if(strncmp(line, "stage\t", 6)) continue;
+    char *state = line + 6, *dir = strchr(state, '\t'), *real = dir ? strchr(dir + 1, '\t') : NULL;
+    char *fps = real ? strchr(real + 1, '\t') : NULL;
+    if(!fps || atoi(state)) continue;
+    *dir++ = 0;
+    *real++ = 0;
+    *fps++ = 0;
+    prev_stage_t *pv = &prev[n];
+    memset(pv, 0, sizeof(*pv));
+    if(sscanf(fps, "%llx\t%llx", &pv->fp_inputs, &pv->fp_staged) != 2 ||
+       strncmp(dir, STAGE_DIR "/", sizeof(STAGE_DIR)) || !fs_is_dir(dir)) {
+      continue;
+    }
+    snprintf(pv->dir, sizeof(pv->dir), "%s", dir);
+    snprintf(pv->real, sizeof(pv->real), "%s", real);
+    pv->live = live;
+    if(nkept_stages < (int)(sizeof(kept_stages) / sizeof(*kept_stages))) {
+      snprintf(kept_stages[nkept_stages++], PATH_MAX, "%s", dir);
+    }
+    n++;
+  }
+  fclose(f);
+  return n;
+}
+
+
+/* The stage folders of the last apply (LIVE_FILE) and the spares
+   (SPARE_FILE), which the next apply may reuse. Their names go to
+   kept_stages too, so a revert keeps them. */
+static int
+load_prev_stages(prev_stage_t *prev, int max) {
+  nkept_stages = 0;
+  int n = read_stage_records(LIVE_FILE, 1, prev, 0, max);
+  return read_stage_records(SPARE_FILE, 0, prev, n, max);
+}
+
+
+/* Before the shown theme's overlays come down: its stage folders that this
+   apply did not reuse become the spares, so switching back to it is as quick
+   as a re-apply. If it left none (the same theme again), the older spares
+   stay. Only these survive the revert that follows (kept_stages). */
+static void
+keep_spares(prev_stage_t *prev, int nprev) {
+  int outgoing = 0;
+  for(int k = 0; k < nprev; k++) outgoing += prev[k].live && !prev[k].used && fs_is_dir(prev[k].dir);
+
+  char tmp[] = SPARE_FILE ".tmp";
+  int fd = fs_open_write(tmp);
+  FILE *f = fd < 0 ? NULL : fdopen(fd, "w");
+  if(!f && fd >= 0) close(fd);
+  nkept_stages = 0;
+  for(int k = 0; k < nprev; k++) {
+    prev_stage_t *pv = &prev[k];
+    if(pv->used || pv->live != (outgoing > 0) || !fs_is_dir(pv->dir)) continue;
+    snprintf(kept_stages[nkept_stages++], PATH_MAX, "%s", pv->dir);
+    if(f) fprintf(f, "stage\t0\t%s\t%s\t%llx\t%llx\n", pv->dir, pv->real, pv->fp_inputs, pv->fp_staged);
+  }
+  if(f) {
+    int ok = !ferror(f);
+    if(fclose(f) || !ok || fs_rename(tmp, SPARE_FILE)) fs_unlink(tmp);
+  }
+  if(!f) nkept_stages = 0;   /* unrecorded folders would never be reused */
+}
+
+
+/* Take the shown theme down, keeping its folders as spares. */
+static void
+revert_keep_spares(prev_stage_t *prev, int nprev) {
+  keep_spares(prev, nprev);
+  revert_mounts(NULL);
+}
+
+
+/* A stage folder prefix ("g<N>-") no folder has yet: kept folders outlive
+   the plugin, and the counter does not. */
+static unsigned
+next_generation(void) {
+  static unsigned generation;
+  DIR *d = opendir(STAGE_DIR);
+  struct dirent *e;
+  while(d && (e = readdir(d))) {
+    unsigned n;
+    if(sscanf(e->d_name, "g%u-", &n) == 1 && n > generation) generation = n;
+  }
+  if(d) closedir(d);
+  return ++generation;
 }
 
 
@@ -949,11 +1161,14 @@ adopt_live(const char *active) {
       if(!dir || !real) { bad = 1; break; }
       *dir++ = 0;
       *real++ = 0;
+      char *fps = strchr(real, '\t');
+      if(fps) *fps++ = 0;
       stage_t *st = &stages[live_stages++];
       memset(st, 0, sizeof(*st));
       st->state = atoi(tab);
       snprintf(st->dir, sizeof(st->dir), "%s", dir);
       snprintf(st->real, sizeof(st->real), "%s", real);
+      if(fps) sscanf(fps, "%llx\t%llx", &st->fp_inputs, &st->fp_staged);
       if(!st->state && (strncmp(dir, STAGE_DIR "/", sizeof(STAGE_DIR)) || !fs_is_dir(dir))) bad = 1;
     } else if(!strcmp(line, "file") && live_stages) {
       if(plan_push(&stages[live_stages - 1].plan, tab)) bad = 1;
@@ -1059,9 +1274,12 @@ apply_theme(const char *name) {
   char path[PATH_MAX], files_root[PATH_MAX], fw[16], want_fw[64], title[128];
   int count = 0, mounted = 0, verified = 0, failed = 0, skipped = 0;
 
-  forget_live();   /* the previous theme's overlays are replaced below */
+  static prev_stage_t prev[64];
+  int nprev = load_prev_stages(prev, 64);   /* before the record is cleared */
+  forget_live(1);   /* the previous theme's overlays are replaced below */
+  stages_reused = 0;
   if(!theme_name_valid(name)) {
-    revert_all();
+    revert_keep_spares(prev, nprev);
     set_result("Invalid theme name.");
     notify("ps5-theme: invalid theme name");
     return -1;
@@ -1070,7 +1288,7 @@ apply_theme(const char *name) {
 
   snprintf(path, sizeof(path), "%s/%s/theme.ini", THEMES_DIR, name);
   if(read_ini_value(path, "fw", want_fw, sizeof(want_fw))) {
-    revert_all();
+    revert_keep_spares(prev, nprev);
     set_result("%s has no theme.ini with a fw= line.", name);
     notify("ps5-theme: %s has no theme.ini with fw=", name);
     return -1;
@@ -1078,7 +1296,7 @@ apply_theme(const char *name) {
   if(read_ini_value(path, "name", title, sizeof(title))) snprintf(title, sizeof(title), "%s", name);
   fw_string(fw, sizeof(fw));
   if(!fw_matches(want_fw, fw)) {
-    revert_all();
+    revert_keep_spares(prev, nprev);
     set_result("%s is for firmware %s; this console is %s.", title, want_fw, fw);
     notify("ps5-theme: '%s' is for FW %s, console is %s", title, want_fw, fw);
     return -1;
@@ -1088,7 +1306,7 @@ apply_theme(const char *name) {
   int unreadable = fs_is_dir(files_root) && collect_targets(files_root, "", targets, &count);
   ntargets = unreadable ? 0 : count;
   if(unreadable) {
-    revert_all();
+    revert_keep_spares(prev, nprev);
     set_result("Could not read %s, or it touches more than %d folders.", title, MAX_TARGETS);
     notify("ps5-theme: could not read %s", title);
     return -1;
@@ -1100,14 +1318,14 @@ apply_theme(const char *name) {
   /* Stage each distinct real folder once, while the previous theme (if any)
      is still shown. A folder without a stock mirror yet needs the previous
      theme taken down first, since the mirror is copied from the system. */
-  static unsigned generation;
   char keep[32];
-  snprintf(keep, sizeof(keep), "g%u-", ++generation);
+  snprintf(keep, sizeof(keep), "g%u-", next_generation());
   static int job_stage[MAX_JOBS];
-  int nstages = 0, views_mounted = 0, reverted = 0;
+  int nstages = 0, views_mounted = 0;
 
   /* Progress: copying stock folders the first time (by bytes), preparing each
-     folder, the swap, then checking each overlay on the console. */
+     folder (by bytes where it is copied), the swap, then checking each
+     overlay on the console. Copying takes most of the time. */
   int nreal = 0;
   uint64_t to_mirror = 0;
   for(int i = 0; i < njobs; i++) {
@@ -1117,10 +1335,11 @@ apply_theme(const char *name) {
     nreal++;
     if(!mirror_ready(jobs[i].real)) to_mirror += tree_size(jobs[i].real, 0);
   }
-  int band_mirror = to_mirror ? 55 : 0, band_stage = band_mirror + (to_mirror ? 10 : 25), band_swap = band_stage + 5;
-  memset(&copy_meter, 0, sizeof(copy_meter));
-  copy_meter.total = to_mirror;
-  copy_meter.hi = band_mirror;
+  int band_mirror = to_mirror ? 45 : 0, band_stage = to_mirror ? 85 : 80, band_swap = band_stage + 5;
+  memset(&mirror_meter, 0, sizeof(mirror_meter));
+  mirror_meter.total = to_mirror;
+  mirror_meter.hi = band_mirror;
+  snprintf(mirror_meter.label, sizeof(mirror_meter.label), "Keeping a copy of the system's files (first time only)");
   set_progress(1, "Checking the theme's files");
 
   for(int i = 0; i < njobs; i++) {
@@ -1146,21 +1365,27 @@ apply_theme(const char *name) {
     int m = ensure_mirror(j->real, mirror, sizeof(mirror));
     if(m > 0) {
       revert_mounts(keep);
-      reverted = 1;
       m = ensure_mirror(j->real, mirror, sizeof(mirror));
     }
-    set_progress(band_mirror, "Preparing the theme (%d of %d)", nstages, nreal);
-    st->state = m ? -1 : stage_folder(st, src, mirror, &skipped);
-    set_progress(band_mirror + (band_stage - band_mirror) * nstages / (nreal ? nreal : 1),
-                 "Preparing the theme (%d of %d)", nstages, nreal);
+    memset(&stage_meter, 0, sizeof(stage_meter));
+    stage_meter.lo = band_mirror + (band_stage - band_mirror) * (nstages - 1) / (nreal ? nreal : 1);
+    stage_meter.hi = band_mirror + (band_stage - band_mirror) * nstages / (nreal ? nreal : 1);
+    if(nreal > 1) snprintf(stage_meter.label, sizeof(stage_meter.label), "Preparing the theme (%d of %d)", nstages, nreal);
+    else snprintf(stage_meter.label, sizeof(stage_meter.label), "Preparing the theme");
+    set_progress(stage_meter.lo, "%s", stage_meter.label);
+    char mirror_dir[PATH_MAX], mark[PATH_MAX];
+    mirror_paths(j->real, mirror_dir, sizeof(mirror_dir), mark, sizeof(mark));
+    st->state = m ? -1 : stage_folder(st, src, mirror, mark, &skipped, prev, nprev);
+    set_progress(stage_meter.hi, "%s", stage_meter.label);
   }
-  copy_meter.total = 0;
 
   /* Swap: the previous theme comes down and this one goes up straight away,
-     so the stock look shows only for a moment. */
+     so the stock look shows only for a moment. The previous theme's folders
+     are kept as spares; other old ones go (also after an earlier revert). */
   crumb(CRUMB_MAIN, "applying theme %s: mounting", name);
   set_progress(band_stage, "Switching to the new theme");
-  if(!reverted) revert_mounts(keep);
+  keep_spares(prev, nprev);
+  revert_mounts(keep);
   static int job_mounted[MAX_JOBS];
   for(int i = 0; i < njobs; i++) {
     job_t *j = &jobs[i];
@@ -1189,7 +1414,8 @@ apply_theme(const char *name) {
     set_progress(band_swap + (99 - band_swap) * i / (njobs ? njobs : 1),
                  "Checking it on the console (%d of %d)", i + 1, njobs);
     snprintf(src, sizeof(src), "%s%s", files_root, j->real);
-    if(verify_plan(&st->plan, src, j->on, "live mount")) {
+    /* Against the stage folder: the very folder that is mounted. */
+    if(verify_plan(&st->plan, st->dir, j->on, "live mount")) {
       log_err("verification failed on %s, removing overlay", j->on);
       if(plat_unmount(j->on)) log_err("unmount %s failed: %s", j->on, strerror(errno));
       if(!j->view) failed++;
@@ -1210,7 +1436,10 @@ apply_theme(const char *name) {
   } else {
     for(int k = 0; k < nstages; k++) plan_free(&stages[k].plan);
   }
-  log_msg("theme %s: %d overlay(s), %d in system views", name, mounted, views_mounted);
+  log_msg("theme %s: %d overlay(s), %d in system views; %d of %d folder(s) reused; "
+          "%d check(s) remembered, %d file(s) compared by content",
+          name, mounted, views_mounted, stages_reused, nstages, asset_checks_remembered(), verified_by_content);
+  verified_by_content = 0;
 
   crumb(CRUMB_MAIN, "idle");
 
@@ -1495,7 +1724,7 @@ main(void) {
       return 0;
     }
     log_msg("taking over from the running copy (%d.%02d)", running / 100, running % 100);
-    if(ask_handoff() || instance_lock(20000)) {
+    if(ask_handoff() || instance_lock(HANDOFF_WAIT_MS)) {
       log_err("the running copy did not hand over; this copy exits");
       notify("ps5-theme: could not take over from the running copy. Restart the console to update.");
       return 1;
@@ -1534,8 +1763,13 @@ main(void) {
     snprintf(current, sizeof(current), "%s", active);
     set_result("%s is applied (kept through the plugin's restart).", title);
   } else {
-    forget_live();
-    revert_all();
+    /* After a reboot the overlays are gone; the last apply's stage folders
+       stay, for the apply below to reuse if nothing changed. */
+    static prev_stage_t kept[64];
+    load_prev_stages(kept, 64);
+    forget_live(0);
+    revert_mounts(NULL);
+    nkept_stages = 0;
   }
   dump_mount_table();
 
@@ -1573,13 +1807,19 @@ main(void) {
 
   time_t last_update_check = 0;
   for(;;) {
-    if(handoff_requested()) {
+    if(handoff_due()) {
       log_msg("handing over to the new copy; the theme stays as it is");
       _exit(0);   /* the overlays stay; the lock is released with the process */
     }
     if(time(NULL) - last_update_check >= UPDATE_CHECK_SECONDS) {
       last_update_check = time(NULL);
-      update_check();
+      if(update_check()) {
+        /* The newer copy asks to take over as soon as it is up. Wait for
+           that instead of starting an apply (at boot, putting the theme
+           back) that it would then have to wait for. */
+        for(int i = 0; i < HANDOFF_ASK_SECONDS * 10 && !handoff_requested(); i++) usleep(100 * 1000);
+        continue;
+      }
     }
     /* Say so if the system is slow to register the tile; nothing else waits on it. */
     if(!tile_warned && !atomic_load(&tile_done) && time(NULL) - tile_started > 45) {
@@ -1617,8 +1857,10 @@ main(void) {
         pthread_mutex_unlock(&state_lock);
         set_progress(-1, "%s", "");
       } else {
-        forget_live();
-        revert_all();
+        static prev_stage_t prev[64];
+        int nprev = load_prev_stages(prev, 64);
+        forget_live(1);
+        revert_keep_spares(prev, nprev);
         set_result("Stock home screen.");
         if(current[0]) notify("ps5-theme: stock theme restored");
       }

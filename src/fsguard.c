@@ -185,6 +185,12 @@ fs_symlink(const char *target, const char *path) {
 int
 fs_link(const char *existing, const char *path) {
   struct stat st;
+#ifdef TEST_HOOKS
+  if(getenv("PS5THEME_TEST_NO_LINKS")) {   /* a filesystem without hard links, like the console's /data */
+    errno = EPERM;
+    return -1;
+  }
+#endif
   if(!fs_write_allowed(path)) return deny("link", path);
   if(!fs_read_within(existing, BASE_DIR) || lstat(existing, &st) || !S_ISREG(st.st_mode)) {
     return deny("link from", existing);
@@ -252,7 +258,13 @@ fs_write_file(const char *path, const void *data, size_t len) {
     p += n;
     len -= n;
   }
-  if(fsync(fd) || close(fd)) { fs_unlink(tmp); return -1; }
+  /* Both always run: a failed fsync must not leave the file open. */
+  int failed = fsync(fd) != 0;
+#ifdef TEST_HOOKS
+  if(!access("/tmp/ps5-theme-fail-fsync", F_OK)) failed = 1;   /* a disk that fails to sync */
+#endif
+  if(close(fd)) failed = 1;
+  if(failed) { fs_unlink(tmp); return -1; }
   return fs_rename(tmp, path);
 }
 

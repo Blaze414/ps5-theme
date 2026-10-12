@@ -14,7 +14,7 @@ the plugin stops, and the plugin puts your theme back each time etaHEN starts.
 
 ![The theme library](docs/screenshots/library.png)
 
-Version 1.24. Developed and tested on a PS5 with firmware 13.42, both with
+Version 1.30. Developed and tested on a PS5 with firmware 13.42, both with
 etaHEN 2.5B (unified build) and on its own from PS5 Payload Manager.
 
 > **About the screenshots.** They were taken from the author's own console.
@@ -70,9 +70,10 @@ etaHEN 2.5B (unified build) and on its own from PS5 Payload Manager.
 - **Comes back by itself.** The applied theme is put back every time etaHEN
   starts the plugin, after a reboot or an update. Only **Restore stock**
   stops it.
-- **Safe by construction.** Nothing under `/system` or `/system_ex` is ever
+- **Never writes the system.** Nothing under `/system` or `/system_ex` is
   opened for writing, only media files can be themed, and every file is
-  checked against the system file it replaces.
+  checked against the system file it replaces (see
+  [what the checks cover](#what-the-checks-cover-and-what-they-dont)).
 
 ## Requirements
 
@@ -154,6 +155,10 @@ what happened.
 4. Press **Save** in the bar at the bottom, then **Apply to console**.
 5. Give it a few seconds. The home screen may show the stock look for a
    moment while it switches.
+6. **To hear new home music,** move to a game or app on the home screen that
+   has its own music, so the console switches to that music, then come back.
+   The console keeps playing the music it already had loaded and only picks
+   up the theme's music when it starts the home music again.
 
 To change only the music, make a theme with just **Home music**. Everything
 else stays stock.
@@ -263,6 +268,13 @@ home screen keeps its place in the music. After a game it carries on where it
 stopped, and when you apply a theme the new music carries on from about where
 the old music had got to.
 
+**Hearing the new music:** the console keeps playing the music it already
+had loaded, so the theme's music doesn't start the moment it's applied. Move
+to a game or app on the home screen that has its own music, so the console
+switches to that music, then come back: the home screen then starts its music
+again and plays the theme's. The same applies after a restart, since the home
+screen loads its music before the jailbreak and the plugin start.
+
 ![The music editor](docs/screenshots/music-editor.png)
 
 **Choose part** opens the music editor:
@@ -322,15 +334,19 @@ show what the console is doing and how far it has got:
 1. **Keeping a copy of the system's files (first time only): 88 of 169 MB.**
    This happens only on the first apply on a firmware. It's the slow part,
    so it's counted in megabytes.
-2. **Preparing the theme.**
+2. **Preparing the theme: 120 of 300 MB.** The console's storage can't share
+   files between folders, so a theme's folder is a full copy. It's made once
+   and reused until the theme or the system's files change.
 3. **Switching to the new theme.**
 4. **Checking it on the console (11 of 15).** Every screen that shows the
    theme is read back and checked.
 
 The top bar says **Applying…** until the console confirms the result. The
 same happens after a reboot, when the plugin puts your theme back. Applying
-can take up to a minute the first time on a firmware, and a few seconds after
-that.
+can take up to a minute the first time on a firmware, and about 20 seconds
+when you change a theme or switch to one you haven't just used. Applying the
+same theme again, switching back to the previous one, or putting it back
+after a reboot, takes a second or two.
 
 The console shows its own notifications too, so you can follow along on the
 TV without the manager open: "Applying 'Name'…" (or "Putting 'Name' back…"
@@ -403,6 +419,17 @@ enforced, not assumed. Every write the plugin makes goes through
 - Theme files, settings and uploads are written under a temporary name and
   renamed into place, so a crash never leaves half a file.
 
+**What it doesn't cover:** the check and the write are two steps on a path.
+Another program on the console that swapped a folder inside
+`/data/ps5-theme/` for a symlink between them could redirect a write. Only
+a program already running on the console with full rights could do that, and
+such a program can write the system directly anyway. Nothing the manager
+accepts over the network creates a symlink. The guard is
+there to stop the plugin's own mistakes and anything it's sent from reaching
+the system, not to contain other software on the console. (The SDK has the
+directory-relative calls, `openat` and the like, that would close the gap if
+that ever mattered.)
+
 Themes are applied as **read-only nullfs overlays**: a staged folder
 (the stock folder plus your files) is mounted over the system folder. Mounts
 live in memory only.
@@ -457,10 +484,36 @@ applied:
 | DDS / `.dds.zst` textures | Fully decoded (built-in zstd decoder, checksum verified); the DDS header must be byte-identical to the system texture and the data exactly the right length |
 | Everything else | Protected: JavaScript bundles, executables, libraries and unknown types can't be replaced |
 
-**Why:** a file that matches the original's format exactly is one the home
-screen already knows how to use. Code is never themable. The home screen's
+**Why:** a file in the same format as the original, with the same
+dimensions, is the kind of file the home screen already handles. Code is
+never themable. The home screen's
 colours and layout live inside ShellUI's encrypted JavaScript; changing them
 would mean patching ShellUI at runtime, which is deliberately out of scope.
+
+### What the checks cover, and what they don't
+
+The checks are about format and structure, not proof that a file is
+harmless to every decoder that reads it:
+
+- **Fully read:** ATRAC9 (every block unpacked), textures (fully decoded,
+  header compared byte for byte), JSON (parsed), WAV (chunks walked).
+- **Header only:** PNG, JPEG and WebP (format and pixel size; the image data
+  itself isn't decoded), fonts and video (the container's first bytes).
+- **SVG** is checked against a list of refused constructs. That isn't a full
+  SVG sanitizer.
+
+So a file can pass and still be damaged further in; the home screen's own
+decoders then decide what happens. Theme files are your own, and the likely
+result of a bad one is a picture or sound that doesn't show or play, or the
+home screen restarting. **Restore stock** or a restart brings it back.
+
+The plugin's own parsers read whatever is uploaded, so they get the most
+care: every read is bounds-checked, each kind of file has a size limit, a
+texture is never unpacked beyond the system texture's size, and the parsers
+are fuzzed with libFuzzer under AddressSanitizer and UBSan
+(`tests/fuzz/run.sh`). Fuzzing found one bug, now fixed (see
+[A WAV file that never finished checking](#a-wav-file-that-never-finished-checking)).
+It makes bugs less likely; it doesn't prove there are none.
 
 ### Verified end to end
 
@@ -468,8 +521,15 @@ would mean patching ShellUI at runtime, which is deliberately out of scope.
   compared with what you gave it before it is uploaded.
 - Uploads carry a CRC-32. The plugin checks it, stores the file under a
   temporary name, re-reads it and only then renames it into place.
-- When applying, each file is checksummed after staging, and again through
-  each live overlay. An overlay that fails is removed.
+- When staging, each theme file in the stage must be the very file the
+  theme holds (the same inode, size and modification time), or else match it
+  by checksum. Each live overlay must show the very files of the stage folder
+  it mounts, or else match them by checksum. An overlay that fails is
+  removed.
+- Each file's check against the system file it replaces is remembered for
+  that exact pair of files (and plugin version), so an unchanged theme isn't
+  decompressed and checked again at every start. A new or edited file is a
+  different file, so it is always checked.
 - Exports are read back before they are offered for download, and imports
   check every entry of the `.zip`.
 
@@ -482,9 +542,22 @@ The home screen's asset folder is 169 MB on 13.42.
   of it under `/data/ps5-theme/stock/<firmware>/`, checked byte for byte
   against the system.
 - **Every apply** builds its stage folder by hard-linking that copy's files,
-  which takes no time and no space, then writes your files in as new files.
-  Theme and stock files are only ever replaced, never edited in place, so
-  the stock copy can't change.
+  and your theme's files too, which takes no time and no space. Theme and
+  stock files are only ever replaced, never edited in place, so neither can
+  change under a live overlay. Where the filesystem can't hard-link (the
+  console's `/data`, as it turned out), the stage folder holds copies
+  instead, and the log says so.
+- **An unchanged stage folder is reused.** Each stage folder is recorded with
+  fingerprints of what it was built from (the stock copy and each theme file:
+  inode, size, modification time) and of what it holds. When both still
+  match, the next apply reuses it as it is, after a reboot too, so nothing is
+  copied or read again.
+- **The previous theme's folder is kept too.** When you switch themes or
+  restore stock, the folder of the theme that was showing is unmounted but
+  kept, and recorded in `/data/ps5-theme/spare`. Switching back reuses it
+  just like a re-apply. Only one previous theme is kept, so this costs one
+  more folder on the console's storage at most (about 300 MB for the home
+  screen).
 - **The new theme is prepared first,** while the previous one is still
   showing. Only then are the old overlays removed and the new ones mounted,
   one after another. The stock look shows for a moment instead of the whole
@@ -500,8 +573,10 @@ looked as if the plugin had forgotten the theme after a reboot.
 ### Progress reporting
 
 The engine reports its step and percentage in the status API, and the
-manager shows both. The first-time copy is measured in bytes copied, staging
-by folder, and checking by overlay. The percentage never goes backwards.
+manager shows both. Copying (the first-time copy of the system's files, and
+a stage folder where hard links don't work) is measured in bytes copied,
+since it takes most of the time; checking is measured by overlay. The
+percentage never goes backwards.
 
 ### Coming back after every start
 
@@ -534,6 +609,12 @@ as long as it runs, and the kernel releases it when the process ends.
   it is newer asks it to step aside (`/api/handoff`, accepted only from the
   console itself). The old copy exits, leaving the overlays, and the new one
   takes the lock and carries on with them.
+- A copy that has just started a newer one waits for it to ask before doing
+  anything else. At boot, that means the newer copy puts the theme back, not
+  the old one.
+- An old copy in the middle of an apply finishes it first, and the new copy
+  waits up to 3 minutes for that. The request carries the new copy's process
+  ID, and the old copy steps aside only if that process is still there.
 - A copy that isn't newer leaves the running one alone and exits. The new
   copy names itself `THEM00001`, as etaHEN's loader names plugins.
 
@@ -728,8 +809,9 @@ On the console:
 | `/data/ps5-theme/active` | The selected theme (`none` means stock) |
 | `/data/ps5-theme/stock/<firmware>/` | The checked copies of system folders |
 | `/data/ps5-theme/snapshots/<id>/` | Unsaved changes' snapshots |
-| `/data/ps5-theme/stage/` | Stage folders behind the live overlays |
+| `/data/ps5-theme/stage/` | Stage folders behind the live overlays, and the previous theme's |
 | `/data/ps5-theme/live` | The applied theme's folders, for a new copy to carry on with |
+| `/data/ps5-theme/spare` | The previous theme's folders, kept for switching back |
 | `/data/ps5-theme/update/` | Drop a newer `ps5-theme.elf` or `.plugin` here to update |
 | `/data/ps5-theme/logs/` | Log and crash reports |
 | `/data/ps5-theme/dump/` | The asset listing and mount table, for reference |
@@ -770,6 +852,25 @@ for a full restart. Restarting the plugin also took the theme down and put it
 back. **Solution:** the plugin updates itself: it notices a newer plugin
 file, starts it through etaHEN's ELF loader and hands over to it, and the new
 copy keeps the overlays already in place.
+
+#### Nothing running after a restart
+
+After a restart, etaHEN started an older plugin while a newer one waited in
+the update folder. The old copy started the newer one, but then carried on
+putting the theme back, which took longer than the newer copy waited. The
+newer copy gave up, and the old one then stepped aside anyway, leaving
+nothing running. **Solution:** a copy that has just started a newer one
+waits for it before doing anything else, the newer copy waits much longer,
+and a copy steps aside only if the newer copy is still there.
+
+#### A WAV file that never finished checking
+
+Fuzzing the parsers turned up a WAV file whose check never ended: a chunk
+size near 4 GB made the step to the next chunk wrap around to zero in 32-bit
+arithmetic, so the same chunk was read forever. Anyone on the network could
+upload one and tie up the manager. **Solution:** the step is computed in 64
+bits, a host test uploads that file, and the fuzz targets now flag any input
+that takes more than 10 seconds.
 
 #### "File name too long"
 
@@ -854,6 +955,19 @@ that would mean changing how the console's own software runs. **Solution:**
 the editor and README say so in plain words, and the editor describes what
 plays from the start of the music.
 
+#### A slow start after every reboot
+
+Even with the stock copy, putting a theme back after a reboot took about 37
+seconds: every apply decompressed and checked each 4K background again,
+staged about 300 MB, and re-read it through each of 15 overlays. The
+console's log showed why staging was slow: hard links don't work on its
+`/data`, so the stage folders held copies. **Solution:** checks against the
+system files are remembered for the exact pair of files; a stage folder
+built from the same files is reused as it is, after a reboot too; and each
+overlay is confirmed by file identity against the folder it mounts.
+Applying the same theme again now takes about a second, and a theme change
+reports how far the copy has got.
+
 #### "It forgot my theme after a reboot"
 
 It hadn't. Putting the theme back took about 30 seconds (each apply copied
@@ -899,11 +1013,15 @@ tests/host/run.sh
 ```
 
 Builds the real plugin sources for Linux with AddressSanitizer and UBSan and
-runs 32 end-to-end tests against a fake console tree in a privileged
+runs 35 end-to-end tests against a fake console tree in a privileged
 container. They cover:
 
-- upload checks and the media policy;
-- apply, re-apply, restore and stock copies with linked staging;
+- upload checks and the media policy, including files crafted to hang or
+  exhaust the checks;
+- apply, re-apply, restore and stock copies with linked staging, reusing
+  stage folders where hard links don't work, across a simulated reboot, and
+  switching back to the previous theme;
+- a write that fails at the disk still closing its file;
 - read-only overlays, sandbox views and symlink containment;
 - concurrent requests during an apply, slow and malformed clients;
 - recovery after a hard kill, log rotation and the crash handler;
@@ -911,7 +1029,9 @@ container. They cover:
 - updating in place, from a `.plugin` in etaHEN's folder and from a plain
   `.elf` in PS5 Payload Manager's folders or the plugin's own update folder:
   the program sent to a stand-in for the ELF loader, the hand-over, keeping
-  the overlays, and a copy that isn't newer stepping aside;
+  the overlays, a copy that isn't newer stepping aside, the hand-over at boot
+  (the old copy steps aside before putting the theme back), and no hand-over
+  to a copy that has gone;
 - Save and Discard, preview pictures and duplicates;
 - home music made by the browser's encoder, and damaged or wrong-format
   ATRAC9 files;
@@ -949,6 +1069,15 @@ tests/atrac9/run.sh path/to/bgm_home.at9
 `tests/zstd/run.sh` checks the plugin's zstd decoder against the reference
 `zstd` tool.
 
+```bash
+tests/fuzz/run.sh
+```
+
+Fuzzes the plugin's parsers (zstd, DDS textures, ATRAC9, WAV, image headers,
+JSON, SVG) with libFuzzer, AddressSanitizer and UBSan, 60 seconds each by
+default (`FUZZ_SECONDS` changes it). Inputs that crash or hang are saved in
+`tests/fuzz/out/`.
+
 ## Building from source
 
 ```bash
@@ -982,6 +1111,7 @@ on Ubuntu 24.04. The `.plugin` file is the ELF with etaHEN's plugin header:
 | `tools/` | Table generator, icon generator, plugin packer |
 | `tests/host/` | End-to-end tests and the fake console |
 | `tests/atrac9/`, `tests/zstd/` | Codec cross-checks |
+| `tests/fuzz/` | Fuzzing the parsers |
 | `examples/sample-theme/` | A minimal theme |
 
 ## Firmware support and known limits
@@ -991,7 +1121,9 @@ on Ubuntu 24.04. The `.plugin` file is the ELF with etaHEN's plugin header:
   all discovered on the console, but they haven't been tried there. If a
   theme doesn't show, leave and re-enter the home screen, or jailbreak again;
   the theme is put back at start either way.
-- The home music's position is kept by the console (see
+- New home music is heard only once the console starts its home music again:
+  move to a game or app that has its own music, then come back (see
+  [Home music](#home-music)). Its position is kept by the console (see
   [Music that starts part-way through](#music-that-starts-part-way-through)).
 - After rest mode, the plugin covers the new views ShellUI's restarted apps
   make (see [Stock again after rest mode](#stock-again-after-rest-mode)). An
@@ -1009,7 +1141,8 @@ on Ubuntu 24.04. The `.plugin` file is the ELF with etaHEN's plugin header:
 The manager listens on port 8095 on your local network and has no password.
 Requests that change anything must carry an `X-PS5-Theme` header, which
 browsers won't send from another site, so web pages opened on the console
-can't drive the API. The hand-over request used by updates is accepted only
+can't drive the API. Anyone else on your network can use it, though, so use it
+on a network you trust. The hand-over request used by updates is accepted only
 from the console itself. Every write stays inside `/data/ps5-theme/` and the
 tile's folder. The plugin sends nothing over the internet.
 

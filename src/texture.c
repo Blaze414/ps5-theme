@@ -58,16 +58,24 @@ is_zstd(const uint8_t *p, size_t len) {
 }
 
 
-/* Load a texture file and return its decoded DDS bytes (caller frees).
-   zstd is recognised by its magic bytes, not the file name (uploads arrive
-   as .part files). *compressed tells which it was. */
-uint8_t *
-texture_load(const char *path, size_t *len, int *compressed) {
+/* A texture file's decoded DDS bytes (caller frees), at most `max_decoded`
+   of them: a file declaring more is refused before anything is allocated
+   for it (*too_big, if given, says so). zstd is recognised by its magic
+   bytes, not the file name (uploads arrive as .part files). *compressed
+   tells which it was. */
+static uint8_t *
+load_decoded(const char *path, size_t max_decoded, size_t *len, int *compressed, int *too_big) {
   size_t flen;
+  if(too_big) *too_big = 0;
   uint8_t *file = read_all(path, MAX_DECODED, &flen);
   if(!file) return NULL;
   *compressed = is_zstd(file, flen);
   if(!*compressed) {
+    if(flen > max_decoded) {
+      if(too_big) *too_big = 1;
+      free(file);
+      return NULL;
+    }
     *len = flen;
     return file;
   }
@@ -78,11 +86,12 @@ texture_load(const char *path, size_t *len, int *compressed) {
   /* The content size is optional in zstd frames (the console's own files
      declare it, streamed ones may not): without it, grow the buffer. */
   int64_t size = zstd_content_size(file, flen);
-  if(size == 0 || (size > 0 && (uint64_t)size > MAX_DECODED)) {
+  if(size == 0 || (size > 0 && (uint64_t)size > max_decoded)) {
+    if(too_big && size > 0) *too_big = 1;
     free(file);
     return NULL;
   }
-  size_t cap = size > 0 ? (size_t)size : 16u << 20;
+  size_t cap = size > 0 ? (size_t)size : (16u << 20 < max_decoded ? 16u << 20 : max_decoded);
   for(;;) {
     uint8_t *out = malloc(cap);
     int64_t n = out ? zstd_decompress(file, flen, out, cap) : -1;
@@ -92,11 +101,17 @@ texture_load(const char *path, size_t *len, int *compressed) {
       return out;
     }
     free(out);
-    if(size > 0 || cap >= MAX_DECODED) break;
-    cap *= 2;
+    if(size > 0 || cap >= max_decoded) break;
+    cap = cap * 2 < max_decoded ? cap * 2 : max_decoded;
   }
   free(file);
   return NULL;
+}
+
+
+uint8_t *
+texture_load(const char *path, size_t *len, int *compressed) {
+  return load_decoded(path, MAX_DECODED, len, compressed, NULL);
 }
 
 
@@ -201,10 +216,14 @@ texture_validate(const char *cand, const char *stock, char *why, size_t len) {
     snprintf(why, len, "cannot read the system texture to compare against");
     return -1;
   }
-  uint8_t *c = texture_load(cand, &cl, &cz);
+  /* A replacement must decode to exactly the system texture's length, so
+     no more than that is ever unpacked. */
+  int too_big;
+  uint8_t *c = load_decoded(cand, sl, &cl, &cz, &too_big);
   if(!c) {
     free(s);
-    snprintf(why, len, sz ? "not a valid zstd-compressed texture" : "not a readable texture");
+    if(too_big) snprintf(why, len, "texture is larger than the system texture (%zu bytes unpacked)", sl);
+    else snprintf(why, len, sz ? "not a valid zstd-compressed texture" : "not a readable texture");
     return -1;
   }
   int bad = texture_parse(c, cl, &ct);

@@ -16,10 +16,12 @@
      texture DDS / zstd-compressed DDS: byte-identical header, same length */
 
 #include <fcntl.h>
+#include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <strings.h>
+#include <stdatomic.h>
 #include <unistd.h>
 
 #include <sys/stat.h>
@@ -162,7 +164,7 @@ wav_probe(const char *path, wav_info_t *out) {
       out->data_size = size;
       break;
     }
-    off += 8 + size + (size & 1);
+    off += 8 + (size_t)size + (size & 1);   /* in 32 bits, a size near 4 GB wraps to 0 */
   }
   if(!have_fmt || !out->data_offset || !out->channels || !out->rate) return -1;
   if(out->data_offset + out->data_size > (uint64_t)st.st_size) return -1;
@@ -436,8 +438,178 @@ check_json(const char *cand, const char *stock, char *why, size_t len) {
 
 /* ---------------- entry point ---------------- */
 
+static int validate_now(const char *cand, const char *stock, char *why, size_t len);
+
+
+/* ---- remembered checks ----
+   Checking a 4K texture means decompressing it and the system's, so a theme
+   with many was slow to apply at every start. A result is remembered for the
+   exact pair of files it was made for: device, inode, size and modification
+   time of both, and the plugin version (whose rules made it). Theme and stock
+   files are only ever replaced, never changed in place, so a new or edited
+   file is a different file and is checked again. Kept in CHECKED_FILE so it
+   survives restarts; a check made at upload counts at apply too, because a
+   rename keeps the file's identity. */
+
+#define CHECKED_FILE BASE_DIR "/checked"
+#define CHECKED_MAX  8192
+
+typedef struct file_id {
+  unsigned long long dev, ino, size, mtime_s, mtime_ns;
+} file_id_t;
+
+typedef struct checked {
+  file_id_t cand, stock;
+  int ok;
+  char why[160];
+} checked_t;
+
+static pthread_mutex_t checked_lock = PTHREAD_MUTEX_INITIALIZER;
+static checked_t *checked;
+static int nchecked, checked_loaded, checked_lines;
+
+static int
+file_id(const char *path, file_id_t *id) {
+  struct stat st;
+  if(stat(path, &st) || !S_ISREG(st.st_mode)) return -1;
+  id->dev = st.st_dev;
+  id->ino = st.st_ino;
+  id->size = st.st_size;
+  id->mtime_s = st.st_mtim.tv_sec;
+  id->mtime_ns = st.st_mtim.tv_nsec;
+  return 0;
+}
+
+static int
+same_id(const file_id_t *a, const file_id_t *b) {
+  return a->dev == b->dev && a->ino == b->ino && a->size == b->size &&
+         a->mtime_s == b->mtime_s && a->mtime_ns == b->mtime_ns;
+}
+
+static const char *
+id_line(char *out, size_t size, const checked_t *c) {
+  snprintf(out, size, "%s\t%llu %llu %llu %llu %llu\t%llu %llu %llu %llu %llu\t%d\t%s\n", PLUGIN_VERSION,
+           c->cand.dev, c->cand.ino, c->cand.size, c->cand.mtime_s, c->cand.mtime_ns,
+           c->stock.dev, c->stock.ino, c->stock.size, c->stock.mtime_s, c->stock.mtime_ns, c->ok, c->why);
+  return out;
+}
+
+static void
+checked_add(const checked_t *c) {
+  if(!checked && !(checked = calloc(CHECKED_MAX, sizeof(*checked)))) return;
+  for(int i = 0; i < nchecked; i++) {
+    if(same_id(&checked[i].cand, &c->cand) && same_id(&checked[i].stock, &c->stock)) {
+      checked[i] = *c;
+      return;
+    }
+  }
+  if(nchecked == CHECKED_MAX) {   /* keep the newer half */
+    memmove(checked, checked + CHECKED_MAX / 2, (CHECKED_MAX / 2) * sizeof(*checked));
+    nchecked = CHECKED_MAX / 2;
+  }
+  checked[nchecked++] = *c;
+}
+
+/* Results from earlier runs, made by this version. Called with checked_lock. */
+static void
+checked_load(void) {
+  char line[512], version[16];
+  checked_loaded = 1;
+  FILE *f = fopen(CHECKED_FILE, "r");
+  if(!f) return;
+  while(fgets(line, sizeof(line), f)) {
+    checked_t c;
+    int used = 0;
+    memset(&c, 0, sizeof(c));
+    checked_lines++;
+    if(sscanf(line, "%15[^\t]\t%llu %llu %llu %llu %llu\t%llu %llu %llu %llu %llu\t%d\t%n", version,
+              &c.cand.dev, &c.cand.ino, &c.cand.size, &c.cand.mtime_s, &c.cand.mtime_ns,
+              &c.stock.dev, &c.stock.ino, &c.stock.size, &c.stock.mtime_s, &c.stock.mtime_ns,
+              &c.ok, &used) != 12 || strcmp(version, PLUGIN_VERSION)) {
+      continue;
+    }
+    snprintf(c.why, sizeof(c.why), "%s", line + used);
+    c.why[strcspn(c.why, "\r\n")] = 0;
+    checked_add(&c);
+  }
+  fclose(f);
+}
+
+/* Remember a result: append it, or write the file afresh when it holds many
+   stale lines. Called with checked_lock. */
+static void
+checked_save(const checked_t *c) {
+  char line[512];
+  checked_add(c);
+  if(checked_lines > 2 * nchecked + 64) {
+    char tmp[] = CHECKED_FILE ".tmp";
+    int fd = fs_open_write(tmp);
+    FILE *f = fd < 0 ? NULL : fdopen(fd, "w");
+    if(!f) {
+      if(fd >= 0) close(fd);
+      return;
+    }
+    for(int i = 0; i < nchecked; i++) fputs(id_line(line, sizeof(line), &checked[i]), f);
+    int ok = !ferror(f);
+    if(fclose(f) || !ok || fs_rename(tmp, CHECKED_FILE)) fs_unlink(tmp);
+    else checked_lines = nchecked;
+    return;
+  }
+  if(!fs_write_allowed(CHECKED_FILE)) return;
+  int fd = open(CHECKED_FILE, O_WRONLY | O_CREAT | O_APPEND | O_NOFOLLOW, 0644);
+  if(fd < 0) return;
+  id_line(line, sizeof(line), c);
+  if(write(fd, line, strlen(line)) > 0) checked_lines++;
+  close(fd);
+}
+
+
+static atomic_int remembered_count;
+
+int
+asset_checks_remembered(void) {
+  return atomic_exchange(&remembered_count, 0);
+}
+
+
 int
 asset_validate(const char *cand, const char *stock, char *why, size_t len) {
+  checked_t c;
+  memset(&c, 0, sizeof(c));
+  int ids = !file_id(cand, &c.cand) && !file_id(stock, &c.stock);
+  if(ids) {
+    pthread_mutex_lock(&checked_lock);
+    if(!checked_loaded) checked_load();
+    for(int i = 0; i < nchecked; i++) {
+      if(same_id(&checked[i].cand, &c.cand) && same_id(&checked[i].stock, &c.stock)) {
+        int ok = checked[i].ok;
+        snprintf(why, len, "%s", checked[i].why);
+        pthread_mutex_unlock(&checked_lock);
+        atomic_fetch_add(&remembered_count, 1);
+        return ok ? 0 : -1;
+      }
+    }
+    pthread_mutex_unlock(&checked_lock);
+  }
+
+  int rc = validate_now(cand, stock, why, len);
+
+  /* Only a file that is still the one checked is remembered. */
+  file_id_t after;
+  if(ids && !file_id(cand, &after) && same_id(&after, &c.cand)) {
+    c.ok = !rc;
+    snprintf(c.why, sizeof(c.why), "%s", rc ? why : "");
+    for(char *q = c.why; *q; q++) if(*q == '\t' || *q == '\n' || *q == '\r') *q = ' ';
+    pthread_mutex_lock(&checked_lock);
+    checked_save(&c);
+    pthread_mutex_unlock(&checked_lock);
+  }
+  return rc;
+}
+
+
+static int
+validate_now(const char *cand, const char *stock, char *why, size_t len) {
   struct stat st;
   int kind = asset_kind(stock);
 
