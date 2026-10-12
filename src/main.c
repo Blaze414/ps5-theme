@@ -1473,7 +1473,7 @@ main(void) {
   /* Privileges first: until then the process may only see a sandbox. */
   crumb(CRUMB_MAIN, "raising privileges");
   if(plat_init()) {
-    plat_notify("ps5-theme: could not get privileges. Is etaHEN running?");
+    plat_notify("ps5-theme: could not get privileges. Is the console jailbroken?");
     plat_klog("[ps5-theme] could not raise privileges\n");
     return 1;
   }
@@ -1512,6 +1512,7 @@ main(void) {
   fs_mkdirs(THEMES_DIR);
   fs_mkdirs(STAGE_DIR);
   fs_mkdirs(DUMP_DIR);
+  fs_mkdirs(UPDATE_DIR);
 
   /* 1.09's audio output choice; the plugin no longer plays audio itself. */
   if(!access(BASE_DIR "/audio-route", F_OK)) fs_unlink(BASE_DIR "/audio-route");

@@ -2,11 +2,13 @@
 
    etaHEN starts plugins at boot. After rest mode its Toolbox is often gone,
    so a plugin file copied in then would wait for the next restart. Instead
-   the running copy looks for a newer ps5-theme plugin file in etaHEN's
-   plugin folders and starts it through etaHEN's ELF loader (port 9021, the
-   loader etaHEN itself uses). The new copy finds the old one holding the
-   instance lock, asks it to step aside over the local web API, and carries
-   on with the overlays that are already in place.
+   the running copy looks for a newer copy of itself: a .plugin file (version
+   in etaHEN's header) or a plain .elf (version in the marker every build
+   carries), in etaHEN's plugin folders or in UPDATE_DIR, which works without
+   etaHEN. It starts the newer one through the ELF loader on port 9021 (the
+   standard PS5 payload loader, which etaHEN also runs). The new copy finds
+   the old one holding the instance lock, asks it to step aside over the
+   local web API, and carries on with the overlays that are already in place.
 
    Only one copy may run: the lock is an flock() on a file in BASE_DIR, held
    for the life of the process and released by the kernel when it ends. */
@@ -37,8 +39,13 @@
 #define PLUGIN_MAX_BYTES (32u << 20)
 #define HEADER_BYTES     29          /* "etaHEN_PLUGIN\0" + 9-char title + "\0" + "x.xx\0" */
 #define RETRY_SECONDS    600         /* before starting the same file again */
+#define PLDMGR_PAYLOADS  "/data/pldmgr/payloads"   /* PS5 Payload Manager's payloads */
 
 static atomic_int handoff;
+
+/* In every build, so a plain .elf of the plugin shows which version it is. */
+#define MARKER "PS5THEME-VERSION:"
+__attribute__((used)) static const char version_marker[] = MARKER PLUGIN_VERSION ":" TITLE_ID;
 
 
 /* "1.23" -> 123; -1 if it isn't a version. */
@@ -145,10 +152,68 @@ plugin_file_version(const char *path, off_t *size) {
 }
 
 
-/* Hand the ELF inside a plugin file to etaHEN's loader, which starts it as a
-   new process. */
+/* `needle` in `hay` (the console's C library has no memmem). */
+static const uint8_t *
+find_bytes(const uint8_t *hay, size_t n, const char *needle, size_t m) {
+  for(size_t i = 0; m && i + m <= n; i++) {
+    const uint8_t *p = memchr(hay + i, (unsigned char)needle[0], n - m + 1 - i);
+    if(!p) return NULL;
+    if(!memcmp(p, needle, m)) return p;
+    i = (size_t)(p - hay);
+  }
+  return NULL;
+}
+
+
+/* The version in a plain .elf of ps5-theme (its marker), or -1. Files are
+   remembered by size and time, so each is read once. */
 static int
-start_plugin_file(const char *path, off_t size) {
+elf_file_version(const char *path, const struct stat *st) {
+  static struct { char path[PATH_MAX]; off_t size; time_t mtime; int version; } seen[64];
+  static size_t next;
+  for(size_t i = 0; i < sizeof(seen) / sizeof(*seen); i++) {
+    if(!strcmp(seen[i].path, path) && seen[i].size == st->st_size && seen[i].mtime == st->st_mtime) {
+      return seen[i].version;
+    }
+  }
+  int version = -1;
+  uint8_t *buf = NULL;
+  int fd = -1;
+  if(S_ISREG(st->st_mode) && st->st_size > 64 && (uint64_t)st->st_size <= PLUGIN_MAX_BYTES &&
+     (buf = malloc(st->st_size)) && (fd = open(path, O_RDONLY)) >= 0 &&
+     read(fd, buf, st->st_size) == st->st_size && !memcmp(buf, "\x7f" "ELF", 4)) {
+    /* The prefix also appears on its own (it is what this code searches
+       for): only "<prefix>x.xx:<title ID>" counts. */
+    size_t from = 0;
+    while(version < 0 && from < (size_t)st->st_size) {
+      const uint8_t *m = find_bytes(buf + from, st->st_size - from, MARKER, sizeof(MARKER) - 1);
+      if(!m) break;
+      size_t at = (size_t)(m - buf) + sizeof(MARKER) - 1;
+      from = at;
+      if(at + 5 + sizeof(TITLE_ID) <= (size_t)st->st_size && buf[at + 4] == ':' &&
+         !memcmp(buf + at + 5, TITLE_ID, sizeof(TITLE_ID))) {
+        char v[5];
+        memcpy(v, buf + at, 4);
+        v[4] = 0;
+        version = version_value(v);
+      }
+    }
+  }
+  if(fd >= 0) close(fd);
+  free(buf);
+  snprintf(seen[next].path, PATH_MAX, "%s", path);
+  seen[next].size = st->st_size;
+  seen[next].mtime = st->st_mtime;
+  seen[next].version = version;
+  next = (next + 1) % (sizeof(seen) / sizeof(*seen));
+  return version;
+}
+
+
+/* Hand a program (the file from `offset` on: after a .plugin header, or a
+   whole .elf) to the ELF loader, which starts it as a new process. */
+static int
+start_elf(const char *path, off_t offset, off_t size) {
   struct sockaddr_in addr = { .sin_family = AF_INET, .sin_port = htons(ELF_LOADER_PORT) };
   struct timeval tv = { .tv_sec = 10 };
   uint8_t *buf = malloc(size);
@@ -166,12 +231,12 @@ start_plugin_file(const char *path, off_t size) {
   setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
   plat_socket_nosigpipe(fd);
   if(connect(fd, (struct sockaddr *)&addr, sizeof(addr))) {
-    log_err("update: etaHEN's ELF loader (port %d) is not answering: %s", ELF_LOADER_PORT, strerror(errno));
+    log_err("update: the ELF loader (port %d) is not answering: %s", ELF_LOADER_PORT, strerror(errno));
     close(fd);
     goto done;
   }
-  const uint8_t *p = buf + HEADER_BYTES;
-  size_t left = size - HEADER_BYTES;
+  const uint8_t *p = buf + offset;
+  size_t left = size - offset;
   while(left) {
     ssize_t n = send(fd, p, left, 0);
     if(n < 0 && errno == EINTR) continue;
@@ -193,48 +258,84 @@ done:
 }
 
 
-/* A newer ps5-theme plugin file in etaHEN's plugin folders: start it. */
+/* The newest copy of ps5-theme found so far. */
+typedef struct candidate {
+  char path[PATH_MAX];
+  int version;
+  off_t size, offset;
+  time_t mtime;
+} candidate_t;
+
+
+static void
+consider_dir(const char *dirpath, candidate_t *best) {
+  DIR *dir = opendir(dirpath);
+  if(!dir) return;
+  struct dirent *e;
+  while((e = readdir(dir))) {
+    size_t len = strlen(e->d_name);
+    char path[PATH_MAX];
+    struct stat st;
+    off_t size = 0, offset = 0;
+    int plugin = len > 7 && !strcmp(e->d_name + len - 7, ".plugin");
+    int elf = len > 4 && !strcmp(e->d_name + len - 4, ".elf");
+    if(!plugin && !elf) continue;
+    if(snprintf(path, sizeof(path), "%s/%s", dirpath, e->d_name) >= (int)sizeof(path) || lstat(path, &st)) continue;
+    int v;
+    if(plugin) {
+      v = plugin_file_version(path, &size);
+      offset = HEADER_BYTES;
+    } else {
+      v = elf_file_version(path, &st);
+      size = st.st_size;
+    }
+    if(v > best->version) {
+      best->version = v;
+      best->size = size;
+      best->offset = offset;
+      best->mtime = st.st_mtime;
+      snprintf(best->path, sizeof(best->path), "%s", path);
+    }
+  }
+  closedir(dir);
+}
+
+
+/* A newer copy of ps5-theme where people keep payloads: etaHEN's plugin
+   folders, UPDATE_DIR, and PS5 Payload Manager's payload folders (one level
+   of subfolders). Start the newest. */
 void
 update_check(void) {
-  static const char *const dirs[] = { "/data/etaHEN/plugins", "/data/etahen/plugins" };
+  static const char *const dirs[] = { "/data/etaHEN/plugins", "/data/etahen/plugins", UPDATE_DIR, PLDMGR_PAYLOADS };
   static char tried[PATH_MAX];
   static time_t tried_at, tried_mtime;
-  char best[PATH_MAX] = "";
-  int best_version = my_version();
-  off_t best_size = 0;
-  time_t best_mtime = 0;
+  candidate_t best = { .version = my_version() };
 
-  for(size_t d = 0; d < sizeof(dirs) / sizeof(*dirs); d++) {
-    DIR *dir = opendir(dirs[d]);
-    if(!dir) continue;
+  for(size_t d = 0; d < sizeof(dirs) / sizeof(*dirs); d++) consider_dir(dirs[d], &best);
+  DIR *pm = opendir(PLDMGR_PAYLOADS);
+  if(pm) {
     struct dirent *e;
-    while((e = readdir(dir))) {
-      size_t len = strlen(e->d_name);
-      char path[PATH_MAX];
-      struct stat st;
-      off_t size;
-      if(len < 8 || strcmp(e->d_name + len - 7, ".plugin")) continue;
-      if(snprintf(path, sizeof(path), "%s/%s", dirs[d], e->d_name) >= (int)sizeof(path) || lstat(path, &st)) continue;
-      int v = plugin_file_version(path, &size);
-      if(v > best_version) {
-        best_version = v;
-        best_size = size;
-        best_mtime = st.st_mtime;
-        snprintf(best, sizeof(best), "%s", path);
-      }
+    while((e = readdir(pm))) {
+      char sub[PATH_MAX];
+      if(e->d_name[0] == '.' || snprintf(sub, sizeof(sub), "%s/%s", PLDMGR_PAYLOADS, e->d_name) >= (int)sizeof(sub)) continue;
+      if(fs_is_dir(sub)) consider_dir(sub, &best);
     }
-    closedir(dir);
+    closedir(pm);
   }
-  if(!best[0]) return;
+  char *best_path = best.path;
+  int best_version = best.version;
+  off_t best_size = best.size, best_offset = best.offset;
+  time_t best_mtime = best.mtime;
+  if(!best_path[0]) return;
 
   time_t now = time(NULL);
-  if(!strcmp(best, tried) && best_mtime == tried_mtime && now - tried_at < RETRY_SECONDS) return;
-  snprintf(tried, sizeof(tried), "%s", best);
+  if(!strcmp(best_path, tried) && best_mtime == tried_mtime && now - tried_at < RETRY_SECONDS) return;
+  snprintf(tried, sizeof(tried), "%s", best_path);
   tried_mtime = best_mtime;
   tried_at = now;
 
-  log_msg("update: found ps5-theme %d.%02d in %s, starting it", best_version / 100, best_version % 100, best);
-  if(start_plugin_file(best, best_size)) {
+  log_msg("update: found ps5-theme %d.%02d in %s, starting it", best_version / 100, best_version % 100, best_path);
+  if(start_elf(best_path, best_offset, best_size)) {
     notify("ps5-theme: found version %d.%02d but could not start it. Restart the console to update.",
            best_version / 100, best_version % 100);
     return;

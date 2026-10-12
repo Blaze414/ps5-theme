@@ -5,7 +5,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#define PLUGIN_VERSION "1.23"
+#define PLUGIN_VERSION "1.24"
 #define TITLE_ID       "THEM00001"
 #define WEB_PORT       8095
 
@@ -15,6 +15,7 @@
 #define DUMP_DIR     BASE_DIR "/dump"
 #define STOCK_DIR    BASE_DIR "/stock"
 #define SNAP_DIR     BASE_DIR "/snapshots"
+#define UPDATE_DIR   BASE_DIR "/update"     /* drop a newer ps5-theme.elf or .plugin here */
 #define LOG_DIR      BASE_DIR "/logs"
 #define LOG_FILE     LOG_DIR "/log.txt"
 #define ACTIVE_FILE  BASE_DIR "/active"

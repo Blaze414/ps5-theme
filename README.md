@@ -6,7 +6,7 @@
 
 Custom home-screen themes for jailbroken PS5 consoles on firmware 13.60 and
 below, as an [etaHEN](https://github.com/GronedWaffel/etahen-11.00-13.60)
-plugin. Change the home screen's backgrounds, icons, sounds, fonts and home
+plugin or a standalone payload. Change the home screen's backgrounds, icons, sounds, fonts and home
 music, keep as many themes as you like, and switch between them from the
 console, a phone or a computer. The system is never written: every theme is a
 read-only overlay held in memory, so the console is stock again the moment
@@ -14,8 +14,8 @@ the plugin stops, and the plugin puts your theme back each time etaHEN starts.
 
 ![The theme library](docs/screenshots/library.png)
 
-Version 1.23. Developed and tested on a PS5 with firmware 13.42 and etaHEN
-2.5B (unified build).
+Version 1.24. Developed and tested on a PS5 with firmware 13.42, both with
+etaHEN 2.5B (unified build) and on its own from PS5 Payload Manager.
 
 > **About the screenshots.** They were taken from the author's own console.
 > The test themes in them use Peanuts artwork, which belongs to its rights
@@ -28,6 +28,7 @@ Version 1.23. Developed and tested on a PS5 with firmware 13.42 and etaHEN
 - [What it does](#what-it-does)
 - [Requirements](#requirements)
 - [Install](#install)
+- [Running without etaHEN](#running-without-etahen)
 - [Your first theme](#your-first-theme)
 - [A tour of the manager](#a-tour-of-the-manager)
 - [How it works, and why](#how-it-works-and-why)
@@ -75,8 +76,9 @@ Version 1.23. Developed and tested on a PS5 with firmware 13.42 and etaHEN
 
 ## Requirements
 
-- A PS5 on firmware 13.60 or below, jailbroken, running etaHEN. Tested on
-  13.42 with
+- A PS5 on firmware 13.60 or below, jailbroken, running etaHEN or any
+  jailbreak with the standard ELF loader (see
+  [Running without etaHEN](#running-without-etahen)). Tested on 13.42 with
   [etaHEN 2.5B unified](https://github.com/GronedWaffel/etahen-11.00-13.60/releases/tag/v2.5B-unified.1),
   which covers 11.00 to 13.60 except 11.40.
 - A phone or computer on the same network is the easiest way to add files.
@@ -102,10 +104,45 @@ starts it through etaHEN's ELF loader and hands over to it. Your theme stays
 on the screen the whole time, and no Toolbox or restart is needed, which
 matters after rest mode, when etaHEN's Toolbox is often gone. An open manager
 page reloads itself with the new version. (This works from 1.23 on: to get
-1.23 itself from an older version, restart the console once.)
+1.23 itself from an older version, restart the console once.) A newer
+`ps5-theme.elf` or `.plugin` in `/data/ps5-theme/update/` works the same way,
+with or without etaHEN.
 
-Without etaHEN, any ELF loader works: send `ps5-theme.elf` to port 9021
-after each jailbreak. The theme is then put back only when you load it.
+## Running without etaHEN
+
+The plugin doesn't need etaHEN, only a jailbreak: a kernel exploit and the
+standard PS5 ELF loader (port 9021) that ps5-payload-sdk programs run under.
+It gets its own privileges, and everything else is its own code. Every
+release has both files, which contain the same program:
+
+- `ps5-theme.elf`: for any ELF loader, such as
+  [PS5 Payload Manager](https://github.com/itsPLK/ps5-payload-manager);
+- `ps5-theme.plugin`: for etaHEN, the same program with etaHEN's header.
+
+**With PS5 Payload Manager:**
+
+- **Start it:** put `ps5-theme.elf` in a folder under
+  `/data/pldmgr/payloads/` (or import it from USB) and launch it from the
+  manager. It then does everything it does under etaHEN: the web manager,
+  the Themes tile, and putting the selected theme back.
+- **Start it after every jailbreak:** add it to the manager's autoload list.
+- **Update it:** replace that `ps5-theme.elf` with the newer one (or put the
+  newer one in `/data/ps5-theme/update/`). Within about 10 seconds the
+  running copy finds it, starts it through the ELF loader and hands over,
+  keeping your theme on the screen. Every build carries its version inside
+  the program, which is how a plain `.elf` is recognised.
+
+**Keeping both as a backup:** you can set up `ps5-theme.elf` in Payload
+Manager and `ps5-theme.plugin` with auto-start in etaHEN at the same time.
+Only one copy ever runs: when the second one starts, it finds the first, and
+it exits if it isn't newer or takes over if it is. So whichever way starts
+first, you get one copy, and the newest one.
+
+**What's different without etaHEN:** nothing starts it at boot unless your
+jailbreak or Payload Manager does. Both ways have been run on a PS5 with
+13.42: `ps5-theme.elf` from PS5 Payload Manager, and `ps5-theme.plugin` from
+etaHEN. If something works differently on your setup, the Activity page says
+what happened.
 
 ## Your first theme
 
@@ -485,11 +522,14 @@ anything doesn't match, it applies the theme again as usual.
 Only one copy of the plugin runs at a time: each copy holds a lock file for
 as long as it runs, and the kernel releases it when the process ends.
 
-- Every 10 seconds the running copy looks in etaHEN's plugin folders for a
-  `ps5-theme` plugin file (checked by its header: `etaHEN_PLUGIN`, the title
-  ID `THEM00001`, the version, then an ELF) with a higher version.
-- It sends that file's program to etaHEN's ELF loader on port 9021, the
-  loader etaHEN itself uses, which starts it as a new process.
+- Every 10 seconds the running copy looks in etaHEN's plugin folders,
+  `/data/ps5-theme/update/` and PS5 Payload Manager's payload folders for a
+  newer copy of itself: a `.plugin` file
+  (checked by its header: `etaHEN_PLUGIN`, the title ID `THEM00001`, the
+  version, then an ELF) or a plain `.elf` (checked by the marker
+  `PS5THEME-VERSION:<version>:THEM00001` every build carries).
+- It sends that program to the ELF loader on port 9021 (the standard PS5
+  payload loader, which etaHEN also runs), which starts it as a new process.
 - The new copy finds the lock taken, asks the running copy's version, and if
   it is newer asks it to step aside (`/api/handoff`, accepted only from the
   console itself). The old copy exits, leaving the overlays, and the new one
@@ -690,6 +730,7 @@ On the console:
 | `/data/ps5-theme/snapshots/<id>/` | Unsaved changes' snapshots |
 | `/data/ps5-theme/stage/` | Stage folders behind the live overlays |
 | `/data/ps5-theme/live` | The applied theme's folders, for a new copy to carry on with |
+| `/data/ps5-theme/update/` | Drop a newer `ps5-theme.elf` or `.plugin` here to update |
 | `/data/ps5-theme/logs/` | Log and crash reports |
 | `/data/ps5-theme/dump/` | The asset listing and mount table, for reference |
 
@@ -858,7 +899,7 @@ tests/host/run.sh
 ```
 
 Builds the real plugin sources for Linux with AddressSanitizer and UBSan and
-runs 30 end-to-end tests against a fake console tree in a privileged
+runs 32 end-to-end tests against a fake console tree in a privileged
 container. They cover:
 
 - upload checks and the media policy;
@@ -867,8 +908,10 @@ container. They cover:
 - concurrent requests during an apply, slow and malformed clients;
 - recovery after a hard kill, log rotation and the crash handler;
 - new sandbox views made after a theme is applied (as after rest mode);
-- updating in place: a newer plugin file started through a stand-in for
-  etaHEN's ELF loader, the hand-over, and keeping the overlays;
+- updating in place, from a `.plugin` in etaHEN's folder and from a plain
+  `.elf` in PS5 Payload Manager's folders or the plugin's own update folder:
+  the program sent to a stand-in for the ELF loader, the hand-over, keeping
+  the overlays, and a copy that isn't newer stepping aside;
 - Save and Discard, preview pictures and duplicates;
 - home music made by the browser's encoder, and damaged or wrong-format
   ATRAC9 files;

@@ -11,6 +11,7 @@ import http.client
 import json
 import os
 import random
+import re
 import shutil
 import socket
 import struct
@@ -272,7 +273,7 @@ S = {}  # shared state between ordered tests
 
 def t_startup():
     s = status()
-    assert s["fw"] == "13.42" and s["version"] == "1.23" and s["themes"] == [], s
+    assert s["fw"] == "13.42" and s["version"] == "1.24" and s["themes"] == [], s
     listing = open(f"{BASE}/dump/assets-v2-13.42.txt").read()
     assert f"{VSH}/bg_hub_default.dds.zst" in listing
     assert f"{HOME}/bg.png" in listing and "/mnt/rnps/apps/NPXS40099/a.png" in listing
@@ -282,7 +283,7 @@ def t_startup():
     assert open("/tmp/tile-registered").read().strip() == "THEM00001"
     assert "starting" in log_text()
     notes = open("/tmp/notifications.txt").read()
-    assert "ps5-theme 1.23 starting" in notes and "ps5-theme ready" in notes, notes
+    assert "ps5-theme 1.24 starting" in notes and "ps5-theme ready" in notes, notes
 
 
 def t_ui_and_icon_served():
@@ -531,11 +532,20 @@ def plugin_file(version, binary=ASAN):
     return b"etaHEN_PLUGIN\0THEM00001\0" + version.encode() + b"\0" + open(binary, "rb").read()
 
 
-def t_update_hands_over():
-    """A newer plugin file is started through etaHEN's ELF loader and takes over, keeping the theme."""
-    s = wait_applied("night")   # left applied by the previous test
+def plain_elf(version, binary=ASAN):
+    """A plain ps5-theme .elf whose version marker says `version`."""
+    data = open(binary, "rb").read()
+    marker = re.search(rb"PS5THEME-VERSION:\d\.\d\d:THEM00001", data)
+    assert marker, "no version marker in the build"
+    return data[:marker.start()] + f"PS5THEME-VERSION:{version}:THEM00001".encode() + data[marker.end():]
+
+
+def take_over(path, data, version):
+    """Put a newer copy at `path` and let a stand-in for the ELF loader on port
+    9021 run what the plugin sends it. Returns what the loader received, once
+    the new copy has taken over and the old one has exited."""
+    s = wait_applied("night")
     assert not s["applying"], s
-    unmounted, carried = log_text().count("unmounted " + HOME), log_text().count("carrying on with")
     old, received, started = S["plugin"], [], threading.Event()
     srv = socket.socket()
     srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
@@ -543,35 +553,84 @@ def t_update_hands_over():
     srv.listen(1)
     srv.settimeout(40)
 
-    def loader():   # stands in for etaHEN's ELF loader: runs what it is sent
+    def loader():
         try:
             conn, _ = srv.accept()
         except OSError:
             return
-        data = b""
+        got = b""
         while chunk := conn.recv(1 << 20):
-            data += chunk
+            got += chunk
         conn.close()
-        received.append(data)
-        write("/tmp/ps5-theme-new", data)
+        received.append(got)
+        write("/tmp/ps5-theme-new", got)
         os.chmod("/tmp/ps5-theme-new", 0o755)
-        S["new"] = Plugin(binary="/tmp/ps5-theme-new", env={"PS5THEME_TEST_VERSION": "9.99"})
+        S["new"] = Plugin(binary="/tmp/ps5-theme-new", env={"PS5THEME_TEST_VERSION": version})
         started.set()
 
     thread = threading.Thread(target=loader)
     thread.start()
-    os.makedirs("/data/etaHEN/plugins", exist_ok=True)
-    write("/data/etaHEN/plugins/ps5-theme.plugin.tmp", plugin_file("9.99"))
-    os.rename("/data/etaHEN/plugins/ps5-theme.plugin.tmp", "/data/etaHEN/plugins/ps5-theme.plugin")
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    write(path + ".tmp", data)
+    os.rename(path + ".tmp", path)
     try:
-        assert started.wait(45), "the newer plugin file was not started"
-        assert received[0] == open(ASAN, "rb").read(), "the loader did not get the plugin's program"
+        assert started.wait(45), "the newer copy was not started"
         end = time.time() + 30
         while old.alive():
             assert time.time() < end, "the old copy did not hand over"
             time.sleep(0.1)
         S["plugin"] = S["new"]
         S["plugin"].wait_port()
+    finally:
+        srv.close()
+        thread.join(5)
+    return received[0]
+
+
+def t_update_from_payload_manager():
+    """A newer ps5-theme.elf among PS5 Payload Manager's payloads takes over too."""
+    carried = log_text().count("carrying on with")
+    folder = "/data/pldmgr/payloads/ps5-theme"
+    write("/data/pldmgr/payloads/other/tool.elf", b"\x7fELF" + b"\0" * 200)   # someone else's payload
+    try:
+        got = take_over(f"{folder}/ps5-theme.elf", plain_elf("9.97"), "9.97")
+        assert got == plain_elf("9.97")
+        assert status()["applied"] == "night"
+        assert f"update: found ps5-theme 9.97 in {folder}/ps5-theme.elf" in log_text()
+        assert log_text().count("carrying on with") == carried + 1
+        assert len(mounts_on(HOME)) == 1 and crc_file(f"{HOME}/bg.png") == zlib.crc32(S["bg"])
+    finally:
+        shutil.rmtree("/data/pldmgr", ignore_errors=True)
+
+
+def t_update_from_plain_elf():
+    """Without etaHEN: a newer ps5-theme.elf in the plugin's own update folder takes over."""
+    unmounted, carried = log_text().count("unmounted " + HOME), log_text().count("carrying on with")
+    data = plain_elf("9.98")
+    try:
+        got = take_over(f"{BASE}/update/ps5-theme.elf", data, "9.98")
+    finally:
+        os.unlink(f"{BASE}/update/ps5-theme.elf")
+    assert got == data, "the loader did not get the whole program"
+    assert status()["applied"] == "night"
+    assert len(mounts_on(HOME)) == 1 and crc_file(f"{HOME}/bg.png") == zlib.crc32(S["bg"])
+    text = log_text()
+    assert "update: found ps5-theme 9.98 in /data/ps5-theme/update/ps5-theme.elf" in text
+    assert text.count("carrying on with") == carried + 1, "the new copy did not keep the overlays"
+    assert text.count("unmounted " + HOME) == unmounted, "the overlays were taken down"
+    # Other .elf files there are not mistaken for an update.
+    write(f"{BASE}/update/other.elf", b"\x7fELF" + b"\0" * 100)
+    time.sleep(12)
+    assert "found ps5-theme" not in log_text()[len(text):]
+    os.unlink(f"{BASE}/update/other.elf")
+
+
+def t_update_hands_over():
+    """With etaHEN: a newer .plugin in etaHEN's plugin folder takes over, keeping the theme."""
+    unmounted, carried = log_text().count("unmounted " + HOME), log_text().count("carrying on with")
+    try:
+        got = take_over("/data/etaHEN/plugins/ps5-theme.plugin", plugin_file("9.99"), "9.99")
+        assert got == open(ASAN, "rb").read(), "the loader did not get the plugin's program"
         s = status()
         assert s["applied"] == "night", s
         assert len(mounts_on(HOME)) == 1 and crc_file(f"{HOME}/bg.png") == zlib.crc32(S["bg"])
@@ -597,8 +656,6 @@ def t_update_hands_over():
         assert S["plugin"].alive()
     finally:
         shutil.rmtree("/data/etaHEN", ignore_errors=True)
-        srv.close()
-        thread.join(5)
 
 
 def raw(data, read=True):
@@ -1182,7 +1239,7 @@ TESTS = [t_startup, t_ui_and_icon_served, t_mutations_need_token, t_create_theme
          t_upload_is_verified, t_apply_verifies_and_is_read_only, t_reapply_picks_up_edits,
          t_stock_mirror_and_linked_staging,
          t_firmware_mismatch_is_refused, t_delete_rules, t_concurrent_requests_during_apply,
-         t_restore_stock_cleans_up, t_overlays_reach_system_views, t_recovers_after_hard_kill, t_update_hands_over, t_survives_malformed_and_abusive_requests,
+         t_restore_stock_cleans_up, t_overlays_reach_system_views, t_recovers_after_hard_kill, t_update_from_payload_manager, t_update_from_plain_elf, t_update_hands_over, t_survives_malformed_and_abusive_requests,
          t_slow_clients_do_not_block_others, t_log_rotates, t_media_policy, t_music, t_settings_and_duplicate, t_preview_pictures, t_save_and_discard,
          t_home_background_textures, t_home_music_at9, t_long_mount_paths_use_parent_folder, t_system_is_byte_identical_afterwards, t_crash_is_reported_and_recovered,
          t_privilege_failure_exits_cleanly]
