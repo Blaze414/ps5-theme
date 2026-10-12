@@ -38,7 +38,7 @@ etaHEN 2.5B (unified build) and on its own from PS5 Payload Manager.
 - [Building from source](#building-from-source)
 - [Project layout](#project-layout)
 - [Firmware support and known limits](#firmware-support-and-known-limits)
-- [Network access](#network-access)
+- [Security](#security)
 - [Removing](#removing)
 - [Development Approach](#development-approach)
 - [Acknowledgements](#acknowledgements)
@@ -511,9 +511,8 @@ The plugin's own parsers read whatever is uploaded, so they get the most
 care: every read is bounds-checked, each kind of file has a size limit, a
 texture is never unpacked beyond the system texture's size, and the parsers
 are fuzzed with libFuzzer under AddressSanitizer and UBSan
-(`tests/fuzz/run.sh`). Fuzzing found one bug, now fixed (see
-[A WAV file that never finished checking](#a-wav-file-that-never-finished-checking)).
-It makes bugs less likely; it doesn't prove there are none.
+(`tests/fuzz/run.sh`). The results, and the bugs found and fixed, are under
+[Security](#security).
 
 ### Verified end to end
 
@@ -870,7 +869,8 @@ size near 4 GB made the step to the next chunk wrap around to zero in 32-bit
 arithmetic, so the same chunk was read forever. Anyone on the network could
 upload one and tie up the manager. **Solution:** the step is computed in 64
 bits, a host test uploads that file, and the fuzz targets now flag any input
-that takes more than 10 seconds.
+that takes more than 10 seconds. The measured before and after are under
+[Security](#security).
 
 #### "File name too long"
 
@@ -1136,15 +1136,83 @@ on Ubuntu 24.04. The `.plugin` file is the ELF with etaHEN's plugin header:
 - etaHEN's plugin **Stop** ends the plugin at once: overlays stay until you
   choose **Restore stock**, start the plugin again, or reboot.
 
-## Network access
+## Security
 
-The manager listens on port 8095 on your local network and has no password.
-Requests that change anything must carry an `X-PS5-Theme` header, which
-browsers won't send from another site, so web pages opened on the console
-can't drive the API. Anyone else on your network can use it, though, so use it
-on a network you trust. The hand-over request used by updates is accepted only
-from the console itself. Every write stays inside `/data/ps5-theme/` and the
-tile's folder. The plugin sends nothing over the internet.
+### Who can reach the plugin
+
+- **Anyone on your local network.** The manager listens on port 8095 and
+  has no password, so anyone on the network can upload files and apply
+  themes. Use it on a network you trust.
+- **Not web pages.** Requests that change anything must carry an
+  `X-PS5-Theme` header, which browsers won't send from another site, so a
+  web page opened on the console can't drive the API.
+- **Not other machines, for updates.** The hand-over request used by updates
+  is accepted only from the console itself.
+- **Nothing outside your network.** The plugin sends nothing over the
+  internet.
+
+**Why this matters:** to mount overlays, the plugin runs as root, with
+system-level rights and outside the console's sandbox. A memory bug in the
+code that reads uploads could let someone on your network run code on the
+console with those rights. So that code gets the most testing.
+
+### What protects the system
+
+- Every write goes through the write guard and stays inside
+  `/data/ps5-theme/` and the tile's folder (see
+  [Never writing the system](#never-writing-the-system), including what it
+  doesn't cover).
+- Themes are read-only overlays held in memory, so a restart always brings
+  back the stock console.
+- Only media can be replaced, never code, and each file is checked against
+  the system file it replaces (see
+  [What the checks cover, and what they don't](#what-the-checks-cover-and-what-they-dont)).
+
+### Fuzzing results
+
+The plugin's parsers for uploaded files were fuzzed with libFuzzer,
+AddressSanitizer and UBSan (`tests/fuzz/run.sh`) on 12 October 2026. Fonts
+and video aren't listed: only their first bytes are read. These are the
+numbers from those runs, made after the fixes below:
+
+| Parser | Inputs tried | Result |
+|---|---|---|
+| zstd decoder | 495,977 in 60 s | no findings |
+| DDS textures | 473,116 in 5 min | no findings |
+| ATRAC9 | 202,175 in 5 min | no findings |
+| WAV | 3,781,560 in 60 s | no findings |
+| PNG / JPEG / WebP headers | 2,432,525 in 60 s | no findings |
+| JSON | 3,274,997 in 60 s | no findings |
+| SVG check | 8,943,201 in 60 s | no findings |
+
+"No findings" means no crash, no sanitizer report and no input taking more
+than 10 seconds. The runs used a Linux x86-64 build of the same source, not
+the console's build.
+
+### Bugs found, and proof they're fixed
+
+Each fix has a host test, and each test was also run against the old code to
+make sure it catches the bug.
+
+| Bug | Found by | Old code | Fixed |
+|---|---|---|---|
+| **A WAV file whose check never ended.** A chunk size of `0xFFFFFFF7` made the step to the next chunk wrap to 0 in 32-bit arithmetic. | Fuzzing: the WAV target stopped making progress, spinning at full CPU on a 181-byte file. | The test's 48-byte upload got no answer (timed out after 30 s) and tied up one of the manager's 4 worker threads for good. Four such uploads would leave it unable to serve anyone. | Refused at once: "not a valid WAV file". |
+| **A texture unpacked with no limit.** A 25-byte file claiming to unpack to 200 MB. | Review | Room for 200 MB was set aside before the file was found to be invalid ("not a valid zstd-compressed texture"). | Refused before unpacking: "larger than the system texture". The texture fuzz target ran about 17 times faster afterwards (93 to 1,577 inputs a second). |
+| **A file left open when saving failed.** `fsync(fd) \|\| close(fd)` skipped the close when `fsync` failed. | Review | 25 failed saves raised the plugin's open files from 8 to 33, one leaked per failure. | No file left open (the test allows a margin of 3 for open connections), `theme.ini` intact, no temporary file left behind. |
+| **No plugin running after a restart.** An older copy started by etaHEN started a newer one, then kept the newer one waiting while it put the theme back. | Console log | 13:49:43 newer copy starts; 13:50:03 it gives up; 13:50:31 the old copy steps aside anyway. Nothing ran until it was started again at 14:14. The host test fails: "the old copy applied before handing over". | On the console with 1.30: the old copy started 1.30 at 15:41:58, finished putting the theme back at 15:42:45 and handed over at 15:42:46, and 1.30 kept running. |
+
+### What isn't covered
+
+- **Fuzzing makes bugs less likely, not impossible.** It ran for minutes,
+  not days.
+- **The HTTP server is not fuzzed.** Request handling (`src/web.c`) is tested
+  with malformed, oversized and slow requests in the host suite.
+- **A file that passes can still upset the console's own decoders.** The
+  checks are about format and structure, not proof that every decoder
+  handles a file safely.
+- **Another program on the console with full rights** could get around the
+  write guard, but such a program can write the system directly anyway.
+- **There is no password.** Anyone on your network can use the manager.
 
 ## Removing
 
