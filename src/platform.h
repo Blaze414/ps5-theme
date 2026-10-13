@@ -52,6 +52,51 @@ void     plat_crash_regs(void *ucontext, uint64_t *rip, uint64_t *rsp, uint64_t 
 /* Name this process's main thread, as etaHEN's loader names a plugin. */
 void     plat_set_name(const char *name);
 
+/* Watch files for being opened, read and closed by any process, for up to
+   `seconds`: seen(index into paths, "open"/"read"/"close", milliseconds
+   since the start, ctx) for each. Files that can't be watched are skipped.
+   -1 if watching isn't possible at all. For diagnosis. */
+int      plat_watch_files(const char *const *paths, int n, int seconds,
+                          void (*seen)(int index, const char *what, long ms, void *ctx), void *ctx);
+
+/* The process whose kernel command name is `name`, or -1. */
+int      plat_find_process(const char *name);
+
+/* The live process with a thread named `name` (see plat_set_name), other
+   than `except`, or -1: how another program finds the running plugin, as
+   every payload's process is named after the loader ("payload.elf"). */
+int      plat_find_named_thread(const char *name, int except);
+
+/* When process `pid` started (an opaque, nonzero count), or 0 if there is no
+   such live process: with the pid, it tells a process from a later one
+   that reused the pid. */
+unsigned long long plat_process_start(int pid);
+
+/* Mount points of this plugin's overlays (mounts of folders under
+   `stage_prefix`) that start with `under`, oldest first, from the console's
+   mount table. -1 where it can't be listed that way (emulated mounts). */
+int      plat_our_mounts(const char *stage_prefix, const char *under, char (*out)[1024], int max);
+
+/* Every thread: "pid tid name / process name" lines, for diagnosis. */
+void     plat_dump_threads(FILE *out);
+
+/* Every process, one "pid name" line each, for diagnosis. */
+void     plat_dump_processes(FILE *out);
+
+/* Wait up to `ms` for a mount or unmount anywhere (PLAT_EV_MOUNTS), or for
+   process `pid` to exit (PLAT_EV_EXIT, when pid > 0). 0 on timeout; where
+   events aren't available it just waits. */
+#define PLAT_EV_MOUNTS 1
+#define PLAT_EV_EXIT   2
+int      plat_wait_events(int pid, int ms);
+
+/* Wait up to `ms` for process `pid` to exit: 1 once it has (or if there is
+   no such process), 0 on timeout. For one watched process per thread. */
+int      plat_wait_exit(int pid, int ms);
+
+/* One unmount attempt, without waiting for the folder to be free. */
+int      plat_unmount_once(const char *on);
+
 /* Keep writes to a closed peer from raising SIGPIPE. */
 void     plat_socket_nosigpipe(int fd);
 

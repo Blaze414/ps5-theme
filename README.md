@@ -14,7 +14,7 @@ the plugin stops, and the plugin puts your theme back each time etaHEN starts.
 
 ![The theme library](docs/screenshots/library.png)
 
-Version 1.30. Developed and tested on a PS5 with firmware 13.42, both with
+Version 1.53. Developed and tested on a PS5 with firmware 13.42, both with
 etaHEN 2.5B (unified build) and on its own from PS5 Payload Manager.
 
 > **About the screenshots.** They were taken from the author's own console.
@@ -51,7 +51,13 @@ etaHEN 2.5B (unified build) and on its own from PS5 Payload Manager.
   phone or computer on your network at `http://<console-ip>:8095`.
 - **Build a theme from parts.** Switch on what you want to change and add a
   file: background, icons, home music, system sounds, fonts, animations,
-  video, textures and other images.
+  video, textures and other images, the home screen's own tiles and the
+  interface's icons.
+- **Game and app icons.** Change the icon, background and logo of any
+  installed game or app, homebrew and PlayStation Network artwork included.
+  The Game Library shows them at once, and the home screen after rest mode;
+  games and apps keep starting as before (see
+  [Changing game and app icons safely](#changing-game-and-app-icons-safely)).
 - **Any file, fitted for you.** One image fills every size of an asset. Any
   audio file is converted to the exact format and loudness of the sound it
   replaces, including the console's ATRAC9 home music. The browser does this,
@@ -108,6 +114,15 @@ page reloads itself with the new version. (This works from 1.23 on: to get
 1.23 itself from an older version, restart the console once.) A newer
 `ps5-theme.elf` or `.plugin` in `/data/ps5-theme/update/` works the same way,
 with or without etaHEN.
+
+**If the manager can't be reached:** start ps5-theme again (from the Toolbox
+or PS5 Payload Manager). The new copy takes over from the running one even
+when that one doesn't answer, and keeps your theme. If that doesn't help,
+start `ps5-theme-stop.elf` from a payload loader or PS5 Payload Manager, then
+start ps5-theme again. It stops the running copy and leaves your theme on the
+screen, apart from the games' and apps' pictures until ps5-theme runs again
+(see [Stopping without a restart](#stopping-without-a-restart)). No restart
+is needed in either case.
 
 ## Running without etaHEN
 
@@ -273,7 +288,8 @@ had loaded, so the theme's music doesn't start the moment it's applied. Move
 to a game or app on the home screen that has its own music, so the console
 switches to that music, then come back: the home screen then starts its music
 again and plays the theme's. The same applies after a restart, since the home
-screen loads its music before the jailbreak and the plugin start.
+screen loads its music before the jailbreak and the plugin start. The result
+of the apply, the section's note and a notification on the console say so.
 
 ![The music editor](docs/screenshots/music-editor.png)
 
@@ -308,6 +324,106 @@ screen loads its music before the jailbreak and the plugin start.
 - **Video:** clips in the same container (MP4 or WebM).
 - **Textures:** other system DDS textures. Any image is encoded to the
   texture's exact format and size.
+
+#### Interface icons
+
+The console draws many of its interface icons, buttons and symbols (search,
+settings, controller buttons and more) from resource files in
+`/system_ex/vsh_asset`. This section lists them and how many pictures each
+holds: on 13.42, `Sce.PlayStation.PUI_UI3.rco` holds 1,432.
+
+**Use your own pictures:** type a picture's name (search, settings, home,
+power, trophies and so on) or a number from the test into the lookup box,
+then choose an image for it. It is written in exactly the format of the
+console's picture. For a vector icon, your picture is drawn inside the
+console's own SVG. **Reset** puts one picture back; with nothing typed, the
+box lists the pictures the theme changes.
+
+It also offers a test that shows which picture is where, one file at a
+time. **Number vector icons** (start with these, in
+`Sce.PlayStation.PUI_UI3.rco`) or **Number all** turns each picture of that
+file into its own number on a pink square, drawn in exactly the format of
+the console's own picture. Apply the theme, then put the console in rest mode
+and wake it: the interface reads these files when it starts. Type any number
+you see into the lookup box to find out which picture it is. **Remove** puts
+the console's own pictures back. If the interface keeps restarting with the
+theme applied, the plugin takes the theme down by itself (see
+[When the interface keeps restarting](#when-the-interface-keeps-restarting)).
+On 13.42 the test showed, among others: search 9406 (`iconid_search`),
+settings 9414 (`iconid_settings`), and the Control Center's Home, Switcher,
+Notifications, Game Base, Music, Downloads, Sound, Mic, Accessories and Power
+(`iconid_home`, `iconid_switcher`, `iconid_notification`,
+`iconid_game_base`, `iconid_music`, `iconid_download`,
+`iconid_sound_speaking`, `iconid_mic`, `iconid_game_controller_1`,
+`iconid_power`). Nothing is drawn beside the **Games** and **Media** tabs.
+
+#### Home screen tiles
+
+The console's own tiles (PlayStation Store, PlayStation Plus, Game Library,
+Media Gallery, Welcome and others) take their icons from each app's own
+`icon0.png`, not from the interface files. This section lists them by name,
+with **Change icon** (written in exactly the format of the console's icon,
+every copy of it) and, where the tile has one, **Change background** (the
+picture shown while the tile is selected). **Number tile icons** is the same
+kind of test as above: each icon becomes the number in front of its name.
+On 13.42 this was seen working on the console for the Games tab's tiles and
+the Media tab's Discover, Music Home, All Apps, Live TV and App Library, and
+Discover's own background.
+
+
+#### Games and apps
+
+Every installed game and app, homebrew included, keeps its pictures in its
+metadata folder, `/user/appmeta/<title ID>/`, and most PS5 games also in
+the `sce_sys` folder of their installation, `/user/app/<title ID>/sce_sys/`.
+This section lists them by name with a **Change** button for each picture,
+which writes your picture into every copy of it, each in exactly the
+console's format (PNG with the console's own chunks, BC7 or DXT1 textures
+behind the console's own header). A title's `param.json`, license, keys,
+trophies and everything else stay protected, and so does the rest of
+`/user/app` and the plugin's own tile.
+
+Some games' tiles show pictures the console downloaded from PlayStation
+Network instead, kept per title in `/user/catalog_downloader/appmeta/<title ID>/`
+and per game in `/user/catalog_downloader/conceptmeta/<concept>/`, a folder
+that a game's editions share (on 13.42, Death Stranding Director's Cut's tile
+points at `conceptmeta/234585`). The plugin reads from the console's app
+database, read-only, which titles use which concept folder, and lists those
+pictures with the title, so **Change** writes them too. These files are
+WebP or JPEG pictures under `.png` names, often in numbered copies
+(`icon0_11.png`, `logo_00.png` to `logo_30.png`): each is written in the
+format it really holds, and the numbered copies count as the same picture.
+Browsers that can't make WebP pictures (Safari) can't change those copies;
+Chrome, Edge and Firefox can. When two installed titles share a concept,
+changing that picture changes it for both.
+
+The buttons name each picture by what it is: **Icon** (the game's tile on
+the home screen and in the Game Library), **Background** (shown behind the
+home screen while the game is selected), **Logo** (the game's name as
+artwork) and, for some games, **other artwork**. Hovering a button shows
+where the picture appears and which files hold it.
+
+After you apply the theme, the Game Library and the backgrounds show the new
+pictures straight away. The home screen's icons change once you put the
+console in rest mode and wake it: the home screen reads them only as it
+starts. The result of the apply, and a notification on the console, say so.
+
+On firmware 13.42 the home screen (ShellUI) reads a title's pictures only
+through its own sandbox's view of `/user`, by the paths in the console's app
+database (for example `/user/app/<title ID>/sce_sys/icon0.png`), so that is
+the only place the plugin puts them: never the real folders (the game
+itself starts from them) or other apps' views. When ShellUI closes (rest
+mode), the system's launcher (SceLncService) takes its sandbox down, and an
+overlay left inside makes that fail, after which no game or app would start
+(error CE-105733-9) until a restart. So a thread of the plugin's own watches
+ShellUI's process and takes the overlays out of its sandbox the moment it
+exits, also while the plugin is busy applying a theme, and nothing is put
+into that sandbox afterwards. ShellUI's next sandbox is covered as soon as
+its views appear, before the home row is read. Until the plugin has found
+ShellUI's process, games' and apps' pictures wait, so on a firmware where it
+can't be found they are never put in place. [PS5 game icons that stayed the
+same](#ps5-game-icons-that-stayed-the-same) and [Apps that wouldn't
+start](#apps-that-wouldnt-start) tell how this was worked out.
 
 #### Save and Discard
 
@@ -456,6 +572,13 @@ nothing) and overlays any new view from the same stage folders, checks it,
 and logs it. It never takes anything down to do this, so there's no stock
 flash, and nothing is forced off while an app is using it.
 
+Some views are views of views. The console shows `/user` again as
+`/original_user`, and ShellUI's sandboxes then show
+`/original_user/appmeta`. The plugin follows such a chain back to the real
+folder (`/user/appmeta`), so a game's icon is overlaid in every place the
+home screen might read it. It does this only for `/user`, the one place it
+happens.
+
 ### The 88-character mount point limit
 
 The PS5 kernel keeps a mount point's name in a fixed 88-byte field, as
@@ -467,8 +590,9 @@ with only your files changed.
 ### Only media, checked against the system file
 
 `src/policy.c` decides what a theme may replace: only media, and only inside
-ShellUI's React Native apps (`/system_ex/rnps/apps`, `/mnt/rnps/apps`) and
-its VSH assets (`/system_ex/vsh_asset`). Each file is checked against the
+ShellUI's React Native apps (`/system_ex/rnps/apps`, `/mnt/rnps/apps`), its
+VSH assets (`/system_ex/vsh_asset`), and installed titles' metadata
+(`/user/appmeta`, pictures only). Each file is checked against the
 system file it replaces when it is uploaded, and again when the theme is
 applied:
 
@@ -482,6 +606,8 @@ applied:
 | JSON | Valid (depth-limited parser); same top-level type; animations keep their `w`/`h` canvas |
 | MP4 / WebM | Same container |
 | DDS / `.dds.zst` textures | Fully decoded (built-in zstd decoder, checksum verified); the DDS header must be byte-identical to the system texture and the data exactly the right length |
+| Interface resource files (`.rco`) | The console's own file with only pictures changed: each PNG matching the console's picture in every chunk but its image data, and that data complete and sound (fully decompressed and checked); each SVG keeping the console's opening and passing the SVG check; everything else byte-identical |
+| Games' and apps' pictures (`/user/appmeta`) | Pictures only, by the rules above; a title's `param.json`, `param.sfo` and anything else in its folder are protected |
 | Everything else | Protected: JavaScript bundles, executables, libraries and unknown types can't be replaced |
 
 **Why:** a file in the same format as the original, with the same
@@ -539,7 +665,9 @@ The home screen's asset folder is 169 MB on 13.42.
 
 - **Once per firmware,** the first apply that touches a folder keeps a copy
   of it under `/data/ps5-theme/stock/<firmware>/`, checked byte for byte
-  against the system.
+  against the system. An installed title's folder changes when the title is
+  updated, so its copy is compared with the folder again at each apply
+  (while none of our overlays covers it) and made again if they differ.
 - **Every apply** builds its stage folder by hard-linking that copy's files,
   and your theme's files too, which takes no time and no space. Theme and
   stock files are only ever replaced, never edited in place, so neither can
@@ -616,9 +744,44 @@ as long as it runs, and the kernel releases it when the process ends.
   ID, and the old copy steps aside only if that process is still there.
 - A copy that isn't newer leaves the running one alone and exits. The new
   copy names itself `THEM00001`, as etaHEN's loader names plugins.
+- If the running copy doesn't answer for 10 seconds (its web server can be
+  down after rest mode, see [A manager that stopped answering](#a-manager-that-stopped-answering)),
+  the new copy finds its process and asks it to step aside with a signal
+  (`SIGUSR1`). Each copy writes its process ID and start time to
+  `/data/ps5-theme/pid` once it holds the lock, so a later process that
+  happens to get the same ID is never mistaken for it; the thread name is a
+  fallback. Copies before 1.50 end on that signal, which also leaves their
+  overlays in place.
 
 **Why:** after rest mode etaHEN's Toolbox is often unavailable, and that was
 the only way to restart a plugin without restarting the console.
+
+### Stopping without a restart
+
+`ps5-theme-stop.elf` is a small separate program for when the manager can't
+be reached. Whether the plugin runs is decided by its lock alone, and the
+tool changes overlays only while it holds that lock itself, never under a
+running copy. If a copy runs, the tool finds it (by `/data/ps5-theme/pid`,
+or its thread name) and asks it to stop (`SIGUSR2`). The plugin then takes
+out only the overlays of games' and apps' pictures and exits. Those must not
+stay in the home screen's view with nothing running to take them out at rest
+mode (see [Apps that wouldn't start](#apps-that-wouldnt-start)). The rest of
+the theme stays, and the next copy carries on with it and puts the pictures
+back. A copy that doesn't stop within two minutes is ended, and so is a copy
+from before 1.50, which ends on the signal at once; once the lock is free
+the tool takes out the pictures' overlays it left. A running copy the tool
+can't find is left alone, and what the tool saw is written to
+`/data/ps5-theme/dump/stop.txt`. It says what it did in a notification.
+
+Overlays are taken out (here, and when ShellUI exits at rest mode) by what
+the console's mount table shows, not only by the plugin's records, so an
+overlay missing from the records still comes out.
+
+After rest mode the system keeps some apps' older sandboxes, with the
+theme's overlay still in their view of `/system_ex/vsh_asset`. A copy that
+starts carries on with the theme all the same: such leftovers stay recorded
+and come down with the next theme change. Only a game's or app's picture
+left in one makes it apply the theme again, which takes it out.
 
 ### Save and Discard
 
@@ -693,6 +856,94 @@ just before where playback continues.
 bit allocation, Huffman coding) and a lot of CPU. It runs in a Web Worker so
 the page stays responsive, and it yields with `MessageChannel` instead of
 timers, which browsers throttle.
+
+### Interface pictures in resource files
+
+ShellUI keeps its interface pictures in resource files (`RCOF` version
+0x110, the layout the PS Vita uses): a 0x50-byte header with the offset and
+size of nine tables, an element tree, string and ID tables, and at the end a
+file table holding the embedded files. Each `texture` element points into the
+file table (`src`, and `src_4k` for a 4K version) and is a PNG or an SVG,
+whatever its declared type says: on 13.42 three "SVG" entries (the app tile
+placeholders) hold PNG data. The
+same files hold the interface sounds (VAG), every on-screen string (JSON per
+language, zstd-compressed) and the colour palettes the 30th-anniversary
+themes use.
+
+- **Built in the browser from the console's own file.** The manager reads the
+  stock file, swaps pictures and rebuilds it. Files keep their order on
+  16-byte boundaries, and files the console shares between entries stay
+  shared. An unchanged rebuild is byte-identical to the console's file; this
+  was checked with 13.42's 37 MB `Sce.PlayStation.PUI_UI3.rco`.
+- **Pictures that match Sony's bit for bit, apart from the pixels.** A
+  replacement PNG copies every chunk of the console's picture other than the
+  image data byte for byte and in the same order: the header (size, bit
+  depth, colour type), palette, transparency, colour space and text chunks.
+  Its image data keeps the console's zlib header and IDAT chunk size. A
+  palette picture uses the console's own palette, each pixel mapped to the
+  nearest entry. On 13.42 that covers 8- and 4-bit palette, 1-bit
+  greyscale, greyscale with transparency, and full-colour pictures. A
+  replacement SVG keeps the console's own opening (XML declaration and
+  `<svg ...>` tag with its size and view box) byte for byte.
+- **Checked strictly by the plugin** (`src/rco.c`, `src/png.c`). Everything
+  before the file table must be byte-identical to the console's file apart
+  from the pointers into it, and each pointer must stay inside the table on
+  a 16-byte boundary. Each PNG must match the console's picture as above and
+  is fully decompressed by the plugin's own inflate (`src/inflate.c`): the
+  data must be exactly the size the header implies, its checksums (chunk CRCs
+  and Adler-32) right, every row's filter valid, and every pixel of a palette
+  picture inside the palette. Each SVG must keep the console's opening and
+  pass the SVG check. Every other embedded file (sounds, strings, colours)
+  must be unchanged.
+- **Your own pictures, in the same format.** Your image is fitted (cover,
+  contain or stretch, as chosen above the sections) to the picture's size and
+  written with the same encoder: in a palette picture each pixel takes the
+  nearest colour of the console's palette. For a vector icon, the SVG keeps
+  the console's opening and draws your image as a PNG `<image>` filling its
+  view box, at twice its size (at most 512 pixels).
+- **Numbers drawn on whole pixels.** The test's numbers are seven-segment
+  digits made of plain rectangles: in a PNG on whole pixels (two colours, so
+  they fit any palette), in an SVG as `<rect>` elements, so they depend on no
+  font and on the simplest SVG there is.
+
+**Why:** an earlier theme pack replaces these files whole, with a separate
+copy for each firmware, written into the system. A file from another firmware
+can break the home screen, and writing it into the system makes that
+permanent. Rebuilding the console's own file and checking it against the
+original avoids both, and the overlay goes with a restart.
+
+### Overlays still in use
+
+Switching themes or choosing **Restore stock** takes the current overlays
+down. If an app is still reading from one (ShellUI keeps the home music and
+its interface files open), the plugin waits a moment and then leaves it
+where it is. It never forces it off. On 13.42, forcing it broke the
+system's own views stacked on it ("Bad file descriptor"), and apps wouldn't
+start until a restart. Instead:
+
+- the new theme's overlay goes on top of the one in use;
+- for **Restore stock**, a verified copy of the system's own folder goes on
+  top, so the console looks stock;
+- the app keeps reading what it already had open;
+- the next switch tries again from the top down, and a restart clears
+  everything.
+
+A stage folder that an overlay still uses is never deleted.
+
+### When the interface keeps restarting
+
+A picture, sound or interface file the console can't handle can make one of
+its apps crash as it starts. The console then starts it again, in a new
+sandbox each time (`NPXS40087_002`, `_003` and so on), and after about ten
+tries it gives up. The plugin's view watcher sees each of those sandboxes
+anyway. If one app restarts 3 times within 60 seconds, or 5 times within 10
+minutes, while a theme is applied, the plugin takes the theme down at once,
+selects stock so the theme isn't put back at the next start, and says so on
+the console and in the manager. One restart, as after rest mode, is normal
+and changes nothing.
+Sandboxes left by earlier restarts can stay on the console for good, so the
+plugin counts only sandboxes newer than the ones it found when the theme was
+applied.
 
 ### Preview pictures
 
@@ -841,7 +1092,12 @@ Re-applying fixed it, because a re-apply covers every view that exists at
 that moment, but it also forced the old overlay off while those apps were
 using it. **Solution:** a watcher that notices new views as soon as they
 appear and covers them, with nothing taken down. `/api/mounts` returns the
-live mount table, to see what the system made.
+live mount table, to see what the system made, and
+`/api/title/where?id=<title ID>` lists where the system keeps one title's
+pictures: the files named after it in the folders ShellUI can see, and the
+strings in the system's databases that mention it. `/api/diag/watch?id=<title
+ID>&seconds=<n>` reports which of that title's picture files, the console's
+and the theme's copies, anything opens or reads in that time.
 
 #### Updating when the Toolbox is gone
 
@@ -861,6 +1117,297 @@ newer copy gave up, and the old one then stepped aside anyway, leaving
 nothing running. **Solution:** a copy that has just started a newer one
 waits for it before doing anything else, the newer copy waits much longer,
 and a copy steps aside only if the newer copy is still there.
+
+#### The interface that wouldn't start
+
+The first numbered test (1.31) changed every picture in all five of the
+console's interface files at once. After rest mode, ShellUI crashed each
+time it started: a new sandbox every 9 seconds, ten times in 90 seconds, and
+then the console gave up and stayed in rest mode until it was turned off at
+the power button. Nothing was written to the system, so a restart brought
+everything back. Two things in those files differed from Sony's: every PNG
+had been written in full colour, while many of the console's are palette,
+1-bit or greyscale pictures, and three entries declared as SVG, the app tile
+placeholders, hold PNG data, which the test had replaced with SVG text.
+Which of these ShellUI failed on isn't known yet. **Solution:** pictures now match the console's bit for bit apart from their
+pixels, and the plugin checks that strictly; a picture's kind comes from its
+bytes; the test goes one file at a time; and the plugin takes a theme down by
+itself when the interface keeps restarting.
+
+#### A guard that took down every theme
+
+The first console test of game icons (1.34) seemed to do nothing. The log
+showed why: 19 seconds after the theme was applied, the plugin took it down
+for an interface crash loop, and then took the next theme down the moment it
+was applied. ShellUI had restarted only once. But the console keeps the
+sandboxes of earlier restarts (`NPXS40087_000`, `_001` and `_002` were all
+there at once), and the guard counted each of those as a fresh restart.
+**Solution:** the guard takes the newest sandbox it finds when a theme is
+applied as its starting point, and only newer ones count. A host test now
+starts with three old sandboxes, applies a theme, and checks that a rest
+mode restart is covered, that a crash loop is still caught, and that
+applying again with all six sandboxes still there keeps the theme.
+
+#### Changing game and app icons safely
+
+Changing the icons of installed games and apps on the home screen took 20
+versions (1.33 to 1.53), each tested on a PS5 with firmware 13.42. Most of
+them changed something on screen, and several broke the console's ability
+to start games until it was restarted. The entries below this one tell each
+part in detail; this is the whole story in short.
+
+**Where the pictures were put, and what happened.** The combination that
+works is the last three rows together.
+
+| Where the game pictures were put | Home row icons | Game Library and background | Games and apps after rest mode | Tried in |
+|---|---|---|---|---|
+| `/user/appmeta/<title>` in every view, with its `.dds` textures | PS4 games only | not checked | start | 1.34 to 1.36 |
+| The game's installation, `/user/app/<title>/sce_sys`, on the real folder | change | change | **the themed game won't start** | 1.38 |
+| The real folders only | unchanged | unchanged | start | 1.42 to 1.44 |
+| `/original_user`, the system's second view of `/user` | unchanged | unchanged | start | 1.42 to 1.44 |
+| The icon service's views (NPXS40102) | unchanged | unchanged | start | 1.42 to 1.44 |
+| ShellUI's own view of `/user`, left in place | only after ShellUI restarts | change at once | **no game or app starts (CE-105733-9) until a restart** | 1.38 to 1.44 |
+| ShellUI's own view, taken out the moment ShellUI exits | **change after rest mode** | change at once | **start** | 1.46 |
+| ...plus PlayStation Network's copies, each in the format it really holds | games with PSN artwork too | change at once | start | 1.48 |
+| ...taken out by a thread of the plugin's own, also in the middle of an apply | change after rest mode | change at once | start, also with rest mode during an apply | 1.53 |
+
+**The setbacks, and what resolved each one.**
+
+- **1.34: the theme taken down by mistake.** The crash guard counted old
+  sandboxes the system keeps as app restarts. *Resolved* by counting only
+  sandboxes that appear after the plugin's first look.
+- **1.35 to 1.36: PS5 games' icons stayed the same**, though every view of
+  their `/user/appmeta` folder was covered and their textures were written
+  too. *Resolved* by a read-only lookup of every file and database string
+  naming a title: the console's app database points most PS5 games at their
+  installation's `sce_sys` folder.
+- **1.38: the themed game wouldn't start, then no app at all.** The game
+  starts from its `sce_sys` folder, and an overlay there stopped it. With the
+  pictures moved out of the real folders, apps still failed (CE-105733-9),
+  and stock didn't help until a restart. 1.39 and 1.40 chased other
+  suspects (forced unmounts, the system apps' records), and in 1.41 game
+  pictures were turned off. *Resolved* by taking the theme apart section by
+  section on the console: the background alone was fine, and game pictures
+  broke launching even when they were only in ShellUI's view.
+- **1.42 to 1.44: four places tested one at a time.** Three were safe but
+  changed nothing. ShellUI's view changed the background and the Game
+  Library at once, and the home row only after ShellUI restarted, but it
+  broke launching after rest mode. *Resolved* by reading the kernel log
+  (`ps5-klog.elf`): at rest mode the system ends ShellUI, and its launcher
+  then fails to take ShellUI's sandbox down (EBUSY) because of the overlay
+  inside it.
+- **1.45: the overlays were never taken out**, because the plugin couldn't
+  find ShellUI's process. *Resolved* in 1.46 by reading the console's
+  process records by their own size, which differs from the SDK's. That
+  version changed the home row's icons after rest mode with every app still
+  starting.
+- **1.47: Death Stranding's pictures were refused.** Its PlayStation Network
+  copies are WebP and JPEG files named `.png`. *Resolved* in 1.48 by writing
+  each file in the format it really holds.
+- **1.49: the manager stopped answering after rest mode**, and starting the
+  plugin again couldn't replace it. *Resolved* in 1.50 and 1.51: the web
+  server opens its socket again, a new copy finds the old one by the process
+  ID it records and signals it to hand over, and `ps5-theme-stop.elf` stops
+  it with the theme left on.
+- **1.50: the stop tool did damage.** It looked for the plugin by a thread
+  name the console doesn't list, took "not found" for "not running", and
+  removed a running copy's overlays, leaving three without a record. The
+  console had to be restarted once more. *Resolved* in 1.51: the plugin's
+  lock alone says whether a copy runs, and overlays are taken out by what
+  the mount table shows, not only by the records.
+- **Found while tidying up for release: a gap.** The plugin watched ShellUI
+  from the same loop that applies themes, so rest mode during an apply could
+  leave the pictures in place. *Resolved* in 1.53 by a thread that only
+  watches ShellUI, checked on the console with rest mode in the middle of an
+  apply.
+
+**Other fixes along the way (1.31 to 1.53).**
+
+- An overlay still in use is never forced off any more: the new theme, or
+  the system's own files, go on top of it, and it comes down once it's free
+  (1.39). The crash guard also catches a slow restart loop: 5 restarts
+  within 10 minutes.
+- A sandbox the system kept from an earlier ShellUI is never covered, even
+  in the moment between ShellUI exiting and its next sandbox appearing,
+  when the old one briefly looks like the newest (1.49).
+- A copy that starts after `ps5-theme-stop` carries on with the theme
+  instead of applying it again from scratch, though old sandboxes still hold
+  some of its overlays (1.52).
+- Reading the mount table is safe from two threads at once: the call the
+  plugin used before keeps one buffer for the whole program (1.53).
+- PlayStation Network's numbered copies (`logo_00` to `logo_30`,
+  `icon0_11`) count as one picture, and only installed games are listed,
+  though the console keeps artwork for others too (1.48).
+- WebP pictures are written in the console's own layout (a plain `VP8 `
+  file without the colour profile browsers add) (1.48).
+- The manager names each game picture by what it is (icon, background,
+  logo), and an apply says what to do to see changes the home screen picks
+  up later: rest mode for game and app icons, another app's music for the
+  home music (1.53).
+- `ps5-klog.elf` opens its socket again after rest mode, as the manager does.
+- The parsers were fuzzed again for this release, every target clean.
+
+**Other key findings about the console (13.42).**
+
+- The home screen (ShellUI) reads a title's pictures by the paths in
+  `/system_data/priv/mms/app.db`, through its own sandbox's view of `/user`:
+  PS4 games' in `/user/appmeta/<title>`, most PS5 games' and homebrew's in
+  `/user/app/<title>/sce_sys`, and some games' from PlayStation Network in
+  `/user/catalog_downloader/conceptmeta/<concept>`.
+- It reads the home row's icons once, as it starts; the Game Library's when
+  that opens; and a game's background (`pic0`) every time its tile is
+  selected. The plugin starts after ShellUI (the jailbreak runs after boot),
+  so the home row needs one rest mode after a restart.
+- At rest mode the system ends ShellUI, and its launcher (SceLncService)
+  takes the sandbox down. An overlay inside its view of `/user` makes that
+  fail and leaves the launcher stuck. Overlays in `/system_ex/vsh_asset` are
+  tolerated: the system's own log shows workarounds for them.
+- Forcing an overlay off while it's in use breaks the system's views on top
+  of it ("Bad file descriptor"), and ShellUI then restarts about once a
+  minute.
+- The system keeps old sandboxes' folders, and some of their views, after
+  rest mode. Their numbers (`NPXS40087_000`, `_001`, ...) only grow until a
+  restart, so the newest one is the running app's.
+- A game's `sce_sys` folder is part of what the console starts the game
+  from: it must never be overlaid on the real folder.
+- PlayStation Network's pictures are WebP and JPEG files under `.png` names,
+  in numbered copies, kept per title and per concept (a game and its
+  editions). The app database names the concept folder in each title's
+  record; `appinfo.db` keeps the same concept in hexadecimal.
+- The console's process records are larger than the SDK's, `kern.proc.all`
+  doesn't exist, and every payload's process is named after the loader
+  (`payload.elf`).
+- Rest mode can break a payload's listening socket for good: `accept()`
+  fails with error `0xA3`, as etaHEN's own servers see. The plugin's
+  manager, the kernel log payload and the ELF loader all went quiet that way.
+
+**What helped.**
+
+- **Read-only tools in the plugin:** a lookup of every file and database
+  string that names a title, a watch of which picture files any process
+  opens and reads, the process list and the mount table. They found where
+  the home screen reads icons from without changing anything.
+- **`ps5-klog.elf`**, a small payload that serves the console's kernel log
+  on TCP port 3232. It showed the launcher's failed teardown and ShellUI
+  loading each background.
+- **Testing on the console one change at a time**, with a restart after each
+  failure, and taking a theme apart section by section to find the part
+  that broke launching.
+- **The plugin's own log, read over the console's FTP server**, when the
+  manager couldn't be reached.
+- **etaHEN's source**, for how its servers come back after rest mode.
+- **The host test rig:** every failure on the console became a test, with a
+  stand-in ShellUI process and sandboxes, applies held part-way, a silenced
+  web server and thread names switched off as on the console. Each new test
+  was also run with the fix taken out, to check that it fails then.
+
+#### PS5 game icons that stayed the same
+
+With the guard fixed, the next test changed a PS4 game's icon but none of
+the PS5 ones, although the log showed every view of their folders covered.
+Listing the folders turned up an `icon0.dds` next to every `icon0.png`, so
+the page learnt to write those textures too (BC7 for PS5 games, DXT1 for
+PS4 ones). But a PS5 homebrew app with no texture at all hadn't changed
+either, so that couldn't be the whole answer. A read-only lookup,
+`/api/title/where`, then listed every file named after a title in the
+folders ShellUI can see, and the lines of the system's databases that
+mention it. The app database, `appinfo.db`, gives each title a
+`_metadata_path`: `/user/appmeta/CUSA05070` for the PS4 game that changed,
+but `/user/app/<title ID>/sce_sys` for Black Myth: Wukong, Ghost of Yōtei and
+the homebrew app, a folder the plugin had never touched. **Solution:** the
+pictures directly in a title's `sce_sys` folder can be themed too, and
+**Change icon** writes every copy of the icon in both folders.
+
+That build changed the icons, and the changed games then wouldn't start.
+It had covered each game's real `sce_sys` folder, which the system starts
+the game from. **Solution:** a title's pictures are now themed only in the
+system apps' sandboxes (`/mnt/sandbox/NPXS…`), where the home screen reads
+them, never on the real folders, `/original_user` or a game's own sandbox.
+A copy that finds an overlay an older version left on a real folder takes
+it down and applies again. The host test
+gives its PS5 game an installation like Black Myth's: pictures beside
+`param.json`, a license, a key file, a library in a subfolder, trophies,
+and the game's package beside `sce_sys`. It checks that only the pictures
+are listed and accepted, that ShellUI's sandbox shows the theme's pictures
+while the real folders, `/original_user` and the game's own sandbox show the
+console's, that every other file reads back unchanged and can't be written,
+that an overlay left on the real folder by 1.38 is taken down, and that the
+installation is byte-identical afterwards.
+
+#### Apps that wouldn't start
+
+After 1.38, no game or app would start while Number Test was applied
+(error CE-105733-9), and choosing stock didn't help until the console was
+restarted. Number Test changes the interface icons, a tile background, the
+system tiles' icons and game icons. With the interface icons switched off
+it still happened, and the log showed where the rest had gone: the system
+apps' real `appdb` folders, which hold each app's record (`param.json`)
+beside its icon, the system's writable copy of them in `/mnt/rnps`, and the
+sandboxes of system services other than the home screen (NPXS40000,
+NPXS40094, NPXS40102). 1.40 then themed tile icons and game pictures only
+inside ShellUI's sandbox: the icons stopped showing, and apps still
+wouldn't start. Taking Number Test apart one section at a time on the
+console found the cause: with only its background, apps started; with the
+game pictures added, even only in ShellUI's sandbox, none did. The log
+showed why it could matter: when the system shut down an old sandbox, it
+couldn't remove a view of `/user` with one of our overlays inside it, and
+new apps' sandboxes stopped being built just before `/user/home` was
+mounted. **Solution:** in 1.41 games' and apps' pictures are turned off.
+They're refused, a theme that has some is applied without them, nothing is
+mounted in or under `/user`, and an overlay an older copy left on a game's
+folder is taken down. Tile icons work as they did in 1.39. A host test
+checks all of this, and fails if game folders are applied again. (1.46
+brought them back safely, by taking them out of ShellUI's view the moment it
+exits: see [Changing game and app icons safely](#changing-game-and-app-icons-safely).)
+
+Along the way, 1.39 also stopped forcing off an overlay an app is still
+using: every theme switch had done that to ShellUI's interface files, and
+the log showed the system's own views on top of them breaking afterwards
+("Bad file descriptor"), with ShellUI restarting about once a minute.
+**Solution:** an overlay in use stays, with the new theme or the system's
+own files on top (see [Overlays still in use](#overlays-still-in-use)), and
+the crash guard also catches a slower loop: 5 restarts within 10 minutes. A
+host test holds a theme's picture open while switching to another theme and
+then to stock: the reader keeps its file, the new theme and then the stock
+picture show, the stage folder in use stays, and once the file is closed the
+next switch takes every layer off. With the old forced removal put back,
+that test fails. Another test restarts an app every few seconds, never 3
+within the short window, and checks that the fifth restart takes the theme
+down.
+
+#### A manager that stopped answering
+
+After a few rest-mode cycles with 1.49, the manager page wouldn't open, and
+starting the plugin again only said it "could not take over from the running
+copy". The plugin's own log, read over the console's FTP server, showed the
+running copy still at work (it took the game pictures out at the next rest
+mode) but no longer answering on port 8095, even on the console itself. The
+kernel log payload and the ELF loader had gone quiet at the same moment. In
+etaHEN's source, its servers treat a failing `accept()` after rest mode
+(error `0xA3`) as a sign to close the socket and listen again, and the
+plugin's server had simply retried the broken socket every second.
+**Solution:** in 1.50 the web server closes a listening socket that stops
+working and opens a new one, and also tries it every 5 seconds when nothing
+arrives, in case it fails silently. A new copy that gets no answer for 10
+seconds signals the running one by process to step aside, so starting the
+plugin again works, and `ps5-theme-stop.elf` stops it with the theme left on.
+
+On the console, 1.50 then found nothing: both the new copy and the stop tool
+looked for the plugin by its thread name, and the console's process list
+didn't show it. Worse, the stop tool took "not found" for "not running" and
+took the running copy's game-picture overlays out from under it, while it put
+them back, and three of them ended up missing from its records. Those would
+have stayed in the home screen's sandbox at the next rest mode, so the
+console had to be restarted. **Solution (1.51):** each copy records its
+process ID and start time when it takes the lock, and that is how it is
+found; the lock alone says whether a copy runs, and the stop tool changes
+nothing unless it holds the lock; and overlays are taken out by what the
+mount table shows, so a missing record can't leave one behind. Host tests
+break the listening socket and check that the manager comes back, silence the
+web server for good and check that a new copy takes over with the theme kept
+(with thread names unavailable, as on the console), run the stop tool against
+a running copy, one it can't find (nothing may change) and one that was
+ended, and take an overlay's record away before ShellUI exits.
 
 #### A WAV file that never finished checking
 
@@ -1013,7 +1560,7 @@ tests/host/run.sh
 ```
 
 Builds the real plugin sources for Linux with AddressSanitizer and UBSan and
-runs 35 end-to-end tests against a fake console tree in a privileged
+runs 38 end-to-end tests against a fake console tree in a privileged
 container. They cover:
 
 - upload checks and the media policy, including files crafted to hang or
@@ -1022,6 +1569,34 @@ container. They cover:
   stage folders where hard links don't work, across a simulated reboot, and
   switching back to the previous theme;
 - a write that fails at the disk still closing its file;
+- interface resource files: pictures swapped and accepted, anything else
+  refused (pixel formats, extra chunks, other compression, damaged or short
+  image data, invalid row filters, colours outside the palette, an SVG where
+  the console has PNG data, sounds, strings, colours, structure, pointers),
+  and the manager page's own code, run in Node, numbering every picture in
+  the console's exact formats, compressed and in stored blocks;
+- installed games' and apps' pictures: listed and accepted only in the
+  console's exact formats (a game's `param.json`, license, keys, the rest of
+  its installation and the plugin's own tile refused, PlayStation Network's
+  WebP and JPEG copies only in their own format), applied only in the home
+  screen's own view of `/user` once its process is found, never the real
+  folders, `/original_user` or other apps' views; an overlay an older copy
+  left on a real folder is taken down; the result and a notification say to
+  use rest mode;
+- the home screen's process exiting: the overlays out of its sandbox at
+  once, also with an overlay missing from the records, and also while the
+  plugin is held in the middle of an apply, before or after mounting
+  (nothing goes into that sandbox afterwards); its older sandboxes and ones
+  the system left behind never covered; its next sandbox covered;
+- your own picture inside a vector icon, a home screen tile icon numbered
+  by the page in its exact format, and tile icon files mapped to their
+  apps, all accepted;
+- a system app that keeps restarting with a theme applied, quickly or about
+  once a minute: the theme taken down and not put back at the next start,
+  while one restart, or sandboxes left by earlier restarts, change nothing;
+- an overlay still in use when switching themes or restoring stock: never
+  forced off, the new theme or the system's own files shown on top, its
+  stage folder kept, and every layer off once it is free;
 - read-only overlays, sandbox views and symlink containment;
 - concurrent requests during an apply, slow and malformed clients;
 - recovery after a hard kill, log rotation and the crash handler;
@@ -1074,8 +1649,9 @@ tests/fuzz/run.sh
 ```
 
 Fuzzes the plugin's parsers (zstd, DDS textures, ATRAC9, WAV, image headers,
-JSON, SVG) with libFuzzer, AddressSanitizer and UBSan, 60 seconds each by
-default (`FUZZ_SECONDS` changes it). Inputs that crash or hang are saved in
+JSON, SVG, PNG pictures with the plugin's inflate, interface resource files)
+with libFuzzer, AddressSanitizer and UBSan, 60 seconds each by default
+(`FUZZ_SECONDS` changes it). Inputs that crash or hang are saved in
 `tests/fuzz/out/`.
 
 ## Building from source
@@ -1084,7 +1660,8 @@ default (`FUZZ_SECONDS` changes it). Inputs that crash or hang are saved in
 ./build.sh
 ```
 
-Produces `build/ps5-theme.plugin` and `build/ps5-theme.elf` in Docker, with
+Produces `build/ps5-theme.plugin`, `build/ps5-theme.elf` and
+`build/ps5-theme-stop.elf` in Docker, with
 [ps5-payload-sdk](https://github.com/ps5-payload-dev/sdk) v0.43 and LLVM 18
 on Ubuntu 24.04. The `.plugin` file is the ELF with etaHEN's plugin header:
 `etaHEN_PLUGIN`, the title ID `THEM00001` and the version
@@ -1100,6 +1677,8 @@ on Ubuntu 24.04. The `.plugin` file is the ELF with etaHEN's plugin header:
 | `src/fsguard.c` | The write guard and file helpers (atomic writes, linked copies) |
 | `src/policy.c` | What can be themed, and the checks for each kind of file |
 | `src/verify.c` | Image header parsing |
+| `src/rco.c` | Interface resource file checks |
+| `src/png.c`, `src/inflate.c` | PNG pictures checked against the console's own, and the inflate they need |
 | `src/texture.c` | DDS texture checks |
 | `src/zstd.c` | Zstandard decoder with XXH64 |
 | `src/atrac9.c`, `src/atrac9_tables.h` | ATRAC9 checks and codebooks |
@@ -1108,8 +1687,10 @@ on Ubuntu 24.04. The `.plugin` file is the ELF with etaHEN's plugin header:
 | `src/platform_ps5.c`, `src/platform.h` | Everything specific to the console |
 | `web/index.html` | The manager: library, editor, music editor, BC7 encoder, zip reader and writer |
 | `web/atrac9.js` | ATRAC9 encoder and decoder (also the Web Worker) |
+| `tools/stop/` | `ps5-theme-stop.elf`: stops the plugin and leaves the theme on |
+| `tools/klog/` | `ps5-klog.elf`: the kernel log on TCP port 3232, for finding out what the system does |
 | `tools/` | Table generator, icon generator, plugin packer |
-| `tests/host/` | End-to-end tests and the fake console |
+| `tests/host/` | End-to-end tests and the fake console (`rco_fixture.py` builds resource files) |
 | `tests/atrac9/`, `tests/zstd/` | Codec cross-checks |
 | `tests/fuzz/` | Fuzzing the parsers |
 | `examples/sample-theme/` | A minimal theme |
@@ -1132,7 +1713,15 @@ on Ubuntu 24.04. The `.plugin` file is the ELF with etaHEN's plugin header:
   stopping after rest mode is outside this plugin.
 - Background and icon sorting is by file name. Anything it misses is under
   **Other images**.
-- The home screen's colours and layout can't be themed (they are code).
+- The home screen's layout can't be themed (it is code). Some of its colours
+  live in the interface resource files' palettes, which the plugin doesn't
+  change yet.
+- Interface pictures: the console reads its resource files when the
+  interface starts, so changed ones show after rest mode or a restart. The
+  numbered test drew nothing beside the **Games** and **Media** tabs on 13.42.
+  Whether the console draws your own picture inside a vector icon, and
+  whether the home screen uses changed tile icons, hasn't been seen on the
+  console yet.
 - etaHEN's plugin **Stop** ends the plugin at once: overlays stay until you
   choose **Restore stock**, start the plugin again, or reboot.
 
@@ -1148,6 +1737,10 @@ on Ubuntu 24.04. The `.plugin` file is the ELF with etaHEN's plugin header:
   web page opened on the console can't drive the API.
 - **Not other machines, for updates.** The hand-over request used by updates
   is accepted only from the console itself.
+- **What it can read back.** Beyond themes and the files they replace,
+  anyone on the network can read the plugin's log, the mount table, and the
+  names (not contents) of the files the system keeps for one game, with the
+  database lines that mention that game.
 - **Nothing outside your network.** The plugin sends nothing over the
   internet.
 
@@ -1181,9 +1774,12 @@ numbers from those runs, made after the fixes below:
 | DDS textures | 473,116 in 5 min | no findings |
 | ATRAC9 | 202,175 in 5 min | no findings |
 | WAV | 3,781,560 in 60 s | no findings |
-| PNG / JPEG / WebP headers | 2,432,525 in 60 s | no findings |
+| PNG / JPEG / WebP headers | 7,098,883 in 3 min | no findings |
 | JSON | 3,274,997 in 60 s | no findings |
-| SVG check | 8,943,201 in 60 s | no findings |
+| SVG check | 24,814,338 in 3 min | no findings |
+| PNG pictures against the console's own (with the plugin's inflate) | 26,897,248 in 3 min | no findings |
+| Interface resource files | 8,437,490 in 3 min | no findings |
+| Interface resource files, structure kept (only pointers and embedded files vary) | 6,744,214 in 3 min | no findings |
 
 "No findings" means no crash, no sanitizer report and no input taking more
 than 10 seconds. The runs used a Linux x86-64 build of the same source, not
@@ -1199,6 +1795,7 @@ make sure it catches the bug.
 | **A WAV file whose check never ended.** A chunk size of `0xFFFFFFF7` made the step to the next chunk wrap to 0 in 32-bit arithmetic. | Fuzzing: the WAV target stopped making progress, spinning at full CPU on a 181-byte file. | The test's 48-byte upload got no answer (timed out after 30 s) and tied up one of the manager's 4 worker threads for good. Four such uploads would leave it unable to serve anyone. | Refused at once: "not a valid WAV file". |
 | **A texture unpacked with no limit.** A 25-byte file claiming to unpack to 200 MB. | Review | Room for 200 MB was set aside before the file was found to be invalid ("not a valid zstd-compressed texture"). | Refused before unpacking: "larger than the system texture". The texture fuzz target ran about 17 times faster afterwards (93 to 1,577 inputs a second). |
 | **A file left open when saving failed.** `fsync(fd) \|\| close(fd)` skipped the close when `fsync` failed. | Review | 25 failed saves raised the plugin's open files from 8 to 33, one leaked per failure. | No file left open (the test allows a margin of 3 for open connections), `theme.ini` intact, no temporary file left behind. |
+| **The interface crashing on start with numbered pictures** (1.31's test). | Console log | ShellUI restarted 10 times in 90 s (new sandboxes `NPXS40087_001` to `_010`) and the console stayed in rest mode. | Not yet confirmed on the console. That copy's pictures are refused by the new check (on 13.42's real file: "its size or pixel format differs", and Sony's `<svg>` opening not kept), while the new test copies are accepted. A host test shows a theme taken down after 3 restarts; with the guard switched off it fails ("the theme was not taken down"). |
 | **No plugin running after a restart.** An older copy started by etaHEN started a newer one, then kept the newer one waiting while it put the theme back. | Console log | 13:49:43 newer copy starts; 13:50:03 it gives up; 13:50:31 the old copy steps aside anyway. Nothing ran until it was started again at 14:14. The host test fails: "the old copy applied before handing over". | On the console with 1.30: the old copy started 1.30 at 15:41:58, finished putting the theme back at 15:42:45 and handed over at 15:42:46, and 1.30 kept running. |
 
 ### What isn't covered
@@ -1279,6 +1876,9 @@ openness and the time they gave freely, none of this would exist.
   plugin's decoder follows.
 - **Microsoft's Direct3D documentation** of the BC7 format, which the texture
   encoder follows.
+- **[PS5Themes](https://github.com/MasterPS0/PS5Themes)** by MasterPS0, whose
+  theme packs showed which files hold the home screen's tab icons, tile icons
+  and per-tile backgrounds.
 - **[PS5SX2](https://github.com/Swordpdf/PS5SX2)** by Swordpdf and
   **[ATRACTool-Reloaded](https://github.com/XyLe-GBP/ATRACTool-Reloaded)** by
   XyLe-GBP, studied while working out how to get music onto the home screen.

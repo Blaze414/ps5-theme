@@ -4,7 +4,7 @@
 seconds=${FUZZ_SECONDS:-60}
 mkdir -p /out
 status=0
-for t in ${FUZZ_TARGETS:-zstd texture at9 wav image json svg}; do
+for t in ${FUZZ_TARGETS:-zstd texture at9 wav image json svg png rco rco-data}; do
   mkdir -p /corpus/$t
   FUZZ_TARGET=$t FUZZ_STOCK_DIR=/stock /fuzz /corpus/$t -max_total_time=$seconds -timeout=10 -rss_limit_mb=2048 \
       -artifact_prefix=/out/$t- -print_final_stats=1 > /out/$t.log 2>&1

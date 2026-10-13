@@ -13,7 +13,9 @@
      font   same font container (sfnt/OTF/collection/WOFF/WOFF2)
      json   valid JSON, same top-level type; animations keep their w/h
      video  same container (MP4/WebM)
-     texture DDS / zstd-compressed DDS: byte-identical header, same length */
+     texture DDS / zstd-compressed DDS: byte-identical header, same length
+     rco    the console's own resource file with only pictures changed
+            (rco.c) */
 
 #include <fcntl.h>
 #include <pthread.h>
@@ -37,6 +39,7 @@ static const struct { const char *ext; int kind; } kinds[] = {
   {".json", KIND_JSON},
   {".mp4", KIND_VIDEO}, {".m4v", KIND_VIDEO}, {".webm", KIND_VIDEO},
   {".dds.zst", KIND_TEXTURE}, {".dds", KIND_TEXTURE},
+  {".rco", KIND_RCO},
 };
 
 static const uint64_t kind_limit[] = {
@@ -48,7 +51,64 @@ static const uint64_t kind_limit[] = {
   [KIND_JSON]    = 4ull << 20,
   [KIND_VIDEO]   = 128ull << 20,
   [KIND_TEXTURE] = 128ull << 20,
+  [KIND_RCO]     = 96ull << 20,
 };
+
+
+/* `app` points at "/user/app/" in a path. If the path goes on into a
+   title's sce_sys folder (not the plugin's own tile, which it writes
+   itself), what follows "sce_sys"; otherwise NULL. */
+static const char *
+app_sce_sys(const char *app) {
+  const char *id = app + sizeof(APP_DIR), *s = strchr(id, '/');
+  if(!s || s == id || ((size_t)(s - id) == strlen(TITLE_ID) && !strncmp(id, TITLE_ID, s - id))) return NULL;
+  if(strncmp(s, "/sce_sys", 8) || (s[8] && s[8] != '/')) return NULL;
+  return s + 8;
+}
+
+
+/* 1 if `path` (a file, or a folder with a trailing slash) is outside
+   APP_DIR or inside a title's sce_sys folder there: everything else under
+   APP_DIR is the game itself. */
+int
+app_path_ok(const char *path) {
+  if(strncmp(path, APP_DIR "/", sizeof(APP_DIR))) return 1;
+  const char *rest = app_sce_sys(path);
+  return rest && *rest == '/';
+}
+
+
+/* `cat` points at CATALOG_DIR "/" in a path. What follows the title's or
+   concept's folder in it (appmeta/<title> or conceptmeta/<concept>), or
+   NULL if it isn't in one. */
+static const char *
+catalog_rest(const char *cat) {
+  const char *sub = cat + sizeof(CATALOG_DIR);
+  if(!strncmp(sub, "appmeta/", 8)) sub += 8;
+  else if(!strncmp(sub, "conceptmeta/", 12)) sub += 12;
+  else return NULL;
+  const char *s = strchr(sub, '/');
+  if(s == sub || !*sub) return NULL;
+  return s ? s : sub + strlen(sub);
+}
+
+
+/* 1 if `dir` is an installed title's metadata folder: /user/appmeta/<title>,
+   /user/app/<title>/sce_sys, or the pictures downloaded for it,
+   CATALOG_DIR/appmeta/<title> and CATALOG_DIR/conceptmeta/<concept>. */
+int
+title_folder(const char *dir) {
+  if(!strncmp(dir, APPMETA_DIR "/", sizeof(APPMETA_DIR))) {
+    return dir[sizeof(APPMETA_DIR)] && !strchr(dir + sizeof(APPMETA_DIR), '/');
+  }
+  if(!strncmp(dir, CATALOG_DIR "/", sizeof(CATALOG_DIR))) {
+    const char *rest = catalog_rest(dir);
+    return rest && !*rest;
+  }
+  if(strncmp(dir, APP_DIR "/", sizeof(APP_DIR))) return 0;
+  const char *rest = app_sce_sys(dir);
+  return rest && !*rest;
+}
 
 
 int
@@ -56,10 +116,30 @@ asset_kind(const char *path) {
   const char *slash = strrchr(path, '/');
   const char *name = slash ? slash + 1 : path;
   size_t n = strlen(name);
+  /* In a title's metadata only pictures: its param.json and the rest are
+     what the system launches it with. (The path may be the folder's stock
+     copy or a theme's file, so it is matched anywhere in the path.) Under
+     /user/app only the pictures directly in a title's sce_sys folder, and
+     under CATALOG_DIR only those directly in a title's or concept's. */
+  int appmeta = strstr(path, APPMETA_DIR "/") != NULL;
+  const char *app = strstr(path, APP_DIR "/"), *cat = strstr(path, CATALOG_DIR "/");
+  if(app) {
+    const char *rest = app_sce_sys(app);
+    if(!rest || *rest != '/' || strchr(rest + 1, '/')) return KIND_BLOCKED;
+    appmeta = 1;
+  }
+  if(cat) {
+    const char *rest = catalog_rest(cat);
+    if(!rest || *rest != '/' || strchr(rest + 1, '/')) return KIND_BLOCKED;
+    appmeta = 1;
+  }
 
   for(size_t i = 0; i < sizeof(kinds) / sizeof(*kinds); i++) {
     size_t e = strlen(kinds[i].ext);
-    if(n > e && !strcasecmp(name + n - e, kinds[i].ext)) return kinds[i].kind;
+    if(n > e && !strcasecmp(name + n - e, kinds[i].ext)) {
+      if(appmeta && kinds[i].kind != KIND_IMAGE && kinds[i].kind != KIND_TEXTURE) return KIND_BLOCKED;
+      return kinds[i].kind;
+    }
   }
   return KIND_BLOCKED;
 }
@@ -75,6 +155,7 @@ asset_kind_name(int kind) {
   case KIND_JSON:  return "json";
   case KIND_VIDEO: return "video";
   case KIND_TEXTURE: return "texture";
+  case KIND_RCO:   return "rco";
   default:         return "protected";
   }
 }
@@ -82,7 +163,7 @@ asset_kind_name(int kind) {
 
 uint64_t
 asset_size_limit(int kind) {
-  return kind > KIND_BLOCKED && kind <= KIND_TEXTURE ? kind_limit[kind] : 0;
+  return kind > KIND_BLOCKED && kind <= KIND_RCO ? kind_limit[kind] : 0;
 }
 
 
@@ -250,22 +331,23 @@ check_magic(const char *cand, const char *stock, int (*container)(const uint8_t 
 
 /* ---------------- SVG ---------------- */
 
-static int
-check_svg(const char *cand, char *why, size_t len) {
+/* SVG text in memory (a file, or a picture inside a resource file). */
+int
+svg_check_mem(const uint8_t *data, size_t n, char *why, size_t len) {
   static const char *const banned[] = {
     "<script", "javascript:", "<foreignobject", "href=\"http", "href='http", "href=\"//",
     "xlink:href=\"http", "@import", "url(http", "<iframe", "<!entity",
   };
-  size_t n;
-  uint8_t *buf = slurp(cand, kind_limit[KIND_SVG], &n);
+  char *buf = malloc(n + 1);
   if(!buf) { snprintf(why, len, "cannot read the SVG"); return -1; }
   for(size_t i = 0; i < n; i++) {
-    if(!buf[i]) { free(buf); snprintf(why, len, "SVG contains binary data"); return -1; }
-    buf[i] = (uint8_t)((buf[i] >= 'A' && buf[i] <= 'Z') ? buf[i] + 32 : buf[i]);
+    if(!data[i]) { free(buf); snprintf(why, len, "SVG contains binary data"); return -1; }
+    buf[i] = (char)((data[i] >= 'A' && data[i] <= 'Z') ? data[i] + 32 : data[i]);
   }
-  int ok = strstr((char *)buf, "<svg") != NULL;
+  buf[n] = 0;
+  int ok = strstr(buf, "<svg") != NULL;
   for(size_t i = 0; ok && i < sizeof(banned) / sizeof(*banned); i++) {
-    if(strstr((char *)buf, banned[i])) {
+    if(strstr(buf, banned[i])) {
       snprintf(why, len, "SVG contains \"%s\", which is not allowed", banned[i]);
       free(buf);
       return -1;
@@ -274,6 +356,17 @@ check_svg(const char *cand, char *why, size_t len) {
   free(buf);
   if(!ok) { snprintf(why, len, "not an SVG file"); return -1; }
   return 0;
+}
+
+
+static int
+check_svg(const char *cand, char *why, size_t len) {
+  size_t n;
+  uint8_t *buf = slurp(cand, kind_limit[KIND_SVG], &n);
+  if(!buf) { snprintf(why, len, "cannot read the SVG"); return -1; }
+  int rc = svg_check_mem(buf, n, why, len);
+  free(buf);
+  return rc;
 }
 
 
@@ -648,6 +741,7 @@ validate_now(const char *cand, const char *stock, char *why, size_t len) {
   case KIND_JSON:  return check_json(cand, stock, why, len);
   case KIND_VIDEO: return check_magic(cand, stock, video_container, "video", why, len);
   case KIND_TEXTURE: return texture_validate(cand, stock, why, len);
+  case KIND_RCO:   return rco_validate(cand, stock, why, len);
   }
   snprintf(why, len, "unsupported file type");
   return -1;

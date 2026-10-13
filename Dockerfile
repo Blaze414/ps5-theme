@@ -21,4 +21,4 @@ COPY . .
 RUN make clean && make
 
 FROM scratch AS artifact
-COPY --from=build /src/ps5-theme.plugin /src/ps5-theme.elf /
+COPY --from=build /src/ps5-theme.plugin /src/ps5-theme.elf /src/ps5-theme-stop.elf /

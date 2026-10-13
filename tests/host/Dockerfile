@@ -15,6 +15,7 @@ COPY src/ src/
 COPY web/ web/
 COPY assets/ assets/
 COPY tests/host/ tests/host/
+COPY tools/stop/ tools/stop/
 RUN make -f tests/host/Makefile
 
 CMD ["python3", "-u", "tests/host/test_e2e.py"]

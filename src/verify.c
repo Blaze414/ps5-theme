@@ -100,7 +100,19 @@ probe_webp(const uint8_t *b, size_t n, image_info_t *out) {
 }
 
 
-/* 0 and fills `out` when the file is a well-formed PNG, JPEG or WebP header. */
+/* 0 and fills `out` when `data` starts with a well-formed PNG, JPEG or WebP
+   header. */
+int
+image_probe_mem(const uint8_t *data, size_t len, image_info_t *out) {
+  memset(out, 0, sizeof(*out));
+  if(!probe_png(data, len, out) || !probe_jpeg(data, len, out) || !probe_webp(data, len, out)) {
+    return out->width && out->height ? 0 : -1;
+  }
+  return -1;
+}
+
+
+/* The same for a file. */
 int
 image_probe(const char *path, image_info_t *out) {
   size_t n = 0;
@@ -118,9 +130,7 @@ image_probe(const char *path, image_info_t *out) {
   }
   close(fd);
 
-  if(!probe_png(buf, n, out) || !probe_jpeg(buf, n, out) || !probe_webp(buf, n, out)) {
-    ret = out->width && out->height ? 0 : -1;
-  }
+  ret = image_probe_mem(buf, n, out);
   free(buf);
   return ret;
 }

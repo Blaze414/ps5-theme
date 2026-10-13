@@ -35,7 +35,6 @@
 #include "theme.h"
 
 
-#define INSTANCE_LOCK    BASE_DIR "/instance.lock"
 #define ELF_LOADER_PORT  9021
 #define PLUGIN_MAX_BYTES (32u << 20)
 #define HEADER_BYTES     29          /* "etaHEN_PLUGIN\0" + 9-char title + "\0" + "x.xx\0" */
@@ -141,6 +140,23 @@ request_handoff(int pid) {
 
 
 int handoff_requested(void) { return atomic_load(&handoff); }
+
+
+static atomic_int stop_flag;
+
+void request_stop(void) { atomic_store(&stop_flag, 1); }
+
+int stop_requested(void) { return atomic_load(&stop_flag); }
+
+
+/* For another program to find this copy (running_copy): its pid and start
+   time, written once it holds the lock. */
+void
+record_running(void) {
+  char line[64];
+  int n = snprintf(line, sizeof(line), "%d %llu\n", (int)getpid(), plat_process_start(getpid()));
+  if(fs_write_file(PID_FILE, line, (size_t)n)) log_err("could not write %s", PID_FILE);
+}
 
 
 /* Step aside only for a newer copy that is still there: one that gave up

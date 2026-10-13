@@ -16,13 +16,16 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <limits.h>
+#include <poll.h>
 #include <pthread.h>
 #include <signal.h>
 #include <stdarg.h>
+#include <stdatomic.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <strings.h>
+#include <time.h>
 #include <unistd.h>
 
 #include <arpa/inet.h>
@@ -40,6 +43,11 @@
 #define MAX_RESULTS      300
 #define MAX_RESULTS_ALL  5000
 #define IO_CHUNK     (64 * 1024)
+
+static atomic_int listen_fd = -1;   /* the listening socket, for a test hook */
+#ifdef TEST_HOOKS
+static atomic_int deaf;              /* the web server stops for good, as 1.49's did */
+#endif
 
 __asm__(
   ".section .rodata\n"
@@ -535,6 +543,84 @@ kind_in_list(const char *list, const char *kind) {
 }
 
 
+/* Which titles show the pictures of which concept folder
+   (CONCEPTMETA_DIR/<concept>, shared by a game's editions): the console's
+   app database names the folder in each title's record right after the
+   title ID, as "...titleId=PPSA01968/user/catalog_downloader/conceptmeta/
+   234585/icon0.png?ts=...". Read-only; the pairs found, in `out`. */
+#define APP_DB        "/system_data/priv/mms/app.db"
+#define MAX_CONCEPTS  256
+#define CONCEPT_RUN   4096
+#define CONCEPT_KEEP  512     /* of a longer run, read on with this much kept */
+#define CONCEPT_BACK  256     /* how far before the folder's path its title ID may be */
+
+typedef struct { char concept[16], title[10]; } concept_t;
+
+static int
+title_id_at(const char *p) {
+  for(int i = 0; i < 9; i++) if(i < 4 ? p[i] < 'A' || p[i] > 'Z' : p[i] < '0' || p[i] > '9') return 0;
+  return p[9] < '0' || p[9] > '9';
+}
+
+static int
+cmp_concept(const void *a, const void *b) {
+  const concept_t *x = a, *y = b;
+  int c = strcmp(x->concept, y->concept);
+  return c ? c : strcmp(x->title, y->title);
+}
+
+static int
+concepts_in_run(char *run, size_t n, concept_t *out, int count) {
+  static const char key[] = CONCEPTMETA_DIR "/";
+  run[n] = 0;
+  for(char *at = run; count < MAX_CONCEPTS && (at = strstr(at, key)); at += sizeof(key) - 1) {
+    const char *num = at + sizeof(key) - 1, *title = NULL;
+    size_t digits = strspn(num, "0123456789");
+    if(!digits || digits >= sizeof(out->concept) || num[digits] != '/') continue;
+    for(const char *p = at - 9; p >= run && at - p <= CONCEPT_BACK && !title; p--) {
+      if(title_id_at(p) && (p == run || p[-1] < 'A' || p[-1] > 'Z')) title = p;
+    }
+    if(!title) continue;
+    concept_t c;
+    snprintf(c.concept, sizeof(c.concept), "%.*s", (int)digits, num);
+    snprintf(c.title, sizeof(c.title), "%.9s", title);
+    int seen = 0;
+    for(int k = 0; k < count && !seen; k++) seen = !cmp_concept(&out[k], &c);
+    if(!seen) out[count++] = c;
+  }
+  return count;
+}
+
+static int
+title_concepts(concept_t *out) {
+  int fd = open(APP_DB, O_RDONLY), count = 0;
+  uint8_t *buf = malloc(IO_CHUNK);
+  char *run = malloc(CONCEPT_RUN + 1);
+  size_t n = 0;
+  ssize_t r;
+  while(fd >= 0 && buf && run && (r = read(fd, buf, IO_CHUNK)) > 0) {
+    for(ssize_t i = 0; i < r; i++) {
+      if(buf[i] >= 0x20 && buf[i] < 0x7f) {
+        run[n++] = (char)buf[i];
+        if(n < CONCEPT_RUN) continue;
+        count = concepts_in_run(run, n, out, count);
+        memmove(run, run + n - CONCEPT_KEEP, CONCEPT_KEEP);
+        n = CONCEPT_KEEP;
+        continue;
+      }
+      count = concepts_in_run(run, n, out, count);
+      n = 0;
+    }
+  }
+  if(run) count = concepts_in_run(run, n, out, count);
+  if(fd >= 0) close(fd);
+  free(buf);
+  free(run);
+  qsort(out, count, sizeof(*out), cmp_concept);
+  return count;
+}
+
+
 static void
 api_assets(request_t *req) {
   char q[128], listing[PATH_MAX], line[PATH_MAX + 32];
@@ -570,7 +656,52 @@ api_assets(request_t *req) {
     count++;
   }
   fclose(f);
-  sb_printf(&sb, "],\"truncated\":%s,\"protected\":%d}", truncated ? "true" : "false", protected);
+
+  /* Installed titles come and go, so their pictures are listed live: each
+     title's metadata folder, its sce_sys folder under /user/app, and the
+     pictures downloaded for it and for its game (concept). */
+  static const char *const title_roots[][2] = {{APPMETA_DIR, ""}, {APP_DIR, "/sce_sys"},
+                                               {CATALOG_APPMETA_DIR, ""}, {CONCEPTMETA_DIR, ""}};
+  for(size_t r = 0; r < sizeof(title_roots) / sizeof(*title_roots) && !truncated; r++) {
+    DIR *titles = opendir(title_roots[r][0]);
+    struct dirent *t;
+    while(titles && !truncated && (t = readdir(titles))) {
+      char dir[PATH_MAX];
+      if(t->d_name[0] == '.' || snprintf(dir, sizeof(dir), "%s/%s%s", title_roots[r][0], t->d_name, title_roots[r][1]) >= (int)sizeof(dir)) continue;
+      DIR *d = opendir(dir);
+      struct dirent *e;
+      while(d && (e = readdir(d))) {
+        char path[PATH_MAX];
+        struct stat st;
+        if(e->d_name[0] == '.' || snprintf(path, sizeof(path), "%s/%s", dir, e->d_name) >= (int)sizeof(path)) continue;
+        if(lstat(path, &st) || !S_ISREG(st.st_mode) || (q[0] && !stristr(path, q))) continue;
+        int kind = asset_kind(path);
+        if(kind == KIND_BLOCKED) { protected++; continue; }
+        if(kinds[0] && !kind_in_list(kinds, asset_kind_name(kind))) continue;
+        if(count >= limit) { truncated = 1; break; }
+        if(!first) SB_LIT(&sb, ",");
+        first = 0;
+        SB_LIT(&sb, "{\"path\":");
+        sb_json_str(&sb, path);
+        sb_printf(&sb, ",\"size\":%lld,\"kind\":\"%s\"}", (long long)st.st_size, asset_kind_name(kind));
+        count++;
+      }
+      if(d) closedir(d);
+    }
+    if(titles) closedir(titles);
+  }
+  sb_printf(&sb, "],\"truncated\":%s,\"protected\":%d,\"concepts\":{", truncated ? "true" : "false", protected);
+  concept_t *concepts = malloc(sizeof(*concepts) * MAX_CONCEPTS);
+  int nc = concepts ? title_concepts(concepts) : 0;
+  for(int k = 0; k < nc; k++) {
+    if(k && !strcmp(concepts[k].concept, concepts[k - 1].concept)) {
+      sb_printf(&sb, ",\"%s\"", concepts[k].title);
+      continue;
+    }
+    sb_printf(&sb, "%s\"%s\":[\"%s\"", k ? "]," : "", concepts[k].concept, concepts[k].title);
+  }
+  free(concepts);
+  sb_printf(&sb, "%s}}", nc ? "]" : "");
   respond_json(req->fd, 200, &sb);
 }
 
@@ -631,6 +762,138 @@ api_delete_theme(request_t *req) {
   if(rc) return respond_error(req->fd, 500, "delete failed");
   log_msg("deleted theme %s", id);
   respond_ok(req->fd);
+}
+
+
+/* Which of a title's picture and sound files, the console's and the theme's
+   copies of them, any process opens or reads in the next few minutes
+   (read-only). For finding where the home screen gets a title's icon: start
+   it, then rest mode and wake the console. */
+#define WATCH_FILES 96
+
+typedef struct {
+  FILE *f;
+  char (*paths)[PATH_MAX];
+  int last_i, repeat;
+  char last_what[8];
+  long last_ms;
+} watch_out_t;
+
+static void
+watch_seen(int i, const char *what, long ms, void *ctx) {
+  watch_out_t *w = ctx;
+  if(i == w->last_i && !strcmp(what, w->last_what) && ms - w->last_ms < 1000) {
+    w->repeat++;
+    return;
+  }
+  if(w->repeat) fprintf(w->f, "           (%d more)\n", w->repeat);
+  w->repeat = 0;
+  fprintf(w->f, "+%3ld.%03ld s  %-5s %s\n", ms / 1000, ms % 1000, what, w->paths[i]);
+  w->last_i = i;
+  snprintf(w->last_what, sizeof(w->last_what), "%s", what);
+  w->last_ms = ms;
+}
+
+static int
+watch_add_folder(char (*paths)[PATH_MAX], int n, const char *dir) {
+  DIR *d = opendir(dir);
+  struct dirent *e;
+  while(d && n < WATCH_FILES && (e = readdir(d))) {
+    const char *dot = strrchr(e->d_name, '.');
+    struct stat st;
+    if(e->d_name[0] == '.' || !dot || (strcasecmp(dot, ".png") && strcasecmp(dot, ".dds") && strcasecmp(dot, ".at9"))) continue;
+    if(snprintf(paths[n], PATH_MAX, "%s/%s", dir, e->d_name) >= PATH_MAX || stat(paths[n], &st) || !S_ISREG(st.st_mode)) continue;
+    n++;
+  }
+  if(d) closedir(d);
+  return n;
+}
+
+static void
+api_watch(request_t *req) {
+  static pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
+  char id[16], secs[16];
+  get_param(req->query, "id", id, sizeof(id));
+  get_param(req->query, "seconds", secs, sizeof(secs));
+  int ok = strlen(id) == 9, seconds = atoi(secs);
+  for(int i = 0; ok && i < 9; i++) ok = i < 4 ? id[i] >= 'A' && id[i] <= 'Z' : id[i] >= '0' && id[i] <= '9';
+  if(!ok) return respond_error(req->fd, 400, "id must be a title ID such as PPSA01234");
+  if(seconds <= 0) seconds = 120;
+  if(seconds > 300) seconds = 300;
+  if(pthread_mutex_trylock(&lock)) return respond_error(req->fd, 409, "a watch is already running");
+
+  static char paths[WATCH_FILES][PATH_MAX];
+  char folders[8][PATH_MAX];
+  int n = 0, nf = 3;
+  snprintf(folders[0], PATH_MAX, "%s/%s", APPMETA_DIR, id);
+  snprintf(folders[1], PATH_MAX, "%s/%s/sce_sys", APP_DIR, id);
+  snprintf(folders[2], PATH_MAX, "%s/%s", CATALOG_APPMETA_DIR, id);
+  concept_t *concepts = malloc(sizeof(*concepts) * MAX_CONCEPTS);
+  int nc = concepts ? title_concepts(concepts) : 0;
+  for(int k = 0; k < nc && nf < 8; k++) {
+    if(!strcmp(concepts[k].title, id)) snprintf(folders[nf++], PATH_MAX, "%s/%s", CONCEPTMETA_DIR, concepts[k].concept);
+  }
+  free(concepts);
+  for(int k = 0; k < nf; k++) n = watch_add_folder(paths, n, folders[k]);
+  /* The theme's staged copies of those folders, as mounted. */
+  FILE *live = fopen(LIVE_FILE, "r");
+  char line[PATH_MAX * 2 + 64];
+  while(live && fgets(line, sizeof(line), live)) {
+    line[strcspn(line, "\r\n")] = 0;
+    char *state = strchr(line, '\t'), *dir = state ? strchr(state + 1, '\t') : NULL, *real = dir ? strchr(dir + 1, '\t') : NULL;
+    if(strncmp(line, "stage", 5) || !real) continue;
+    *dir++ = 0;
+    *real++ = 0;
+    char *end = strchr(real, '\t');
+    if(end) *end = 0;
+    for(int k = 0; k < nf; k++) if(!strcmp(real, folders[k])) n = watch_add_folder(paths, n, dir);
+  }
+  if(live) fclose(live);
+
+  const char *path = DUMP_DIR "/watch.txt", *tmp = DUMP_DIR "/watch.txt.tmp";
+  int fd = fs_open_write(tmp);
+  FILE *f = fd < 0 ? NULL : fdopen(fd, "w");
+  if(!f) {
+    if(fd >= 0) close(fd);
+    pthread_mutex_unlock(&lock);
+    return respond_error(req->fd, 500, "could not write the report");
+  }
+  fprintf(f, "# watching %d file(s) of %s for %d s\n", n, id, seconds);
+  for(int i = 0; i < n; i++) fprintf(f, "#   %s\n", paths[i]);
+  fflush(f);
+  log_msg("watching %d picture file(s) of %s for %d s", n, id, seconds);
+  watch_out_t w = {f, paths, -1, 0, "", 0};
+  const char *list[WATCH_FILES];
+  for(int i = 0; i < n; i++) list[i] = paths[i];
+  if(plat_watch_files(list, n, seconds, watch_seen, &w)) fprintf(f, "# files can't be watched here\n");
+  if(w.repeat) fprintf(f, "           (%d more)\n", w.repeat);
+  fprintf(f, "# done\n");
+  fclose(f);
+  ok = !fs_rename(tmp, path);
+  pthread_mutex_unlock(&lock);
+  if(ok) respond_file(req, path);
+  else respond_error(req->fd, 500, "could not write the report");
+}
+
+
+/* Every process's pid and name (read-only), to find the ones to watch. */
+static void
+api_procs(request_t *req) {
+  static pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
+  const char *path = DUMP_DIR "/procs.txt", *tmp = DUMP_DIR "/procs.txt.tmp";
+  pthread_mutex_lock(&lock);
+  int fd = fs_open_write(tmp);
+  FILE *f = fd < 0 ? NULL : fdopen(fd, "w");
+  if(f) {
+    plat_dump_processes(f);
+    fclose(f);
+  } else if(fd >= 0) {
+    close(fd);
+  }
+  int ok = f && !fs_rename(tmp, path);
+  if(ok) respond_file(req, path);
+  pthread_mutex_unlock(&lock);
+  if(!ok) respond_error(req->fd, 500, "could not list the processes");
 }
 
 
@@ -1016,6 +1279,147 @@ api_mounts(request_t *req) {
 }
 
 
+/* Where the system keeps a title's pictures, for finding what the home
+   screen draws (read-only, names and sizes only): the files under the
+   folders ShellUI can see whose path names the title, and the strings in
+   the system's databases that name it. On 13.42, PS4 games' tiles followed
+   /user/appmeta/<title>/icon0.png and PS5 games' didn't. */
+
+#define WHERE_LINES   3000
+#define WHERE_VISITS  200000
+#define WHERE_STRINGS 400
+#define WHERE_RUN     8192    /* longer runs are cut; around the title ID is shown */
+
+typedef struct {
+  FILE *f;
+  const char *id;
+  int lines, visits, strings;
+  uint32_t seen[WHERE_STRINGS];
+  uint8_t buf[1 << 16];
+} where_t;
+
+static void
+where_walk(where_t *w, const char *dir, int depth, int named) {
+  DIR *d = opendir(dir);
+  if(!d) {
+    if(!named) fprintf(w->f, "# %s: %s\n", dir, strerror(errno));
+    return;
+  }
+  struct dirent *e;
+  while((e = readdir(d)) && w->lines < WHERE_LINES && w->visits < WHERE_VISITS) {
+    if(!strcmp(e->d_name, ".") || !strcmp(e->d_name, "..")) continue;
+    w->visits++;
+    char path[PATH_MAX];
+    struct stat st;
+    if(snprintf(path, sizeof(path), "%s/%s", dir, e->d_name) >= (int)sizeof(path) || lstat(path, &st)) continue;
+    int here = named || strstr(e->d_name, w->id);
+    if(S_ISDIR(st.st_mode)) {
+      /* A folder named after the title is listed two levels down. */
+      int next = here && !named ? 2 : depth - 1;
+      if(next >= 0) where_walk(w, path, next, here);
+      else if(here) { fprintf(w->f, "%s/ (not listed)\n", path); w->lines++; }
+    } else if(here) {
+      fprintf(w->f, "%s %lld %lld%s\n", path, (long long)st.st_size, (long long)st.st_mtime, S_ISLNK(st.st_mode) ? " symlink" : "");
+      w->lines++;
+    }
+  }
+  closedir(d);
+}
+
+/* A printable run from a database: kept if it names the title, once, as
+   up to 300 characters either side of the first mention. */
+static void
+where_run(where_t *w, const char *path, char *run, size_t n) {
+  if(n < strlen(w->id) || w->strings >= WHERE_STRINGS) return;
+  run[n] = 0;
+  char *at = strstr(run, w->id);
+  if(!at) return;
+  uint32_t h = crc32_update(0, run, n);
+  for(int k = 0; k < w->strings; k++) if(w->seen[k] == h) return;
+  w->seen[w->strings++] = h;
+  char *from = at - run > 300 ? at - 300 : run;
+  int len = (int)(run + n - from) > 600 + (int)strlen(w->id) ? 600 + (int)strlen(w->id) : (int)(run + n - from);
+  fprintf(w->f, "%s: %s%.*s%s\n", path, from > run ? "..." : "", len, from, from + len < run + n ? "..." : "");
+}
+
+static void
+where_strings(where_t *w, const char *path) {
+  int fd = open(path, O_RDONLY);
+  if(fd < 0) { fprintf(w->f, "# %s: %s\n", path, strerror(errno)); return; }
+  char run[WHERE_RUN + 1];
+  size_t n = 0;
+  ssize_t r;
+  while(w->strings < WHERE_STRINGS && (r = read(fd, w->buf, sizeof(w->buf))) > 0) {
+    for(ssize_t i = 0; i < r; i++) {
+      if(w->buf[i] >= 0x20 && w->buf[i] < 0x7f) {
+        if(n < WHERE_RUN) run[n++] = (char)w->buf[i];
+        continue;
+      }
+      where_run(w, path, run, n);
+      n = 0;
+    }
+  }
+  where_run(w, path, run, n);
+  close(fd);
+}
+
+static void
+where_databases(where_t *w, const char *dir, int depth) {
+  DIR *d = opendir(dir);
+  if(!d) { fprintf(w->f, "# %s: %s\n", dir, strerror(errno)); return; }
+  struct dirent *e;
+  while((e = readdir(d)) && w->strings < WHERE_STRINGS) {
+    char path[PATH_MAX];
+    struct stat st;
+    if(e->d_name[0] == '.' || snprintf(path, sizeof(path), "%s/%s", dir, e->d_name) >= (int)sizeof(path) || lstat(path, &st)) continue;
+    if(S_ISDIR(st.st_mode) && depth > 0) where_databases(w, path, depth - 1);
+    else if(S_ISREG(st.st_mode) && st.st_size <= (128 << 20) && (strstr(e->d_name, ".db") || strstr(e->d_name, ".json"))) where_strings(w, path);
+  }
+  closedir(d);
+}
+
+static void
+api_title_where(request_t *req) {
+  static pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
+  static const char *roots[] = {
+    "/system_data/priv/appmeta", "/system_data/priv/home", "/system_data/priv/cache", "/system_data/priv/game",
+    "/system_data/priv/mms", "/system_data/nobackup/temp", "/user/appmeta", "/user/temp", "/user/av_contents",
+    "/user/bgft", "/user/app", "/user/patch", "/user/catalog_downloader", "/user/download", "/user/home",
+  };
+  char id[16];
+  get_param(req->query, "id", id, sizeof(id));
+  int ok = strlen(id) == 9;
+  for(int i = 0; ok && i < 9; i++) ok = i < 4 ? id[i] >= 'A' && id[i] <= 'Z' : id[i] >= '0' && id[i] <= '9';
+  if(!ok) return respond_error(req->fd, 400, "id must be a title ID such as PPSA01234");
+
+  const char *path = DUMP_DIR "/where.txt", *tmp = DUMP_DIR "/where.txt.tmp";
+  pthread_mutex_lock(&lock);
+  int fd = fs_open_write(tmp);
+  FILE *f = fd < 0 ? NULL : fdopen(fd, "w");
+  if(f) {
+    where_t *w = calloc(1, sizeof(*w));
+    if(w) {
+      w->f = f;
+      w->id = id;
+      fprintf(f, "# files whose path names %s\n", id);
+      for(size_t i = 0; i < sizeof(roots) / sizeof(*roots); i++) where_walk(w, roots[i], 4, 0);
+      if(w->lines >= WHERE_LINES || w->visits >= WHERE_VISITS) fprintf(f, "# stopped after %d file(s), %d visited\n", w->lines, w->visits);
+      fprintf(f, "# strings naming %s in the system's databases\n", id);
+      where_databases(w, "/system_data/priv/mms", 1);
+      where_databases(w, "/system_data/priv/home", 2);
+      free(w);
+    }
+    fclose(f);
+  } else if(fd >= 0) {
+    close(fd);
+  }
+  ok = f && !fs_rename(tmp, path);
+  if(ok) respond_file(req, path);
+  pthread_mutex_unlock(&lock);
+  if(!ok) respond_error(req->fd, 500, "could not write the listing");
+}
+
+
 static void
 api_get_preview(request_t *req) {
   char id[128], kind[16], path[PATH_MAX];
@@ -1235,7 +1639,12 @@ api_get_asset(request_t *req) {
   char asset[512];
 
   get_param(req->query, "path", asset, sizeof(asset));
-  if(!asset_path_valid(asset) || asset_kind(asset) == KIND_BLOCKED) {
+  /* A title's param.json or param.sfo may be read (for its name), never
+     replaced. */
+  const char *base = strrchr(asset, '/');
+  int title_info = !strncmp(asset, APPMETA_DIR "/", sizeof(APPMETA_DIR)) && base &&
+                   (!strcmp(base, "/param.json") || !strcmp(base, "/param.sfo"));
+  if(!asset_path_valid(asset) || (asset_kind(asset) == KIND_BLOCKED && !title_info)) {
     return respond_error(req->fd, 403, "not a themable system asset");
   }
   char stock[PATH_MAX];
@@ -1392,6 +1801,9 @@ route(request_t *req) {
   if(get && !strcmp(p, "/api/theme/music")) return api_get_music(req);
   if(get && !strcmp(p, "/api/theme/preview")) return api_get_preview(req);
   if(get && !strcmp(p, "/api/mounts"))      return api_mounts(req);
+  if(get && !strcmp(p, "/api/title/where")) return api_title_where(req);
+  if(get && !strcmp(p, "/api/diag/watch")) return api_watch(req);
+  if(get && !strcmp(p, "/api/diag/procs")) return api_procs(req);
 
   if((post || put || del) && !req->has_token) {
     return respond_error(req->fd, 403, "missing X-PS5-Theme header");
@@ -1410,6 +1822,21 @@ route(request_t *req) {
   if(post && !strcmp(p, "/api/theme/save")) return api_save_theme(req);
   if(post && !strcmp(p, "/api/handoff"))     return api_handoff(req);
   if(post && !strcmp(p, "/api/theme/discard")) return api_discard_theme(req);
+#ifdef TEST_HOOKS
+  if(post && !strcmp(p, "/api/debug/break-listener")) {
+    /* As rest mode does on the PS5: the listening socket stops working. */
+    log_msg("debug: breaking the listening socket on request");
+    respond_ok(req->fd);
+    shutdown(atomic_load(&listen_fd), SHUT_RDWR);
+    return;
+  }
+  if(post && !strcmp(p, "/api/debug/deafen")) {
+    log_msg("debug: the web server stops answering on request");
+    respond_ok(req->fd);
+    atomic_store(&deaf, 1);
+    return;
+  }
+#endif
 #ifdef HOST_TEST
   if(post && !strcmp(p, "/api/debug/crash")) {
     log_msg("debug: crashing on request");
@@ -1565,11 +1992,42 @@ start_workers(void) {
 }
 
 
-void *
-web_server_thread(void *arg) {
+/* The listening socket. On the PS5, rest mode can leave it failing every
+   accept() for good (errno 0xA3, as etaHEN's own servers see), which took
+   the manager and the hand-over to a newer copy with it: it is then closed
+   and opened again. */
+#define LISTEN_CHECK_SECONDS 5
+
+/* Up to `attempts` tries a second apart (0: until it works). */
+static int
+web_listen(int attempts) {
   struct sockaddr_in addr;
   int one = 1;
 
+  memset(&addr, 0, sizeof(addr));
+  addr.sin_family = AF_INET;
+  addr.sin_port = htons(WEB_PORT);
+  addr.sin_addr.s_addr = htonl(INADDR_ANY);
+  for(int tries = 0; !attempts || tries < attempts; tries++) {
+    if(tries) sleep(1);   /* after a hard Stop the old socket can linger briefly */
+    int srv = socket(AF_INET, SOCK_STREAM, 0);
+    if(srv < 0) continue;
+    setsockopt(srv, SOL_SOCKET, SO_REUSEADDR, &one, sizeof(one));
+    if(!bind(srv, (struct sockaddr *)&addr, sizeof(addr)) && !listen(srv, 32)) {
+      int fl = fcntl(srv, F_GETFL);
+      if(fl >= 0) fcntl(srv, F_SETFL, fl | O_NONBLOCK);
+      return srv;
+    }
+    int saved = errno;
+    close(srv);
+    errno = saved;
+  }
+  return -1;
+}
+
+
+void *
+web_server_thread(void *arg) {
   (void)arg;
   crash_thread_init(CRUMB_LISTEN);
   crumb(CRUMB_LISTEN, "starting");
@@ -1578,42 +2036,59 @@ web_server_thread(void *arg) {
     log_err("web: could not start any worker");
     return NULL;
   }
-
-  int srv = socket(AF_INET, SOCK_STREAM, 0);
+  int srv = web_listen(30);
   if(srv < 0) {
-    log_err("web: socket failed: %s", strerror(errno));
+    log_err("web: bind :%d failed: %s", WEB_PORT, strerror(errno));
     return NULL;
   }
-  setsockopt(srv, SOL_SOCKET, SO_REUSEADDR, &one, sizeof(one));
-
-  memset(&addr, 0, sizeof(addr));
-  addr.sin_family = AF_INET;
-  addr.sin_port = htons(WEB_PORT);
-  addr.sin_addr.s_addr = htonl(INADDR_ANY);
-
-  /* After a hard Stop the old socket can linger briefly. */
-  for(int tries = 0; bind(srv, (struct sockaddr *)&addr, sizeof(addr)); tries++) {
-    if(tries == 30) {
-      log_err("web: bind :%d failed: %s", WEB_PORT, strerror(errno));
-      close(srv);
-      return NULL;
-    }
-    sleep(1);
-  }
-  if(listen(srv, 32)) {
-    log_err("web: listen failed: %s", strerror(errno));
-    close(srv);
-    return NULL;
-  }
+  atomic_store(&listen_fd, srv);
   log_msg("web: listening on port %d with %d workers", WEB_PORT, WEB_WORKERS);
   crumb(CRUMB_LISTEN, "accepting");
 
+  time_t checked = time(NULL), reported = 0;
   for(;;) {
-    int fd = accept(srv, NULL, NULL);
-    if(fd < 0) {
-      if(errno != EINTR) sleep(1);
+#ifdef TEST_HOOKS
+    if(atomic_load(&deaf)) {
+      atomic_store(&listen_fd, -1);
+      close(srv);
+      for(;;) sleep(60);
+    }
+#endif
+    struct pollfd pf = {srv, POLLIN, 0};
+    int ready = poll(&pf, 1, 1000), fd = -1, broken = 0, err = 0;
+    socklen_t len = sizeof(err);
+    if(ready > 0 && (pf.revents & (POLLERR | POLLHUP | POLLNVAL))) {
+      broken = 1;
+      if(getsockopt(srv, SOL_SOCKET, SO_ERROR, &err, &len) || !err) err = EPIPE;
+    } else if(ready > 0 || time(NULL) - checked >= LISTEN_CHECK_SECONDS) {
+      /* Also when nothing seems to arrive: a socket broken by rest mode
+         may not say so to poll(). */
+      checked = time(NULL);
+      fd = accept(srv, NULL, NULL);
+      if(fd < 0 && errno != EAGAIN && errno != EWOULDBLOCK && errno != EINTR && errno != ECONNABORTED) {
+        broken = 1;
+        err = errno;
+      }
+    }
+    if(broken) {
+      if(time(NULL) - reported >= 60) {
+        log_msg("web: the listening socket stopped working (%s, errno %d), as rest mode can do; listening again",
+                strerror(err), err);
+      }
+      atomic_store(&listen_fd, -1);
+      close(srv);
+      crumb(CRUMB_LISTEN, "listening again");
+      srv = web_listen(0);
+      atomic_store(&listen_fd, srv);
+      if(time(NULL) - reported >= 60) log_msg("web: listening on port %d again", WEB_PORT);
+      reported = time(NULL);
+      crumb(CRUMB_LISTEN, "accepting");
       continue;
     }
+    if(fd < 0) continue;
+    /* The BSDs pass non-blocking mode on from the listening socket. */
+    int fl = fcntl(fd, F_GETFL);
+    if(fl >= 0 && (fl & O_NONBLOCK)) fcntl(fd, F_SETFL, fl & ~O_NONBLOCK);
     struct timeval tv = {5, 0};
     setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
     tv.tv_sec = 15;

@@ -11,6 +11,7 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <limits.h>
+#include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -26,23 +27,32 @@ static const char *const roots[] = { BASE_DIR, TILE_DIR };
 #define NROOTS (sizeof(roots) / sizeof(*roots))
 
 static uint32_t crc_table[256];
+static pthread_once_t crc_once = PTHREAD_ONCE_INIT;
 
-
-int
-fs_guard_init(void) {
+static void
+crc_init(void) {
   for(uint32_t n = 0; n < 256; n++) {
     uint32_t c = n;
     for(int k = 0; k < 8; k++) c = (c & 1) ? 0xedb88320u ^ (c >> 1) : c >> 1;
     crc_table[n] = c;
   }
+}
+
+
+int
+fs_guard_init(void) {
+  pthread_once(&crc_once, crc_init);
   if(mkdir(BASE_DIR, 0755) && errno != EEXIST) return -1;
   return access(BASE_DIR, W_OK) ? -1 : 0;
 }
 
 
+/* The table is made on first use, so the checks work in any program that
+   links them (the fuzzer and test tools too), not only after start-up. */
 uint32_t
 crc32_update(uint32_t crc, const void *buf, size_t len) {
   const uint8_t *p = buf;
+  pthread_once(&crc_once, crc_init);
   crc = ~crc;
   while(len--) crc = crc_table[(crc ^ *p++) & 0xff] ^ (crc >> 8);
   return ~crc;

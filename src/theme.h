@@ -5,7 +5,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#define PLUGIN_VERSION "1.30"
+#define PLUGIN_VERSION "1.53"
 #define TITLE_ID       "THEM00001"
 #define WEB_PORT       8095
 
@@ -20,6 +20,7 @@
 #define LOG_FILE     LOG_DIR "/log.txt"
 #define ACTIVE_FILE  BASE_DIR "/active"
 #define MOUNTS_FILE  BASE_DIR "/mounts"
+#define LIVE_FILE    BASE_DIR "/live"      /* the applied theme's targets and stages */
 #define TILE_DIR     "/user/app/" TITLE_ID
 
 
@@ -62,11 +63,12 @@ typedef struct image_info {
 int         image_format_for_path(const char *path);
 const char *image_format_name(int format);
 int         image_probe(const char *path, image_info_t *out);
+int         image_probe_mem(const uint8_t *data, size_t len, image_info_t *out);
 
 
 /* policy.c: which system files a theme may replace and how a candidate is
    validated against the stock file. Code and unknown types are protected. */
-enum { KIND_BLOCKED = 0, KIND_IMAGE, KIND_SVG, KIND_AUDIO, KIND_FONT, KIND_JSON, KIND_VIDEO, KIND_TEXTURE };
+enum { KIND_BLOCKED = 0, KIND_IMAGE, KIND_SVG, KIND_AUDIO, KIND_FONT, KIND_JSON, KIND_VIDEO, KIND_TEXTURE, KIND_RCO };
 typedef struct wav_info {
   uint32_t format, channels, rate, bits;
   uint8_t  subformat[16];
@@ -74,10 +76,22 @@ typedef struct wav_info {
 } wav_info_t;
 
 int         asset_kind(const char *path);
+int         title_folder(const char *dir);
+
+int         app_path_ok(const char *path);
 const char *asset_kind_name(int kind);
 uint64_t    asset_size_limit(int kind);
 int         asset_validate(const char *candidate, const char *stock, char *why, size_t len);
 int         asset_checks_remembered(void);   /* results reused since the last call */
+int         svg_check_mem(const uint8_t *data, size_t len, char *why, size_t why_len);
+
+/* inflate.c, png.c: checking PNG pictures against the console's own. */
+long        inflate_raw(const uint8_t *src, size_t len, size_t *used, uint8_t *dst, size_t cap, size_t window);
+int         png_check_against(const uint8_t *stock, size_t stock_len, const uint8_t *cand, size_t cand_len,
+                              char *why, size_t why_len);
+
+/* rco.c: ShellUI resource containers; only their pictures may change. */
+int         rco_validate(const char *candidate, const char *stock, char *why, size_t len);
 int         wav_probe(const char *path, wav_info_t *out);
 
 
@@ -90,6 +104,21 @@ int         wav_probe(const char *path, wav_info_t *out);
 #define MUSIC_MAX_BYTES (128ull << 20)
 #define MUSIC_RATE      48000
 #define HOME_MUSIC      "/system_ex/vsh_asset/bgm_home.at9"
+
+/* Installed games' and apps' metadata, one folder per title: their icons and
+   other pictures may be themed (only pictures: the rest is the system's).
+   Most PS5 games' records point instead at the sce_sys folder of the game's
+   installation, /user/app/<title>/sce_sys, the only part of APP_DIR that
+   may be themed. */
+#define APPMETA_DIR     "/user/appmeta"
+#define APP_DIR         "/user/app"
+/* The pictures the console downloads from PlayStation Network: a title's
+   (one folder per title) and its game's (one folder per concept, which a
+   game's editions share). The app database points some games' tiles at
+   these instead (Death Stranding's at conceptmeta/234585 on 13.42). */
+#define CATALOG_DIR     "/user/catalog_downloader"
+#define CATALOG_APPMETA_DIR CATALOG_DIR "/appmeta"
+#define CONCEPTMETA_DIR CATALOG_DIR "/conceptmeta"
 #define GAIN_MIN        (-12)            /* dB relative to the system music's loudness */
 #define GAIN_MAX        12
 #define MUSIC_MAX_MS    3600000          /* bounds for the selected portion */
@@ -142,7 +171,7 @@ uint64_t xxh64(const void *data, size_t len);
 
 /* crash.c */
 #define WEB_WORKERS 4
-enum { CRUMB_MAIN = 0, CRUMB_LISTEN, CRUMB_TILE, CRUMB_WEB, CRUMB_COUNT = CRUMB_WEB + WEB_WORKERS };
+enum { CRUMB_MAIN = 0, CRUMB_LISTEN, CRUMB_TILE, CRUMB_GUARD, CRUMB_WEB, CRUMB_COUNT = CRUMB_WEB + WEB_WORKERS };
 void crash_install(void);
 void crash_thread_init(int slot);
 void crash_thread_exit(int slot);
@@ -184,6 +213,16 @@ int   ask_handoff(void);
 void  request_handoff(int pid);            /* pid of the newer copy, or 0 if it didn't say */
 int   handoff_requested(void);
 int   handoff_due(void);                   /* asked, and the newer copy is still there */
+void  request_stop(void);                  /* ps5-theme-stop asked (async-signal-safe) */
+int   stop_requested(void);
+void  record_running(void);                /* PID_FILE, once this copy holds the lock */
+
+/* running.c, shared with ps5-theme-stop. */
+#define INSTANCE_LOCK   BASE_DIR "/instance.lock"
+#define PID_FILE        BASE_DIR "/pid"      /* "<pid> <start>" of the copy holding the lock */
+int   running_copy(int self);
+int   title_mount_point(const char *on);
+int   release_overlays(const char *under, int (*match)(const char *on), char (*recorded)[1024], int nrecorded, int *stuck);
 int   update_check(void);                  /* 1 if a newer copy was started */
 
 

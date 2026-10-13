@@ -365,7 +365,7 @@ pre.log {
 /* ================================================================ basics */
 
 /* Where a theme .zip keeps its files: the console's themable folders (main.c). */
-const ASSET_ROOTS = ["system_ex/rnps/", "mnt/rnps/", "system_ex/vsh_asset/"];
+const ASSET_ROOTS = ["system_ex/rnps/", "mnt/rnps/", "system_ex/vsh_asset/", "user/appmeta/", "user/app/", "user/catalog_downloader/"];
 const IMAGE_MIME = { png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", webp: "image/webp" };
 const HOME_MUSIC = "/system_ex/vsh_asset/bgm_home.at9";  /* the console's home screen music */
 const MUSIC_RATE = 48000;                                 /* a theme keeps its music source at this rate */
@@ -736,6 +736,7 @@ async function loadAssets() {
   try {
     const r = await api("GET", "/api/assets", { limit: 5000 });
     state.assets = r.assets;
+    state.concepts = r.concepts || {};
     state.protectedCount = r.protected || 0;
     state.assetsError = "";
   } catch (e) {
@@ -796,6 +797,898 @@ function bgOff() {
   return new Set(home ? [...areas].filter(a => !a.startsWith("Home:")) : []);
 }
 function setBgOff(set) { localSet(`bg-off:${state.editId}`, JSON.stringify([...set])); }
+/* ================================================================ interface pictures
+
+   The console keeps its interface pictures (icons, buttons, symbols) in
+   resource files in /system_ex/vsh_asset (RCOF 0x110): a header with nine
+   tables, an element tree whose type-8 attributes point into the file table
+   at the end, and the files themselves. A theme may swap pictures; the
+   console refuses anything else that differs from its own file. The block
+   between the markers runs in the tests too (no DOM). */
+/* rco:begin */
+const RCO_HEADER = 0x50, RCO_FILE_TABLE = 8;
+
+function rcoParse(b) {
+  const dv = new DataView(b.buffer, b.byteOffset, b.byteLength), u32 = o => dv.getUint32(o, true);
+  if (b.length < RCO_HEADER || b[0] !== 0x52 || b[1] !== 0x43 || b[2] !== 0x4f || b[3] !== 0x46 || u32(4) !== 0x110) {
+    throw new Error("not an interface resource file");
+  }
+  const t = [];
+  for (let i = 0; i < 9; i++) {
+    const off = u32(8 + 8 * i), size = u32(12 + 8 * i);
+    if (off < RCO_HEADER || off + size > b.length) throw new Error("damaged resource file");
+    t.push([off, size]);
+  }
+  const [fileOff, fileSize] = t[RCO_FILE_TABLE], [treeOff, treeSize] = t[0];
+  if (fileOff + fileSize !== b.length || treeOff !== RCO_HEADER) throw new Error("damaged resource file");
+  const dec = new TextDecoder();
+  const str = (tab, o) => {
+    const [base, size] = t[tab];
+    if (o >= size) return "";
+    let e = base + o;
+    while (e < base + size && b[e]) e++;
+    return e < base + size ? dec.decode(b.subarray(base + o, e)) : "";
+  };
+  const files = [];
+  for (let at = 0, el = 0; at < treeSize; el++) {
+    if (treeSize - at < 28) throw new Error("damaged resource file");
+    const nattr = u32(treeOff + at + 4);
+    if (nattr > (treeSize - at - 28) / 16) throw new Error("damaged resource file");
+    const elem = str(3, u32(treeOff + at));
+    let id = "", type = "";
+    const own = [];
+    for (let i = 0; i < nattr; i++) {
+      const a = treeOff + at + 28 + 16 * i, name = str(3, u32(a)), kind = u32(a + 4);
+      if ((kind === 9 || kind === 10) && name === "id") id = str(1, u32(a + 8) + 4);
+      else if (kind === 3 && name === "type") type = str(3, u32(a + 8));
+      else if (kind === 8) {
+        const off = u32(a + 8), size = u32(a + 12);
+        if (off + size > fileSize) throw new Error("damaged resource file");
+        own.push({ attr: name, slot: a + 8, off, size });
+      }
+    }
+    for (const f of own) files.push({ el, elem, id, type, ...f });
+    at += 28 + 16 * nattr;
+  }
+  return { b, fileOff, fileSize, files };
+}
+
+const rcoData = (r, f) => r.b.subarray(r.fileOff + f.off, r.fileOff + f.off + f.size);
+
+/* What a picture really is, from its bytes: "png", "svg" or "" (some
+   entries declared as SVG hold PNG data). */
+function pictureKind(d) {
+  if (d.length >= 8 && d[0] === 0x89 && d[1] === 0x50 && d[2] === 0x4e && d[3] === 0x47) return "png";
+  return svgRootEnd(new TextDecoder().decode(d.subarray(0, 4096))) ? "svg" : "";
+}
+
+/* The pictures of a resource file, one entry per picture (with its size
+   variants, such as src and src_4k), each with what it really is. */
+function rcoPictures(r) {
+  const out = new Map();
+  for (const f of r.files) {
+    if (f.elem !== "texture" || (f.type !== "texture/png" && f.type !== "texture/svg")) continue;
+    if (!out.has(f.el)) out.set(f.el, { el: f.el, id: f.id, type: f.type, files: [] });
+    out.get(f.el).files.push({ ...f, kind: pictureKind(rcoData(r, f)) });
+  }
+  return [...out.values()].map(p => ({ ...p, kind: p.files.every(f => f.kind === "svg") ? "svg" : p.files.every(f => f.kind === "png") ? "png" : "" }));
+}
+
+/* A copy with some files replaced: `replace` maps "element\tattribute" to
+   new bytes. Files keep their order, 16-byte aligned, and files the console
+   shares between entries stay shared. */
+function rcoRebuild(r, replace) {
+  const own = f => `${f.el}\t${f.attr}`;
+  const keyOf = f => replace.has(own(f)) ? own(f) : `${f.off}:${f.size}`;
+  const where = new Map(), parts = [];
+  let len = 0;
+  const pad = () => { const n = (16 - len % 16) % 16; if (n) { parts.push(new Uint8Array(n)); len += n; } };
+  for (const f of [...r.files].sort((x, y) => x.off - y.off || x.size - y.size)) {
+    const k = keyOf(f);
+    if (where.has(k)) continue;
+    const data = replace.get(own(f)) || rcoData(r, f);
+    pad();
+    where.set(k, [len, data.length]);
+    parts.push(data);
+    len += data.length;
+  }
+  pad();
+  const out = new Uint8Array(r.fileOff + len);
+  out.set(r.b.subarray(0, r.fileOff));
+  const dv = new DataView(out.buffer);
+  for (const f of r.files) {
+    const [o, size] = where.get(keyOf(f));
+    dv.setUint32(f.slot, o, true);
+    dv.setUint32(f.slot + 4, size, true);
+  }
+  dv.setUint32(12 + 8 * RCO_FILE_TABLE, len, true);
+  let at = r.fileOff;
+  for (const p of parts) { out.set(p, at); at += p.length; }
+  return out;
+}
+
+/* A number drawn as seven-segment digits in a box, as rectangles (no fonts
+   needed): rows of two digits, padded to an even count ("0123"). */
+const SEGMENTS = ["abcdef", "bc", "abdeg", "abcdg", "bcfg", "acdfg", "acdefg", "abc", "abcdefg", "abcdfg"];
+function numberRects(n, w, h) {
+  let digits = String(n);
+  if (digits.length > 1 && digits.length % 2) digits = "0" + digits;
+  const rows = [];
+  for (let i = 0; i < digits.length; i += 2) rows.push(digits.slice(i, i + 2));
+  const m = Math.min(w, h) * 0.08, cols = Math.max(...rows.map(x => x.length));
+  const cw = (w - 2 * m) / cols, ch = (h - 2 * m) / rows.length, out = [];
+  rows.forEach((row, ri) => [...row].forEach((d, ci) => {
+    const dw = cw * 0.72, dh = ch * 0.84, t = Math.max(Math.min(dw, dh) * 0.2, 1);
+    const x = m + ci * cw + (cw - dw) / 2, y = m + ri * ch + (ch - dh) / 2;
+    const seg = { a: [x, y, dw, t], d: [x, y + dh - t, dw, t], g: [x, y + (dh - t) / 2, dw, t],
+                  f: [x, y, t, dh / 2], b: [x + dw - t, y, t, dh / 2], e: [x, y + dh / 2, t, dh / 2], c: [x + dw - t, y + dh / 2, t, dh / 2] };
+    for (const s of SEGMENTS[+d]) out.push(seg[s]);
+  }));
+  return out;
+}
+
+/* A numbered SVG made from the console's own: its beginning up to and
+   including the <svg ...> start tag byte for byte (XML declaration, size,
+   view box), then a pink square with the digits as rectangles, then its
+   closing tag. null if it has no ordinary start tag. */
+function numberSvg(n, stockText) {
+  const end = svgRootEnd(stockText);
+  if (!end) return null;
+  const [x0, y0, w, h] = svgBox(stockText.slice(stockText.lastIndexOf("<svg", end), end)), fx = v => +v.toFixed(2);
+  const rects = numberRects(n, w, h).map(([x, y, rw, rh]) =>
+    `<rect x="${fx(x0 + x)}" y="${fx(y0 + y)}" width="${fx(rw)}" height="${fx(rh)}" fill="#ffffff"/>`).join("");
+  const close = stockText.lastIndexOf("</svg>");
+  return stockText.slice(0, end) + `<rect x="${fx(x0)}" y="${fx(y0)}" width="${fx(w)}" height="${fx(h)}" fill="#ff00ff"/>` +
+    rects + (close >= end ? stockText.slice(close) : "</svg>");
+}
+
+/* An <svg ...> start tag's view box [x, y, width, height] (from viewBox,
+   else width and height). */
+function svgBox(root) {
+  const attr = name => (new RegExp(`\\s${name}\\s*=\\s*["']([^"']*)["']`, "i").exec(root) || [])[1];
+  const num = v => parseFloat(v) || 0;
+  const vb = (attr("viewBox") || "").trim().split(/[\s,]+/).map(Number);
+  return vb.length === 4 && !vb.some(isNaN) && vb[2] > 0 && vb[3] > 0 ? vb : [0, 0, num(attr("width")) || 64, num(attr("height")) || 64];
+}
+
+/* The console's SVG with a picture (a data: URL) in place of its drawing:
+   its opening byte for byte, then an <image> filling its view box. */
+function svgWithImage(stockText, dataUrl) {
+  const end = svgRootEnd(stockText);
+  if (!end) return null;
+  const root = stockText.slice(stockText.lastIndexOf("<svg", end), end);
+  const [x0, y0, w, h] = svgBox(root), fx = v => +v.toFixed(2);
+  const href = /\sxmlns:xlink\s*=/.test(root) ? "xlink:href" : "href";
+  const close = stockText.lastIndexOf("</svg>");
+  return stockText.slice(0, end) +
+    `<image x="${fx(x0)}" y="${fx(y0)}" width="${fx(w)}" height="${fx(h)}" preserveAspectRatio="xMidYMid meet" ${href}="${dataUrl}"/>` +
+    (close >= end ? stockText.slice(close) : "</svg>");
+}
+
+/* A home screen tile's icon file: the title ID it belongs to, or "". The
+   icon of an app is appdb/<title or "default">/icon0.png in its folder
+   (some apps keep a second copy under assets). */
+function tileTitle(path) {
+  const m = /^\/(?:system_ex|mnt)\/rnps\/apps\/(NPXS\d+)\/(?:(?:assets\/)?(?:applications\/[^/]+\/)?appdb\/([^/]+)\/|assets\/src\/assets\/texture\/)icon0\.png$/.exec(path);
+  return m ? (m[2] && m[2] !== "default" ? m[2] : m[1]) : "";
+}
+
+/* A game's or app's picture: in its folder in /user/appmeta, in the
+   sce_sys folder of its installation, which most PS5 games' records point
+   to instead, or among the pictures the console downloaded from PlayStation
+   Network for it (by title ID) or for its game (by concept number, shared
+   by a game's editions), which some games' records point to. */
+const TITLE_PICTURE_RE = /^\/user\/(?:appmeta\/([^/]+)|app\/([^/]+)\/sce_sys|catalog_downloader\/appmeta\/([^/]+)|catalog_downloader\/conceptmeta\/([^/]+))\/[^/]+$/;
+function isTitlePicture(path) { return TITLE_PICTURE_RE.test(path); }
+
+/* The titles a picture belongs to: one, or for a concept's pictures every
+   installed title the console's records show them for (from the plugin). */
+function titlesOf(path) {
+  const m = TITLE_PICTURE_RE.exec(path);
+  if (!m) return [];
+  return m[4] ? (state.concepts && state.concepts[m[4]]) || [] : [m[1] || m[2] || m[3]];
+}
+
+/* A PS4 param.sfo's TITLE, or "". */
+function sfoTitle(b) {
+  const dv = new DataView(b.buffer, b.byteOffset, b.byteLength), dec = new TextDecoder();
+  if (b.length < 20 || dv.getUint32(0, true) !== 0x46535000) return "";
+  const keys = dv.getUint32(8, true), data = dv.getUint32(12, true), n = dv.getUint32(16, true);
+  for (let i = 0; i < n && 36 + 16 * i <= b.length; i++) {
+    const e = 20 + 16 * i, ko = keys + dv.getUint16(e, true), len = dv.getUint32(e + 4, true), off = data + dv.getUint32(e + 12, true);
+    let k = ko;
+    while (k < b.length && b[k]) k++;
+    if (dec.decode(b.subarray(ko, k)) === "TITLE" && off + len <= b.length) return dec.decode(b.subarray(off, off + len)).replace(/\0+$/, "");
+  }
+  return "";
+}
+
+/* Where an SVG's <svg ...> start tag ends (after its ">"), or 0. */
+function svgRootEnd(text) {
+  const m = /<svg[\s>]/.exec(text);
+  if (!m) return 0;
+  const end = text.indexOf(">", m.index + 4);
+  return end < 0 || text[end - 1] === "/" ? 0 : end + 1;
+}
+
+/* A PNG's chunks: [{ type, start, end, data }] (end exclusive, CRC included). */
+function pngChunks(d) {
+  const out = [], dv = new DataView(d.buffer, d.byteOffset, d.length);
+  if (d.length < 8 || d[0] !== 0x89 || d[1] !== 0x50 || d[2] !== 0x4e || d[3] !== 0x47) return null;
+  for (let pos = 8; pos + 12 <= d.length;) {
+    const len = dv.getUint32(pos), end = pos + 12 + len;
+    if (end > d.length) return null;
+    const type = String.fromCharCode(d[pos + 4], d[pos + 5], d[pos + 6], d[pos + 7]);
+    out.push({ type, start: pos, end, data: d.subarray(pos + 8, pos + 8 + len) });
+    if (type === "IEND") return out;
+    pos = end;
+  }
+  return null;
+}
+
+/* What a console picture is: size, bit depth, colour type, palette (RGBA
+   entries), its chunks, and whether this page can write it again exactly. */
+function pngFormat(d) {
+  const chunks = pngChunks(d);
+  if (!chunks || chunks[0].type !== "IHDR" || chunks[0].data.length !== 13) return null;
+  const h = chunks[0].data, dv = new DataView(h.buffer, h.byteOffset, 13);
+  const f = { w: dv.getUint32(0), h: dv.getUint32(4), depth: h[8], ctype: h[9], chunks, stock: d };
+  const ok = { 0: [1, 2, 4, 8, 16], 2: [8, 16], 3: [1, 2, 4, 8], 4: [8, 16], 6: [8, 16] }[f.ctype];
+  const idat = chunks.filter(c => c.type === "IDAT");
+  f.zhead = idat.length && idat[0].data.length >= 2 ? [idat[0].data[0], idat[0].data[1]] : null;
+  f.writable = !!ok && ok.includes(f.depth) && !h[10] && !h[11] && !h[12] && f.w > 0 && f.h > 0 && !!f.zhead;
+  if (f.ctype === 3) {
+    const plte = chunks.find(c => c.type === "PLTE"), trns = chunks.find(c => c.type === "tRNS");
+    if (!plte) f.writable = false;
+    else f.palette = Array.from({ length: plte.data.length / 3 }, (_, i) =>
+      [plte.data[3 * i], plte.data[3 * i + 1], plte.data[3 * i + 2], trns && i < trns.data.length ? trns.data[i] : 255]);
+  }
+  /* IDAT chunks are split as the console's are. */
+  f.idatSize = idat.length > 1 ? idat[0].data.length : Infinity;
+  return f;
+}
+
+const PNG_CRC = (() => {
+  const t = new Uint32Array(256);
+  for (let n = 0; n < 256; n++) { let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1; t[n] = c >>> 0; }
+  return t;
+})();
+function pngChunk(type, data) {
+  const out = new Uint8Array(12 + data.length), dv = new DataView(out.buffer);
+  dv.setUint32(0, data.length);
+  for (let i = 0; i < 4; i++) out[4 + i] = type.charCodeAt(i);
+  out.set(data, 8);
+  let c = 0xffffffff;
+  for (let i = 4; i < 8 + data.length; i++) c = PNG_CRC[(c ^ out[i]) & 0xff] ^ (c >>> 8);
+  dv.setUint32(8 + data.length, (c ^ 0xffffffff) >>> 0);
+  return out;
+}
+
+/* zlib with stored (uncompressed) blocks: valid for any window size, and
+   used when the browser has no CompressionStream. */
+function zlibStored(data) {
+  const blocks = Math.max(1, Math.ceil(data.length / 65535));
+  const out = new Uint8Array(2 + data.length + 5 * blocks + 4);
+  out[0] = 0x78; out[1] = 0x01;
+  let o = 2;
+  for (let b = 0; b < blocks; b++) {
+    const part = data.subarray(b * 65535, Math.min(data.length, (b + 1) * 65535));
+    out[o++] = b === blocks - 1 ? 1 : 0;
+    out[o++] = part.length & 0xff; out[o++] = part.length >> 8;
+    out[o++] = ~part.length & 0xff; out[o++] = (~part.length >> 8) & 0xff;
+    out.set(part, o); o += part.length;
+  }
+  let a = 1, b2 = 0;
+  for (let i = 0; i < data.length; i++) { a = (a + data[i]) % 65521; b2 = (b2 + a) % 65521; }
+  new DataView(out.buffer).setUint32(o, ((b2 << 16) | a) >>> 0);
+  return out;
+}
+
+/* RGBA pixels as a PNG that matches the console's picture `f` (pngFormat)
+   in everything but the pixels: every other chunk is copied byte for byte
+   and in place (header, palette, transparency, colour space, text), the
+   image data keeps the console's zlib header and IDAT chunk size, and a
+   palette picture uses the console's own palette (each pixel the nearest
+   entry). `deflate` returns a zlib stream; it is used only where the
+   console's header allows its 32 KB window, stored blocks otherwise. */
+async function encodePng(rgba, f, deflate) {
+  const { w, h, depth, ctype } = f, n = w * h;
+  const grey = i => Math.round(0.299 * rgba[4 * i] + 0.587 * rgba[4 * i + 1] + 0.114 * rgba[4 * i + 2]);
+  let samples, channels;
+  if (ctype === 3) {
+    const cache = new Map();
+    const nearest = i => {
+      const key = ((rgba[4 * i] << 24) | (rgba[4 * i + 1] << 16) | (rgba[4 * i + 2] << 8) | rgba[4 * i + 3]) >>> 0;
+      if (cache.has(key)) return cache.get(key);
+      let best = 0, bestD = Infinity;
+      f.palette.forEach((p, j) => {
+        let dd = 0;
+        for (let c = 0; c < 4; c++) { const e = p[c] - rgba[4 * i + c]; dd += e * e; }
+        if (dd < bestD) { bestD = dd; best = j; }
+      });
+      cache.set(key, best);
+      return best;
+    };
+    samples = new Uint16Array(n);
+    for (let i = 0; i < n; i++) samples[i] = nearest(i);
+    channels = 1;
+  } else {
+    channels = { 0: 1, 2: 3, 4: 2, 6: 4 }[ctype];
+    samples = new Uint16Array(n * channels);
+    const scale = v => depth === 16 ? v * 257 : depth === 8 ? v : Math.round(v * ((1 << depth) - 1) / 255);
+    for (let i = 0; i < n; i++) {
+      const px = ctype === 0 ? [grey(i)] : ctype === 4 ? [grey(i), rgba[4 * i + 3]]
+        : ctype === 2 ? [rgba[4 * i], rgba[4 * i + 1], rgba[4 * i + 2]] : [rgba[4 * i], rgba[4 * i + 1], rgba[4 * i + 2], rgba[4 * i + 3]];
+      for (let c = 0; c < channels; c++) samples[i * channels + c] = scale(px[c]);
+    }
+  }
+  /* Scanlines, filter 0 (none), samples packed most significant bit first. */
+  const rowBytes = Math.ceil(w * channels * depth / 8), raw = new Uint8Array(h * (1 + rowBytes));
+  for (let y = 0; y < h; y++) {
+    const row = raw.subarray(y * (1 + rowBytes) + 1, (y + 1) * (1 + rowBytes));
+    for (let x = 0; x < w * channels; x++) {
+      const v = samples[y * w * channels + x];
+      if (depth === 16) { row[2 * x] = v >> 8; row[2 * x + 1] = v & 255; }
+      else if (depth === 8) row[x] = v;
+      else { const bit = x * depth; row[bit >> 3] |= v << (8 - depth - (bit & 7)); }
+    }
+  }
+  const body = (f.zhead[0] >> 4) === 7 && deflate ? (await deflate(raw)).subarray(2) : zlibStored(raw).subarray(2);
+  const z = new Uint8Array(2 + body.length);
+  z[0] = f.zhead[0]; z[1] = f.zhead[1];
+  z.set(body, 2);
+  const parts = [f.stock.subarray(0, 8)];
+  let idatDone = false;
+  for (const c of f.chunks) {
+    if (c.type !== "IDAT") { parts.push(f.stock.subarray(c.start, c.end)); continue; }
+    if (idatDone) continue;
+    idatDone = true;
+    const step = Math.min(f.idatSize, z.length);
+    for (let o = 0; o < z.length; o += step) parts.push(pngChunk("IDAT", z.subarray(o, Math.min(z.length, o + step))));
+  }
+  const out = new Uint8Array(parts.reduce((a, p) => a + p.length, 0));
+  let o = 0;
+  for (const p of parts) { out.set(p, o); o += p.length; }
+  return out;
+}
+
+/* A number's pixels on whole pixels, RGBA: `bg` square, `fg` digits. */
+function numberPixels(n, w, h, bg = [255, 0, 255, 255], fg = [255, 255, 255, 255]) {
+  const px = new Uint8Array(4 * w * h);
+  for (let i = 0; i < w * h; i++) px.set(bg, 4 * i);
+  for (const [x, y, rw, rh] of numberRects(n, w, h)) {
+    const x0 = Math.round(x), y0 = Math.round(y), x1 = Math.max(x0 + 1, Math.round(x + rw)), y1 = Math.max(y0 + 1, Math.round(y + rh));
+    for (let yy = Math.max(0, y0); yy < Math.min(h, y1); yy++) {
+      for (let xx = Math.max(0, x0); xx < Math.min(w, x1); xx++) px.set(fg, 4 * (yy * w + xx));
+    }
+  }
+  return px;
+}
+
+/* The numbered version of a console picture, in its exact format; null if
+   that format can't be written. A palette picture is drawn with two of its
+   own colours: those nearest pink and white, or else its darkest and
+   lightest visible ones. */
+async function numberPicture(n, stock, deflate) {
+  const f = pngFormat(stock);
+  if (!f || !f.writable) return null;
+  let bg = [255, 0, 255, 255], fg = [255, 255, 255, 255];
+  if (f.ctype === 3) {
+    const dist = (p, q) => p.reduce((s, v, i) => s + (v - q[i]) ** 2, 0);
+    const near = q => f.palette.reduce((b, p, i) => dist(p, q) < dist(f.palette[b], q) ? i : b, 0);
+    let bi = near(bg), fi = near(fg);
+    if (bi === fi) {
+      const light = p => p[3] * (0.299 * p[0] + 0.587 * p[1] + 0.114 * p[2]);
+      const order = f.palette.map((p, i) => i).sort((a, b) => light(f.palette[a]) - light(f.palette[b]));
+      bi = order[0]; fi = order[order.length - 1];
+    }
+    bg = f.palette[bi]; fg = f.palette[fi];
+  }
+  return encodePng(numberPixels(n, f.w, f.h, bg, fg), f, deflate);
+}
+/* rco:end */
+
+async function zlibDeflate(data) {
+  if (typeof CompressionStream === "undefined") return zlibStored(data);
+  const stream = new Blob([data]).stream().pipeThrough(new CompressionStream("deflate"));
+  return new Uint8Array(await new Response(stream).arrayBuffer());
+}
+
+/* The console's own resource files, read once per page (they are large). */
+async function rcoStock(path) {
+  state.rco = state.rco || new Map();
+  if (!state.rco.has(path)) {
+    const res = await fetch(`/api/asset?${q({ path })}`);
+    if (!res.ok) throw new Error(`cannot read ${baseName(path)} from the console`);
+    let parsed = null;
+    try { parsed = rcoParse(new Uint8Array(await res.arrayBuffer())); } catch (e) { /* another kind of .rco: left out */ }
+    state.rco.set(path, parsed);
+  }
+  return state.rco.get(path);
+}
+
+/* Read every resource file once, then show the section with what each
+   holds (files of another kind are left out). */
+let rcoLoading = null;
+function rcoEnsureLoaded() {
+  const paths = aspectAssets(aspectById("interface")).map(a => a.path);
+  if (rcoLoading || paths.every(p => state.rco && state.rco.has(p))) return;
+  rcoLoading = (async () => {
+    for (const p of paths) await rcoStock(p).catch(() => state.rco.set(p, null));
+  })().finally(() => { rcoLoading = null; renderAspect(aspectById("interface")); });
+}
+
+/* Every picture in every resource file, numbered from 1 in a fixed order
+   (files by name, pictures in file order): the key to the numbered test. */
+async function rcoKey(onFile) {
+  const paths = aspectAssets(aspectById("interface")).map(a => a.path).sort();
+  const key = [];
+  for (let i = 0; i < paths.length; i++) {
+    if (onFile) onFile(i, paths.length, paths[i]);
+    const r = await rcoStock(paths[i]);
+    if (r) for (const pic of rcoPictures(r)) key.push({ n: key.length + 1, path: paths[i], r, pic });
+  }
+  return key;
+}
+
+/* Number the pictures of one resource file (`vectorOnly`: only its SVG
+   icons). The numbers come from the key, so they are the same whichever
+   file is numbered first. */
+async function numberPictures(path, vectorOnly) {
+  const p = progressToast("Reading the console's interface files…");
+  try {
+    const key = (await rcoKey((i, n, x) => p.set(`Reading ${baseName(x)}…`, i / n * 0.3))).filter(k => k.path === path);
+    if (!key.length) throw new Error("this file has no pictures");
+    const replace = new Map();
+    let done = 0, skipped = 0;
+    for (const k of key) {
+      if (vectorOnly && k.pic.kind !== "svg") continue;
+      let ok = false;
+      for (const f of k.pic.files) {
+        let bytes = null;
+        if (f.kind === "png") bytes = await numberPicture(k.n, rcoData(k.r, f), zlibDeflate);
+        else if (f.kind === "svg") {
+          const text = numberSvg(k.n, new TextDecoder().decode(rcoData(k.r, f)));
+          bytes = text === null ? null : new TextEncoder().encode(text);
+        }
+        if (bytes) { replace.set(`${f.el}\t${f.attr}`, bytes); ok = true; }
+      }
+      if (ok) done++; else skipped++;
+      if ((done + skipped) % 50 === 0) p.set(`Numbering pictures… ${done + skipped} of ${key.length}`, 0.3 + 0.4 * (done + skipped) / key.length);
+    }
+    p.set(`Sending ${baseName(path)} to the console…`, 0.75);
+    await uploadVerified("/api/theme/file", { id: state.editId, path }, new Blob([rcoRebuild(key[0].r, replace)]));
+    state.files.add(path);
+    stamp = Date.now();
+    p.done(`${plural(done, "picture")} numbered in ${baseName(path)} and verified${skipped ? ` (${skipped} left as they are, in a format this page can't write)` : ""}. ` +
+      "Apply the theme, then put the console in rest mode and wake it.", "ok");
+  } catch (e) {
+    p.done(`Numbering failed: ${e.message}`, "err");
+  }
+  await refreshStatus();
+  renderAspect(aspectById("interface"));
+}
+
+/* ---------------------------------------------------------------- your own pictures */
+
+/* Your image as RGBA pixels at w x h (fitted as chosen above the sections),
+   transparent where it doesn't reach. */
+async function imageRgba(file, w, h) {
+  const url = URL.createObjectURL(file);
+  let img;
+  try { img = await loadImage(url); } finally { URL.revokeObjectURL(url); }
+  const c = document.createElement("canvas");
+  c.width = w; c.height = h;
+  const g = c.getContext("2d", { colorSpace: "srgb", willReadFrequently: true });
+  g.imageSmoothingQuality = "high";
+  let dw = w, dh = h;
+  if (state.fit !== "stretch") {
+    const sc = (state.fit === "cover" ? Math.max : Math.min)(w / img.naturalWidth, h / img.naturalHeight);
+    dw = img.naturalWidth * sc; dh = img.naturalHeight * sc;
+  }
+  g.drawImage(img, (w - dw) / 2, (h - dh) / 2, dw, dh);
+  return new Uint8Array(g.getImageData(0, 0, w, h).data.buffer);
+}
+
+/* Your image for one console picture, in exactly its format: a PNG written
+   like the console's (pngFormat), or the console's SVG with your image in
+   it as a PNG at twice the SVG's size (at most 512 pixels). */
+async function pictureFromImage(file, stock, kind) {
+  if (kind === "png") {
+    const f = pngFormat(stock);
+    if (!f || !f.writable) throw new Error("this picture's format can't be written");
+    return encodePng(await imageRgba(file, f.w, f.h), f, zlibDeflate);
+  }
+  const text = new TextDecoder().decode(stock), end = svgRootEnd(text);
+  if (!end) throw new Error("this picture can't be replaced");
+  const [, , vw, vh] = svgBox(text.slice(text.lastIndexOf("<svg", end), end));
+  const scale = Math.min(512 / Math.max(vw, vh), 2 * Math.max(1, 128 / Math.max(vw, vh)));
+  const w = Math.max(1, Math.round(vw * scale)), h = Math.max(1, Math.round(vh * scale));
+  const c = document.createElement("canvas");
+  c.width = w; c.height = h;
+  c.getContext("2d").putImageData(new ImageData(new Uint8ClampedArray(await imageRgba(file, w, h)), w, h), 0, 0);
+  return new TextEncoder().encode(svgWithImage(text, c.toDataURL("image/png")));
+}
+
+/* The theme's changes to a resource file: entry ("element\tattribute") ->
+   bytes, for every embedded picture that differs from the console's. */
+const rcoThemeCache = new Map();
+async function rcoChanges(path) {
+  const r = await rcoStock(path), out = new Map();
+  if (!r || !state.files.has(path)) return out;
+  const cacheKey = `${state.editId}|${path}|${stamp}`;
+  if (!rcoThemeCache.has(cacheKey)) {
+    const res = await fetch(`/api/theme/file?${q({ id: state.editId, path })}&v=${stamp}`);
+    rcoThemeCache.set(cacheKey, res.ok ? rcoParse(new Uint8Array(await res.arrayBuffer())) : null);
+  }
+  const t = rcoThemeCache.get(cacheKey);
+  if (!t) return out;
+  const theirs = new Map(t.files.map(f => [`${f.el}\t${f.attr}`, f]));
+  for (const f of r.files) {
+    const k = `${f.el}\t${f.attr}`, o = theirs.get(k);
+    if (!o) continue;
+    const a = rcoData(r, f), b = rcoData(t, o);
+    if (a.length !== b.length || a.some((v, i) => v !== b[i])) out.set(k, b);
+  }
+  return out;
+}
+
+async function rcoSave(path, changes) {
+  if (!changes.size) await resetAssets([{ path }]);
+  else {
+    await uploadVerified("/api/theme/file", { id: state.editId, path }, new Blob([rcoRebuild(await rcoStock(path), changes)]));
+    state.files.add(path);
+  }
+  stamp = Date.now();
+  await refreshStatus();
+}
+
+async function replacePicture(path, el, file) {
+  const r = await rcoStock(path), pic = rcoPictures(r).find(p => p.el === el);
+  if (!pic) return;
+  const p = progressToast(`Adding your picture as ${pic.id}…`);
+  try {
+    const changes = await rcoChanges(path);
+    for (const f of pic.files) {
+      if (!f.kind) throw new Error("this picture can't be replaced");
+      changes.set(`${f.el}\t${f.attr}`, await pictureFromImage(file, rcoData(r, f), f.kind));
+    }
+    p.set(`Sending ${baseName(path)} to the console…`, 0.6);
+    await rcoSave(path, changes);
+    p.done(`${pic.id} replaced and verified${pic.kind === "svg" ? " (a vector icon: your picture is drawn inside the console's own SVG)" : ""}. Apply the theme, then put the console in rest mode and wake it.`, "ok");
+  } catch (e) {
+    p.done(`${pic.id}: ${e.message}`, "err");
+  }
+  renderAspect(aspectById("interface"));
+}
+
+async function resetPicture(path, el) {
+  const r = await rcoStock(path), pic = rcoPictures(r).find(p => p.el === el);
+  const changes = await rcoChanges(path);
+  for (const f of pic.files) changes.delete(`${f.el}\t${f.attr}`);
+  try { await rcoSave(path, changes); toast(`${pic.id} is back to the console's own.`, "ok"); }
+  catch (e) { toast(e.message, "err"); }
+  renderAspect(aspectById("interface"));
+}
+
+/* ---------------------------------------------------------------- home screen tiles */
+
+/* The console's own tiles: title ID -> their icon files, with names from
+   each app's param.json (read once). */
+function tileGroups() {
+  const groups = new Map();
+  for (const a of aspectAssets(aspectById("tiles"))) {
+    const t = tileTitle(a.path);
+    if (!groups.has(t)) groups.set(t, { title: t, icons: [] });
+    groups.get(t).icons.push(a);
+  }
+  const bgs = new Map((state.assets || []).filter(a => /\/vsh_asset\/bg_NPXS\d+\.dds(\.zst)?$/.test(a.path))
+    .map(a => [/bg_(NPXS\d+)/.exec(a.path)[1], a]));
+  return [...groups.values()].sort((a, b) => a.title.localeCompare(b.title))
+    .map((g, i) => ({ ...g, n: i + 1, bg: bgs.get(g.title) || null }));
+}
+
+let tileNamesLoading = null;
+function tileNamesEnsure() {
+  state.tileNames = state.tileNames || new Map();
+  const missing = tileGroups().filter(g => !state.tileNames.has(g.title));
+  if (!missing.length || tileNamesLoading) return;
+  tileNamesLoading = (async () => {
+    for (const g of missing) {
+      let name = "";
+      for (const a of g.icons) {
+        try {
+          const res = await fetch(`/api/asset?${q({ path: a.path.replace(/icon0\.png$/, "param.json") })}`);
+          if (!res.ok) continue;
+          const pj = await res.json(), loc = pj.localizedParameters || {};
+          const own = loc[loc.defaultLanguage] || loc["en-US"] || Object.values(loc).find(v => v && v.titleName) || {};
+          name = own.titleName || "";
+          if (name) break;
+        } catch (e) { /* no param.json beside this copy */ }
+      }
+      state.tileNames.set(g.title, name);
+    }
+  })().finally(() => { tileNamesLoading = null; renderAspect(aspectById("tiles")); });
+}
+
+/* A tile's icon from your image (or its number, for the test), each copy in
+   exactly the format of the console's. */
+async function tileIconFiles(g, make) {
+  for (const a of g.icons) {
+    const res = await fetch(`/api/asset?${q({ path: a.path })}`);
+    if (!res.ok) throw new Error(`cannot read ${a.path} from the console`);
+    await uploadVerified("/api/theme/file", { id: state.editId, path: a.path }, new Blob([await make(new Uint8Array(await res.arrayBuffer()))]));
+    state.files.add(a.path);
+  }
+}
+
+async function tileIcon(title, file) {
+  const g = tileGroups().find(x => x.title === title), name = (state.tileNames && state.tileNames.get(title)) || title;
+  const p = progressToast(`Adding the ${name} icon…`);
+  try {
+    await tileIconFiles(g, async stock => {
+      const f = pngFormat(stock);
+      if (!f || !f.writable) throw new Error("this icon's format can't be written");
+      return encodePng(await imageRgba(file, f.w, f.h), f, zlibDeflate);
+    });
+    p.done(`${name} icon replaced and verified${g.icons.length > 1 ? ` (${plural(g.icons.length, "copy")})` : ""}. Apply the theme to use it.`, "ok");
+  } catch (e) { p.done(`${name}: ${e.message}`, "err"); }
+  stamp = Date.now();
+  await refreshStatus();
+  renderAspect(aspectById("tiles"));
+}
+
+async function numberTileIcons() {
+  const groups = tileGroups(), p = progressToast("Numbering the tile icons…");
+  try {
+    for (const g of groups) {
+      p.set(`Numbering tile ${g.n} of ${groups.length}…`, g.n / groups.length);
+      await tileIconFiles(g, async stock => {
+        const out = await numberPicture(g.n, stock, zlibDeflate);
+        if (!out) throw new Error(`tile ${g.n}'s icon format can't be written`);
+        return out;
+      });
+    }
+    p.done(`${plural(groups.length, "tile icon")} numbered and verified. Apply the theme, then look at the home screen.`, "ok");
+  } catch (e) { p.done(`Numbering failed: ${e.message}`, "err"); }
+  stamp = Date.now();
+  await refreshStatus();
+  renderAspect(aspectById("tiles"));
+}
+
+function tilesBody(asp) {
+  const groups = tileGroups();
+  if (!groups.length) return `<p class="note">This firmware has no tile icons that can be themed.</p>`;
+  setTimeout(tileNamesEnsure);
+  const rows = groups.map(g => {
+    const rep = g.icons.some(a => state.files.has(a.path)), bgRep = g.bg && state.files.has(g.bg.path);
+    const name = state.tileNames && state.tileNames.has(g.title) ? state.tileNames.get(g.title) || "(no name)" : "Reading…";
+    return `<div class="row-item${rep || bgRep ? " replaced" : ""}">
+      <div class="info"><div class="file">${g.n} · ${esc(name)}${rep ? ` <span class="tag on">Icon changed</span>` : ""}${bgRep ? ` <span class="tag on">Background changed</span>` : ""}</div>
+        <div class="dir">${esc(g.title)}${g.icons.length > 1 ? ` · ${plural(g.icons.length, "copy")} of its icon` : ""}${g.bg ? " · has its own background" : ""}</div></div>
+      <div class="strip">${thumbFor(g.icons.find(a => state.files.has(a.path)) || g.icons[0])}</div>
+      <div class="acts">
+        <button class="btn sm" data-act="tile-icon" data-title="${esc(g.title)}">Change icon</button>
+        ${g.bg ? `<button class="btn sm" data-act="tile-bg" data-title="${esc(g.title)}">Change background</button>` : ""}
+        ${rep || bgRep ? `<button class="btn sm ghost danger" data-act="tile-reset" data-title="${esc(g.title)}">Reset</button>` : ""}
+      </div></div>`;
+  }).join("");
+  return `<p class="note">The console's own tiles on the home screen and in the Game Library. Each icon is written in
+      exactly the format of the console's; a tile's background is the picture shown while it is selected.</p>
+    <div class="toolbar"><button class="btn" data-act="tiles-number">Number tile icons</button>
+      <span class="note">A test: each icon becomes the number in front of its name below, so you can see which tile is which.</span></div>
+    <div class="rows">${rows}</div>`;
+}
+
+/* ---------------------------------------------------------------- games and apps */
+
+/* A title's picture by name: icon0.png and icon0.dds are the same icon, and
+   so are the numbered copies PlayStation Network's pictures come in
+   (icon0_11.png, logo_00.png ... logo_30.png, pic0_08.jpg). */
+function pictureStem(path) { return baseName(path).replace(/\.(png|dds|jpe?g|webp)$/i, "").replace(/_\d+$/, "").toLowerCase(); }
+
+/* Installed titles and their pictures, the icon first. A picture can be in
+   several files: a PNG and a texture, in the title's /user/appmeta folder
+   and in the sce_sys folder of its installation, and the PlayStation Network
+   copies (titlesOf). Which one the home screen shows depends on the title
+   (most PS5 games' records point at sce_sys, some at the network's), so
+   each picture (`sets`) is changed in all its files at once. */
+function titleGroups() {
+  const groups = new Map();
+  for (const a of aspectAssets(aspectById("titles"))) {
+    for (const t of titlesOf(a.path)) {
+      if (!groups.has(t)) groups.set(t, { title: t, pictures: [] });
+      groups.get(t).pictures.push(a);
+    }
+  }
+  /* Installed ones only: PlayStation Network's pictures are also kept for
+     games that aren't (or are no longer) installed. */
+  for (const [t, g] of groups) {
+    if (!g.pictures.some(a => /^\/user\/app(?:meta)?\//.test(a.path))) groups.delete(t);
+  }
+  const rank = { icon0: 0, pic0: 1, logo: 2 };
+  const iconFirst = stem => stem in rank ? rank[stem] : 3, pngFirst = a => ext(a.path) === "png" ? 0 : 1;
+  for (const g of groups.values()) {
+    g.pictures.sort((a, b) => iconFirst(pictureStem(a.path)) - iconFirst(pictureStem(b.path)) ||
+      pictureStem(a.path).localeCompare(pictureStem(b.path)) || pngFirst(a) - pngFirst(b) || a.path.localeCompare(b.path));
+    const sets = new Map();
+    for (const a of g.pictures) {
+      if (!sets.has(pictureStem(a.path))) sets.set(pictureStem(a.path), []);
+      sets.get(pictureStem(a.path)).push(a);
+    }
+    g.sets = [...sets].map(([stem, files]) => ({ stem, files }));
+  }
+  const name = g => (state.titleNames && state.titleNames.get(g.title)) || g.title;
+  return [...groups.values()].sort((a, b) => name(a).localeCompare(name(b)));
+}
+
+let titleNamesLoading = null;
+function titleNamesEnsure() {
+  state.titleNames = state.titleNames || new Map();
+  const missing = titleGroups().filter(g => !state.titleNames.has(g.title));
+  if (!missing.length || titleNamesLoading) return;
+  titleNamesLoading = (async () => {
+    for (const g of missing) {
+      let name = "";
+      const dir = `/user/appmeta/${g.title}`;
+      try {
+        const res = await fetch(`/api/asset?${q({ path: `${dir}/param.json` })}`);
+        if (res.ok) {
+          const pj = await res.json(), loc = pj.localizedParameters || {};
+          name = ((loc[loc.defaultLanguage] || loc["en-US"] || Object.values(loc).find(v => v && v.titleName) || {}).titleName) || "";
+        }
+      } catch (e) { /* not JSON */ }
+      if (!name) {
+        try {
+          const res = await fetch(`/api/asset?${q({ path: `${dir}/param.sfo` })}`);
+          if (res.ok) name = sfoTitle(new Uint8Array(await res.arrayBuffer()));
+        } catch (e) { /* no param.sfo either */ }
+      }
+      state.titleNames.set(g.title, name);
+    }
+  })().finally(() => { titleNamesLoading = null; renderAspect(aspectById("titles")); });
+}
+
+/* One of a title's pictures from your image, in every file that holds it:
+   a PNG in exactly the format of the console's, a texture (and anything
+   else) through the usual conversion into the console's exact format. */
+async function titlePicture(title, stem, file) {
+  const g = titleGroups().find(x => x.title === title), set = g && g.sets.find(x => x.stem === stem);
+  if (!set) return;
+  const label = `${(state.titleNames && state.titleNames.get(title)) || title} ${pictureName(stem)[0]}`;
+  const rest = [];
+  let failed = false, written = 0;
+  for (const a of set.files) {
+    if (ext(a.path) !== "png") { rest.push(a); continue; }
+    try {
+      const res = await fetch(`/api/asset?${q({ path: a.path })}`);
+      if (!res.ok) throw new Error("cannot read the console's picture");
+      const f = pngFormat(new Uint8Array(await res.arrayBuffer()));
+      if (!f || !f.writable) { rest.push(a); continue; }
+      await uploadVerified("/api/theme/file", { id: state.editId, path: a.path }, new Blob([await encodePng(await imageRgba(file, f.w, f.h), f, zlibDeflate)]));
+      state.files.add(a.path);
+      written++;
+    } catch (e) {
+      failed = true;
+      toast(`${label} (${baseName(a.path)}): ${e.message}`, "err", 9000);
+    }
+  }
+  if (rest.length) await attachTo(rest, file, label, written);
+  else if (!failed) toast(`${label} replaced${written > 1 ? ` in ${plural(written, "file")}` : ""} and verified. Apply the theme to use it.`, "ok");
+  stamp = Date.now();
+  await refreshStatus();
+  renderAspect(aspectById("titles"));
+}
+
+/* What a title's picture is, in plain words: [button label, where it shows]. */
+const PICTURE_NAMES = {
+  icon0: ["icon", "The icon: the game's tile on the home screen and in the Game Library."],
+  pic0: ["background", "The background: shown behind the home screen while the game is selected."],
+  logo: ["logo", "The logo: the game's name as artwork."],
+};
+function pictureName(stem) {
+  return PICTURE_NAMES[stem] || [`other artwork (${stem})`, `Other artwork the console keeps for the game (${stem}).`];
+}
+
+function titlesBody(asp) {
+  const groups = titleGroups();
+  if (!groups.length) return `<p class="note">No installed games or apps with pictures were found.</p>`;
+  setTimeout(titleNamesEnsure);
+  const filter = (state.filters[asp.id] || "").toLowerCase();
+  const name = g => state.titleNames && state.titleNames.has(g.title) ? state.titleNames.get(g.title) || g.title : "Reading…";
+  const shown = filter ? groups.filter(g => `${name(g)} ${g.title}`.toLowerCase().includes(filter)) : groups;
+  const page = state.pages[asp.id] || 48;
+  const rows = shown.slice(0, page).map(g => {
+    const rep = g.pictures.some(a => state.files.has(a.path));
+    /* Titles whose PlayStation Network pictures (a concept's) are this one's too. */
+    const shared = [...new Set(g.pictures.flatMap(a => titlesOf(a.path)))].filter(t => t !== g.title)
+      .map(t => (state.titleNames && state.titleNames.get(t)) || t);
+    return `<div class="row-item${rep ? " replaced" : ""}">
+      <div class="info"><div class="file">${esc(name(g))}${rep ? ` <span class="tag on">Changed</span>` : ""}</div>
+        <div class="dir">${esc(g.title)} · ${plural(g.sets.length, "picture")}${shared.length ? ` · shares pictures with ${esc(shared.join(", "))}` : ""}</div></div>
+      <div class="strip">${thumbFor(g.pictures.find(a => isImage(a) && state.files.has(a.path)) || g.pictures.find(isImage) || g.pictures[0])}</div>
+      <div class="acts">${g.sets.map(x => `<button class="btn sm" data-act="title-pic" data-title="${esc(g.title)}" data-stem="${esc(x.stem)}" title="${esc(`${pictureName(x.stem)[1]} Files: ${x.files.map(a => a.path.replace(/^\/user\//, "")).join(", ")}`)}">Change ${esc(pictureName(x.stem)[0])}</button>`).join("")}
+        ${rep ? `<button class="btn sm ghost danger" data-act="title-reset" data-title="${esc(g.title)}">Reset</button>` : ""}
+      </div></div>`;
+  }).join("");
+  return `<p class="note">Installed games and apps, homebrew included. <b>Icon</b>: the game's tile on the home screen
+      and in the Game Library. <b>Background</b>: shown behind the home screen while the game is selected.
+      <b>Logo</b>: the game's name as artwork. Some games also have <b>other artwork</b>. Each picture is written into
+      every file that holds it, in exactly the console's format.</p>
+    <p class="note">After you apply the theme, the Game Library and the backgrounds show the new pictures straight away.
+      The home screen's icons change once you put the console in rest mode and wake it.</p>
+    <p class="note">While a theme changes a title's pictures, the console can't update them: choose <b>Restore stock</b>
+      before installing an update for that title, then apply the theme again.</p>
+    ${groups.length > 12 ? `<div class="toolbar"><input type="search" data-filter-aspect="${asp.id}" placeholder="Search games and apps" value="${esc(state.filters[asp.id] || "")}" aria-label="Search games and apps"></div>` : ""}
+    <div class="rows">${rows || `<p class="note">Nothing matches.</p>`}</div>
+    ${shown.length > page ? `<div><button class="btn sm" data-act="more" data-aspect="${asp.id}">Show more (${shown.length - page})</button></div>` : ""}`;
+}
+
+function rcoBody(asp) {
+  const all = aspectAssets(asp);
+  if (!all.length) return `<p class="note">This firmware has no interface files that can be themed.</p>`;
+  setTimeout(rcoEnsureLoaded);
+  const rows = all.slice().sort((a, b) => a.path.localeCompare(b.path)).map(a => {
+    const rep = state.files.has(a.path), r = state.rco && state.rco.get(a.path);
+    const pics = r ? rcoPictures(r) : null, svgs = pics ? pics.filter(x => x.kind === "svg").length : 0;
+    const what = pics ? `${plural(pics.length, "picture")}${svgs ? `, ${svgs} of them vector icons` : ""}` : "Reading…";
+    return `<div class="row-item${rep ? " replaced" : ""}">
+      <div class="info"><div class="file">${esc(baseName(a.path))}${rep ? ` <span class="tag on">Numbered</span>` : ""}</div>
+        <div class="dir">${what} · ${fmtSize(a.size)}</div></div>
+      <div class="acts">${pics && pics.length ? `
+        ${svgs ? `<button class="btn sm" data-act="rco-number" data-path="${esc(a.path)}" data-vector="1">Number vector icons</button>` : ""}
+        <button class="btn sm" data-act="rco-number" data-path="${esc(a.path)}">Number all</button>` : ""}
+        ${rep ? `<button class="btn sm ghost danger" data-act="rco-reset" data-path="${esc(a.path)}">Remove</button>` : ""}
+      </div></div>`;
+  }).join("");
+  return `<p class="note">The console draws its interface icons, buttons and symbols from these files. A theme can swap
+      pictures in them; everything else in them stays exactly the console's own.</p>
+    <p class="note"><b>Which picture is where?</b> Number the pictures of one file at a time, each on a pink square,
+      starting with <b>Sce.PlayStation.PUI_UI3.rco</b> and its vector icons. Apply the theme, then put the console in rest
+      mode and wake it: the interface reads these files when it starts. If it keeps restarting, the plugin takes the
+      theme down by itself. Then look up any number you see below.</p>
+    <div class="rows">${rows}</div>
+    <p class="note"><b>Use your own pictures:</b> find a picture by a number from the test or by name (search, settings,
+      home, power, trophies…) and choose an image for it. It is written in exactly the format of the console's picture;
+      for a vector icon, your picture is drawn inside the console's own SVG. Numbering a file again replaces your pictures in it.</p>
+    <div class="toolbar"><input type="search" id="rco-lookup" placeholder="A number from the screen, or a name" aria-label="Look up a picture"
+      value="${esc(state.rcoLookup || "")}"></div>
+    <div id="rco-lookup-result"><p class="note">Looking up…</p></div>`;
+}
+
+let rcoLookupTimer = 0;
+async function rcoLookup() {
+  const text = (state.rcoLookup || "").trim().toLowerCase();
+  if (!$("#rco-lookup-result")) return;
+  let html;
+  try {
+    const key = await rcoKey(), changed = new Map();
+    for (const path of new Set(key.map(k => k.path))) changed.set(path, await rcoChanges(path));
+    const isChanged = k => k.pic.files.some(f => changed.get(k.path).has(`${f.el}\t${f.attr}`));
+    let hits, more = 0;
+    if (!text) {
+      const all = key.filter(isChanged);
+      hits = all.slice(0, 24); more = all.length - hits.length;
+      if (!hits.length) { $("#rco-lookup-result").innerHTML = ""; return; }
+    } else {
+      hits = /^\d+$/.test(text) ? key.filter(k => k.n === +text) : key.filter(k => k.pic.id.toLowerCase().includes(text)).slice(0, 24);
+    }
+    html = hits.length ? `${text ? "" : `<p class="note">Pictures this theme changes:</p>`}<div class="rows">${hits.map(k => {
+      const f = k.pic.files[0], mine = changed.get(k.path).get(`${f.el}\t${f.attr}`), rep = isChanged(k);
+      const url = URL.createObjectURL(new Blob([mine || rcoData(k.r, f)], { type: f.kind === "svg" ? "image/svg+xml" : "image/png" }));
+      const what = k.pic.kind === "svg" ? "vector icon" : k.pic.kind === "png" ? (() => { const fm = pngFormat(rcoData(k.r, f)); return fm ? `${fm.w}×${fm.h} picture` : "picture"; })() : "picture";
+      return `<div class="row-item${rep ? " replaced" : ""}"><div class="info"><div class="file">${k.n} · ${esc(k.pic.id)}${rep ? ` <span class="tag on">Changed</span>` : ""}</div>
+          <div class="dir">${what} · ${esc(baseName(k.path))}</div></div>
+        <div class="strip"><div class="thumb"><img alt="" src="${url}"></div></div>
+        <div class="acts">${k.pic.kind ? `<button class="btn sm" data-act="rco-pick" data-path="${esc(k.path)}" data-el="${k.pic.el}">${rep ? "Replace" : "Use my picture"}</button>` : ""}
+          ${rep ? `<button class="btn sm ghost danger" data-act="rco-unpick" data-path="${esc(k.path)}" data-el="${k.pic.el}">Reset</button>` : ""}</div></div>`;
+    }).join("")}</div>${more ? `<p class="note">and ${more} more.</p>` : ""}` : `<p class="note">No picture ${/^\d+$/.test(text) ? "has that number" : "matches"}.</p>`;
+  } catch (e) { html = `<p class="note">${esc(e.message)}</p>`; }
+  /* The section may have been redrawn, or the text changed, while reading. */
+  const out = $("#rco-lookup-result");
+  if (out && (state.rcoLookup || "").trim().toLowerCase() === text) out.innerHTML = html;
+}
+
 const ASPECTS = [
   { id: "background", title: "Background", mode: "single",
     sub: "One image for the home screen backgrounds (and any other screens you switch on), encoded to each background's own format and size.",
@@ -819,10 +1712,19 @@ const ASPECTS = [
     filter: a => a.kind === "video" && !BG_RE.test(a.path), accept: "video/*,.mp4,.webm,.m4v" },
   { id: "textures", title: "Textures", mode: "rows",
     sub: "Other system textures (DDS). Any image is encoded to each texture's exact format and size.",
-    filter: a => a.kind === "texture" && !BG_RE.test(a.path), accept: "image/*" },
+    filter: a => a.kind === "texture" && !BG_RE.test(a.path) && !isTitlePicture(a.path), accept: "image/*" },
+  { id: "tiles", title: "Home screen tiles", mode: "systiles",
+    sub: "The console's own tiles (PlayStation Store, Game Library and others): their icons, and the background shown while each is selected.",
+    filter: a => a.kind === "image" && !!tileTitle(a.path), accept: "image/*" },
+  { id: "titles", title: "Games and apps", mode: "titles",
+    sub: "Installed games and apps, homebrew included: their icons and other pictures on the home screen.",
+    filter: a => titlesOf(a.path).length > 0 && (a.kind === "image" || a.kind === "texture"), accept: "image/*" },
+  { id: "interface", title: "Interface icons", mode: "rco",
+    sub: "The pictures the console's interface draws: icons, buttons and symbols. Includes a test that shows which picture is where.",
+    filter: a => a.kind === "rco" && !(state.rco && state.rco.get(a.path) === null) },
   { id: "images", title: "Other images", mode: "tiles",
     sub: "Every other replaceable image, with search.",
-    filter: a => isImage(a) && !ICON_RE.test(a.path) && !BG_RE.test(a.path), accept: "image/*,.svg" },
+    filter: a => isImage(a) && !ICON_RE.test(a.path) && !BG_RE.test(a.path) && !isTitlePicture(a.path), accept: "image/*,.svg" },
 ];
 const aspectById = id => ASPECTS.find(a => a.id === id);
 
@@ -852,20 +1754,80 @@ function loadImage(src) {
   });
 }
 
-/* Re-encode an image to the asset's exact format and pixel size, then decode
-   the result again to prove it. */
+/* What a picture file really holds, from its first bytes: the console keeps
+   the pictures it downloads from PlayStation Network as WebP or JPEG under
+   .png names. "" if none of these. */
+function sniffImage(b) {
+  if (b.length >= 8 && b[0] === 0x89 && b[1] === 0x50 && b[2] === 0x4e && b[3] === 0x47) return "image/png";
+  if (b.length >= 3 && b[0] === 0xff && b[1] === 0xd8 && b[2] === 0xff) return "image/jpeg";
+  const tag = (o, t) => [...t].every((c, i) => b[o + i] === c.charCodeAt(0));
+  if (b.length >= 16 && tag(0, "RIFF") && tag(8, "WEBP")) return "image/webp";
+  return "";
+}
+const MIME_NAME = { "image/png": "PNG", "image/jpeg": "JPEG", "image/webp": "WebP" };
+
+/* A WebP file's chunks after its RIFF header: [{ type, data }], or null. */
+function webpChunks(b) {
+  if (b.length < 20 || sniffImage(b) !== "image/webp") return null;
+  const dv = new DataView(b.buffer, b.byteOffset, b.length), out = [];
+  for (let o = 12; o + 8 <= b.length;) {
+    const n = dv.getUint32(o + 4, true);
+    if (o + 8 + n > b.length) return null;
+    out.push({ type: String.fromCharCode(b[o], b[o + 1], b[o + 2], b[o + 3]), data: b.subarray(o + 8, o + 8 + n) });
+    o += 8 + n + (n & 1);
+  }
+  return out.length ? out : null;
+}
+
+function webpFile(chunks) {
+  const size = chunks.reduce((a, c) => a + 8 + c.data.length + (c.data.length & 1), 4);
+  const out = new Uint8Array(8 + size), dv = new DataView(out.buffer);
+  out.set([0x52, 0x49, 0x46, 0x46]); dv.setUint32(4, size, true); out.set([0x57, 0x45, 0x42, 0x50], 8);
+  let o = 12;
+  for (const c of chunks) {
+    for (let i = 0; i < 4; i++) out[o + i] = c.type.charCodeAt(i);
+    dv.setUint32(o + 4, c.data.length, true);
+    out.set(c.data, o + 8);
+    o += 8 + c.data.length + (c.data.length & 1);
+  }
+  return out;
+}
+
+/* The browser's WebP laid out as the console's: a plain one (a single "VP8 "
+   chunk) when the console's is plain, and otherwise without the colour
+   profile browsers add, unless the console's has one too. */
+function webpLike(out, stock) {
+  const oc = webpChunks(out), sc = webpChunks(stock);
+  if (!oc || !sc) return out;
+  const vp8 = oc.find(c => c.type === "VP8 ");
+  if (sc.length === 1 && sc[0].type === "VP8 " && vp8 && !oc.some(c => c.type === "ALPH")) return webpFile([vp8]);
+  if (sc[0].type === "VP8X" && oc[0].type === "VP8X" && !sc.some(c => c.type === "ICCP")) {
+    const x = oc[0].data.slice();
+    x[0] &= ~0x20;   /* "has a colour profile" */
+    return webpFile([{ type: "VP8X", data: x }, ...oc.slice(1).filter(c => c.type !== "ICCP")]);
+  }
+  return out;
+}
+
+/* Re-encode an image to the asset's exact format (the one its file really
+   holds) and pixel size, then decode the result again to prove it. */
 async function imageForAsset(file, assetPath) {
-  const mime = IMAGE_MIME[ext(assetPath)];
-  if (!mime) {
+  if (!IMAGE_MIME[ext(assetPath)]) {
     if (!/svg/.test(file.type) && !/\.svg$/i.test(file.name)) throw new Error("use an SVG file for this one");
     return file;
   }
   if (!file.type.startsWith("image/") && !/\.(png|jpe?g|webp|gif|bmp|svg)$/i.test(file.name)) throw new Error(`${file.name} is not an image`);
-  const url = URL.createObjectURL(file);
+  const res = await fetch(`/api/asset?${q({ path: assetPath })}`);
+  if (!res.ok) throw new Error("could not read the system image");
+  const stockBytes = new Uint8Array(await res.arrayBuffer());
+  const mime = sniffImage(stockBytes) || IMAGE_MIME[ext(assetPath)];
+  /* A WebP without an alpha channel (a plain "VP8 " one) stays opaque. */
+  const opaque = mime === "image/jpeg" || (mime === "image/webp" && stockBytes[12] === 0x56 && stockBytes[15] === 0x20);
+  const url = URL.createObjectURL(file), stockUrl = URL.createObjectURL(new Blob([stockBytes], { type: mime }));
   let stock, img;
   try {
-    [stock, img] = await Promise.all([loadImage(`/api/asset?${q({ path: assetPath })}`), loadImage(url)]);
-  } finally { URL.revokeObjectURL(url); }
+    [stock, img] = await Promise.all([loadImage(stockUrl), loadImage(url)]);
+  } finally { URL.revokeObjectURL(url); URL.revokeObjectURL(stockUrl); }
   const w = stock.naturalWidth, h = stock.naturalHeight;
   if (!w || !h) throw new Error("could not read the system image size");
   if (file.type === mime && img.naturalWidth === w && img.naturalHeight === h) return file;
@@ -874,15 +1836,16 @@ async function imageForAsset(file, assetPath) {
   canvas.width = w; canvas.height = h;
   const ctx = canvas.getContext("2d", { colorSpace: "srgb" });  /* sRGB: same look in SDR and HDR */
   ctx.imageSmoothingQuality = "high";
-  if (mime === "image/jpeg") { ctx.fillStyle = "#000"; ctx.fillRect(0, 0, w, h); }
+  if (opaque) { ctx.fillStyle = "#000"; ctx.fillRect(0, 0, w, h); }
   let dw = w, dh = h;
   if (state.fit !== "stretch") {
     const s = (state.fit === "cover" ? Math.max : Math.min)(w / img.naturalWidth, h / img.naturalHeight);
     dw = img.naturalWidth * s; dh = img.naturalHeight * s;
   }
   ctx.drawImage(img, (w - dw) / 2, (h - dh) / 2, dw, dh);
-  const blob = await new Promise(r => canvas.toBlob(r, mime, 0.92));
-  if (!blob || blob.type !== mime) throw new Error(`this browser cannot produce ${ext(assetPath).toUpperCase()} images`);
+  let blob = await new Promise(r => canvas.toBlob(r, mime, 0.92));
+  if (!blob || blob.type !== mime) throw new Error(`this browser cannot make ${MIME_NAME[mime] || mime} pictures; use Chrome, Edge or Firefox for this one`);
+  if (mime === "image/webp") blob = new Blob([webpLike(new Uint8Array(await blob.arrayBuffer()), stockBytes)], { type: mime });
   const check = URL.createObjectURL(blob);
   try {
     const out = await loadImage(check);
@@ -1096,10 +2059,9 @@ async function soundForAsset(file, assetPath) {
 
 const BC7_WEIGHTS = [0, 4, 9, 13, 17, 21, 26, 30, 34, 38, 43, 47, 51, 55, 60, 64];
 
-/* One opaque 4x4 block as BC7 mode 6 (7-bit endpoints + p-bit, 4-bit indices).
-   Endpoints come from the block's principal colour axis; every pixel then
-   takes the exact nearest of the 16 palette colours. */
-function bc7Block(px, out, o) {
+/* A 4x4 block's colour line: the two ends of its pixels' range along their
+   principal colour axis, as RGB. Both block encoders start from it. */
+function blockLine(px) {
   let mr = 0, mg = 0, mb = 0;
   for (let i = 0; i < 64; i += 4) { mr += px[i]; mg += px[i + 1]; mb += px[i + 2]; }
   mr /= 16; mg /= 16; mb /= 16;
@@ -1125,10 +2087,17 @@ function bc7Block(px, out, o) {
       if (t > tmax) tmax = t;
     }
   }
+  return [[mr + tmin * ax, mg + tmin * ay, mb + tmin * az], [mr + tmax * ax, mg + tmax * ay, mb + tmax * az]];
+}
+
+/* One opaque 4x4 block as BC7 mode 6 (7-bit endpoints + p-bit, 4-bit indices).
+   Endpoints come from the block's principal colour axis; every pixel then
+   takes the exact nearest of the 16 palette colours. */
+function bc7Block(px, out, o) {
+  const [lo, hi] = blockLine(px);
   /* p-bit 1 on both endpoints keeps alpha at exactly 255 (A0 = A1 = 127). */
   const q = v => Math.max(0, Math.min(127, Math.round((v - 1) / 2)));
-  let e0 = [q(mr + tmin * ax), q(mg + tmin * ay), q(mb + tmin * az)];
-  let e1 = [q(mr + tmax * ax), q(mg + tmax * ay), q(mb + tmax * az)];
+  let e0 = lo.map(q), e1 = hi.map(q);
   const pal = new Int32Array(48);
   const fill = () => {
     for (let i = 0; i < 16; i++) {
@@ -1179,6 +2148,47 @@ function bc7DecodeMode6(src, o, px) {
   return true;
 }
 
+/* BC1 (DXT1) colours from two RGB565 endpoints: four opaque ones when the
+   first is larger, else three and transparent black. */
+function bc1Palette(c0, c1) {
+  const rgb = c => [((c >> 11) << 3) | (c >> 13), (((c >> 5) & 63) << 2) | ((c >> 9) & 3), ((c & 31) << 3) | ((c >> 2) & 7)];
+  const a = rgb(c0), b = rgb(c1), mix = (wa, wb, d) => a.map((v, i) => Math.round((wa * v + wb * b[i]) / d)).concat(255);
+  return c0 > c1 ? [a.concat(255), b.concat(255), mix(2, 1, 3), mix(1, 2, 3)] : [a.concat(255), b.concat(255), mix(1, 1, 2), [0, 0, 0, 0]];
+}
+
+/* One opaque 4x4 block as BC1 (DXT1), as PS4 titles' icon0.dds: endpoints
+   from the block's colour line, stored larger first so the block has four
+   opaque colours, and each pixel the nearest of them. */
+function bc1Block(px, out, o) {
+  const [lo, hi] = blockLine(px);
+  const q = (v, n) => Math.max(0, Math.min(n, Math.round(v * n / 255)));
+  const to565 = c => (q(c[0], 31) << 11) | (q(c[1], 63) << 5) | q(c[2], 31);
+  let c0 = to565(hi), c1 = to565(lo);
+  if (c0 < c1) [c0, c1] = [c1, c0];
+  let bits = 0;
+  if (c0 !== c1) {  /* equal endpoints: index 0 everywhere, still opaque */
+    const pal = bc1Palette(c0, c1);
+    for (let p = 0; p < 16; p++) {
+      let best = 0, bestErr = Infinity;
+      for (let i = 0; i < 4; i++) {
+        const dr = px[p * 4] - pal[i][0], dg = px[p * 4 + 1] - pal[i][1], db = px[p * 4 + 2] - pal[i][2];
+        const e = dr * dr + dg * dg + db * db;
+        if (e < bestErr) { bestErr = e; best = i; }
+      }
+      bits = (bits | (best << (2 * p))) >>> 0;
+    }
+  }
+  out[o] = c0 & 255; out[o + 1] = c0 >> 8; out[o + 2] = c1 & 255; out[o + 3] = c1 >> 8;
+  for (let i = 0; i < 4; i++) out[o + 4 + i] = (bits >>> (8 * i)) & 255;
+}
+
+/* BC1 decoder, used only to check the encoder's own output. */
+function bc1Decode(src, o, px) {
+  const pal = bc1Palette(src[o] | (src[o + 1] << 8), src[o + 2] | (src[o + 3] << 8));
+  for (let p = 0; p < 16; p++) px.set(pal[(src[o + 4 + (p >> 2)] >> (2 * (p & 3))) & 3], p * 4);
+  return true;
+}
+
 function b64bytes(s) { return Uint8Array.from(atob(s), c => c.charCodeAt(0)); }
 
 /* Wrap data in a zstd frame of stored (raw) blocks: valid for any decoder. */
@@ -1206,9 +2216,10 @@ async function textureForAsset(file, assetPath, progress) {
   const info = await api("GET", "/api/asset/texture", { path: assetPath });
   const key = `${info.header}|${info.dataLength}|${state.fit}|${file.name}|${file.size}|${file.lastModified}`;
   if (textureCache.has(key)) return textureCache.get(key);
-  const bc7 = info.dxgi === 98 || info.dxgi === 99;
+  const bc7 = info.dxgi === 98 || info.dxgi === 99, bc1 = info.dxgi === 71 || info.dxgi === 72 || info.format === "DXT1";
   const rgba = info.dxgi === 28 || info.dxgi === 29, bgra = info.dxgi === 87 || info.dxgi === 91;
-  if (!bc7 && !rgba && !bgra) throw new Error(`${info.format} textures are not supported yet`);
+  if (!bc7 && !bc1 && !rgba && !bgra) throw new Error(`${info.format} textures are not supported yet`);
+  const blockBytes = bc1 ? 8 : 16, encode = bc1 ? bc1Block : bc7Block, decode = bc1 ? bc1Decode : bc7DecodeMode6;
   if (info.array !== 1) throw new Error("texture arrays are not supported");
   if (!file.type.startsWith("image/") && !/\.(png|jpe?g|webp|gif|bmp)$/i.test(file.name)) throw new Error(`${file.name} is not an image`);
 
@@ -1236,7 +2247,7 @@ async function textureForAsset(file, assetPath, progress) {
     }
     ctx.drawImage(img, (w - dw) / 2, (h - dh) / 2, dw, dh);
     const pix = ctx.getImageData(0, 0, w, h).data;
-    if (!bc7) {
+    if (!bc7 && !bc1) {
       for (let i = 0; i < w * h; i++) {
         const s = i * 4;
         if (rgba) { data[o++] = pix[s]; data[o++] = pix[s + 1]; data[o++] = pix[s + 2]; data[o++] = 255; }
@@ -1254,12 +2265,12 @@ async function textureForAsset(file, assetPath, progress) {
             block[d] = pix[s]; block[d + 1] = pix[s + 1]; block[d + 2] = pix[s + 2]; block[d + 3] = 255;
           }
         }
-        bc7Block(block, data, o);
+        encode(block, data, o);
         if ((bx * 7 + by * 13) % 97 === 0) {  /* re-decode a sample of blocks */
-          if (!bc7DecodeMode6(data, o, check)) throw new Error("texture encoder self-check failed");
+          if (!decode(data, o, check)) throw new Error("texture encoder self-check failed");
           for (let i = 0; i < 64; i++) { if ((i & 3) !== 3) { const e = check[i] - block[i]; sampleErr += e * e; sampled++; } else if (check[i] !== 255) throw new Error("texture encoder self-check failed"); }
         }
-        o += 16;
+        o += blockBytes;
       }
       done += bw;
       if (performance.now() - lastYield > 50) {
@@ -1290,8 +2301,10 @@ async function fileForAsset(file, asset) {
 
 let attachProgress = null;
 
-/* Put one file onto a set of system assets (for example all size variants). */
-async function attachTo(assets, file, label) {
+/* Put one file onto a set of system assets (for example all size variants).
+   `copies`: the same picture already written to that many other files, for
+   a message that counts files instead of sizes. */
+async function attachTo(assets, file, label, copies = null) {
   const big = assets.length > 2 || assets.some(a => a.kind === "texture" || ext(a.path) === "at9");
   const p = big ? progressToast(`Adding ${label}…`) : null;
   let ok = 0;
@@ -1310,6 +2323,7 @@ async function attachTo(assets, file, label) {
   stamp = Date.now();
   const msg = errors.length
     ? `${label}: ${ok} of ${assets.length} added and verified. ${errors.slice(0, 2).join("; ")}`
+    : copies !== null ? `${label} replaced in ${plural(ok + copies, "file")} and verified. Apply the theme to use it.`
     : `${label} added and verified${assets.length > 1 ? ` at ${plural(ok, "size")}` : ""}. Apply the theme to use it.`;
   const kind = errors.length ? (ok ? "" : "err") : "ok";
   if (p) p.done(msg, kind); else toast(msg, kind, errors.length ? 9000 : 4500);
@@ -1642,6 +2656,9 @@ function thumbFor(a) {
 function aspectBody(asp) {
   if (asp.mode === "music") return musicBody();
   if (!state.assets) return `<p class="note">The system asset list is not available yet.</p>`;
+  if (asp.mode === "rco") { setTimeout(rcoLookup); return rcoBody(asp); }
+  if (asp.mode === "systiles") return tilesBody(asp);
+  if (asp.mode === "titles") return titlesBody(asp);
   const all = aspectAssets(asp);
   if (!all.length) return `<p class="note">This firmware has no ${esc(asp.title.toLowerCase())} that can be themed. Anything else replaceable is under Other images.</p>`;
 
@@ -1740,7 +2757,7 @@ function musicBody() {
       </div></div>
     ${t.music ? `<label class="field">Loudness <span id="gain-label">${esc(gainLabel(t.gain || 0))}</span>
       <input type="range" min="-12" max="12" step="1" value="${t.gain || 0}" id="music-gain"></label>` : ""}
-    ${converted ? `<p class="note">${esc(MUSIC_PLACE_NOTE)}</p>` : ""}`;
+    ${converted ? `<p class="note">${esc(MUSIC_HEAR_NOTE)} ${esc(MUSIC_PLACE_NOTE)}</p>` : ""}`;
 }
 
 /* ---- Home music: the music part, the loop part and their order ---- */
@@ -1759,6 +2776,7 @@ const MIN_PART = 3;          /* seconds */
 /* Seen on 13.42: the home screen's player keeps its place in time. It carries
    on after a game, and when the music changes under it (a theme is applied)
    it carries on in the new music from the same point. */
+const MUSIC_HEAR_NOTE = "To hear the new home music after applying the theme, highlight a game or app that plays its own music, let it play, then go back to the home screen.";
 const MUSIC_PLACE_NOTE = "The home screen keeps its place in the music: after a game it carries on where it stopped. When you apply a theme, the new music carries on from about where the old music had got to, so the first time it can start part-way through instead of at the beginning.";
 const SNAP = 0.25;           /* seconds: a loop edge this close to the music's edge joins it */
 
@@ -2438,8 +3456,10 @@ async function exportTheme(id) {
 /* "15 backgrounds, the home music and 2 other files", for export and import. */
 function describeFiles(paths) {
   const bg = paths.filter(x => BG_RE.test(x)).length, music = paths.includes(HOME_MUSIC);
-  const other = paths.length - bg - (music ? 1 : 0);
-  const parts = [bg ? plural(bg, "background") : "", music ? "the home music" : "", other ? plural(other, "other file") : ""].filter(Boolean);
+  const ui = paths.filter(x => /\.rco$/i.test(x)).length;
+  const other = paths.length - bg - ui - (music ? 1 : 0);
+  const parts = [bg ? plural(bg, "background") : "", music ? "the home music" : "", ui ? `interface pictures (${plural(ui, "file")})` : "",
+                 other ? plural(other, "other file") : ""].filter(Boolean);
   return parts.length > 1 ? `${parts.slice(0, -1).join(", ")} and ${parts[parts.length - 1]}` : parts[0] || "";
 }
 
@@ -2618,6 +3638,40 @@ document.addEventListener("click", async e => {
       await reencodeMusic(state.editId, themeById(state.editId).gain || 0);
       return renderAspect(aspectById("music"));
     case "choose-part": return openThemePart(state.editId);
+    case "rco-number": return numberPictures(el.dataset.path, el.dataset.vector === "1");
+    case "rco-reset": await resetAssets([{ path: el.dataset.path }]); return renderAspect(aspectById("interface"));
+    case "rco-pick": {
+      const file = await pickFile("image/*,.svg");
+      if (file) replacePicture(el.dataset.path, +el.dataset.el, file);
+      return;
+    }
+    case "rco-unpick": return resetPicture(el.dataset.path, +el.dataset.el);
+    case "tiles-number": return numberTileIcons();
+    case "title-pic": {
+      const file = await pickFile("image/*");
+      if (file) titlePicture(el.dataset.title, el.dataset.stem, file);
+      return;
+    }
+    case "title-reset": {
+      const g = titleGroups().find(x => x.title === el.dataset.title);
+      if (g) { await resetAssets(g.pictures); renderAspect(aspectById("titles")); }
+      return;
+    }
+    case "tile-icon": {
+      const file = await pickFile("image/*,.svg");
+      if (file) tileIcon(el.dataset.title, file);
+      return;
+    }
+    case "tile-bg": {
+      const g = tileGroups().find(x => x.title === el.dataset.title), file = g && await pickFile("image/*");
+      if (file) { await attachTo([g.bg], file, `${(state.tileNames && state.tileNames.get(g.title)) || g.title} background`); renderAspect(aspectById("tiles")); }
+      return;
+    }
+    case "tile-reset": {
+      const g = tileGroups().find(x => x.title === el.dataset.title);
+      if (g) { await resetAssets(g.icons.concat(g.bg ? [g.bg] : [])); renderAspect(aspectById("tiles")); }
+      return;
+    }
     case "choose-cover": return chooseCover();
     case "remove-cover": return removePreview(state.editId, "picture");
     case "trim-play": return preview && !preview.timer ? stopPreview() : playPreview("");
@@ -2672,6 +3726,11 @@ document.addEventListener("input", e => {
     }, 250);
   }
   if (e.target.id === "music-gain") $("#gain-label").textContent = gainLabel(+e.target.value);
+  if (e.target.id === "rco-lookup") {
+    state.rcoLookup = e.target.value;
+    clearTimeout(rcoLookupTimer);
+    rcoLookupTimer = setTimeout(rcoLookup, 250);
+  }
   const timeField = { "trim-start-time": "start", "trim-end-time": "end", "trim-lstart-time": "lstart", "trim-lend-time": "lend",
                       "trim-from-time": "from" }[e.target.id];
   if (timeField && state.trim) {

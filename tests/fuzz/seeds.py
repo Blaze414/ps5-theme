@@ -7,6 +7,9 @@ import subprocess
 import sys
 import zlib
 
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "../host"))
+from rco_fixture import Rco, palette_png, sample as rco_sample  # noqa: E402
+
 stock_dir, corpus = sys.argv[1], sys.argv[2]
 os.makedirs(stock_dir, exist_ok=True)
 r = random.Random(7)
@@ -104,6 +107,26 @@ open(f"{stock_dir}/stock.json", "wb").write(b'{"v":"5.7","w":100,"h":100,"layers
 put("json", "lottie", b'{"v":"5.7","w":100,"h":100,"layers":[{"ty":4,"ks":{"o":{"a":0,"k":100}}}]}')
 put("json", "array", b'[1, -2.5e3, "a\\u00e9\\n", true, false, null, {"x": []}]')
 put("json", "bom", b'\xef\xbb\xbf{"w": 100, "h": 100}')
+
+# PNG pictures checked against the console's own (a palette picture)
+open(f"{stock_dir}/stock-palette.png", "wb").write(palette_png(20, 20))
+put("png", "same", palette_png(20, 20))
+put("png", "other-pixels", palette_png(20, 20, lambda x, y: 2 * (x > y)))
+put("png", "stored", palette_png(20, 20, level=0))
+put("png", "8-bit", palette_png(20, 20, depth=8))
+
+# Interface resource files
+svg_icon = b'<svg width="128px" height="128px" viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg"><path d="M8 8h48v48H8z"/></svg>'
+stock_rco = rco_sample(lambda w, h: png(w, h, (90, 90, 90)), lambda: svg_icon, bytes(range(256)) * 8, b'{"button.fill.enabled": 268435455}')
+open(f"{stock_dir}/stock.rco", "wb").write(stock_rco)
+put("rco", "stock", stock_rco)
+put("rco", "pictures", Rco(stock_rco).replaced({("emoji_game", "src"): png(24, 24, (255, 0, 255)),
+                                                 ("iconid_home", "src"): b'<svg viewBox="0 0 64 64"><rect width="9" height="9"/></svg>'}))
+put("rco", "sound", Rco(stock_rco).replaced({("snd_focus_move", "src"): bytes(2048)}))
+for name in ("stock", "pictures", "sound"):   # rco-data: the pointers, then the file table
+    r = Rco(open(f"{corpus}/rco/{name}", "rb").read())
+    pointers = b"".join(struct.pack("<II", off, size) for *_, off, size in r.files())
+    put("rco-data", name, pointers + r.b[r.t["file"][0]:])
 
 # SVG
 put("svg", "plain", b'<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10"><rect width="5" height="5"/></svg>')

@@ -10,12 +10,20 @@
 
 #include <dlfcn.h>
 #include <errno.h>
+#include <stddef.h>
+#include <fcntl.h>
 #include <pthread.h>
+#include <signal.h>
+#include <stdint.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
+#include <time.h>
 #include <unistd.h>
 
+#include <sys/event.h>
 #include <sys/mount.h>
+#include <sys/user.h>
 #include <sys/thr.h>
 #include <sys/socket.h>
 #include <sys/sysctl.h>
@@ -126,24 +134,328 @@ plat_mount_path_max(void) {
 }
 
 
-/* An app may still be reading from the overlay: wait for it rather than
-   pulling the files away, and force only as a last resort. */
+/* An app may still be reading from the overlay: wait a little for it, and
+   never pull the files away (EBUSY then). Forcing it broke the system's own
+   views stacked on the overlay until a restart. */
 int
 plat_unmount(const char *on) {
   for(int i = 0; i < 15; i++) {
     if(!unmount(on, 0)) return 0;
-    if(errno != EBUSY) break;
+    if(errno != EBUSY) return -1;
     usleep(200 * 1000);
   }
-  if(errno == EBUSY) log_err("unmount %s: still busy after 3 s, forcing", on);
-  return unmount(on, MNT_FORCE);
+  errno = EBUSY;
+  return -1;
+}
+
+
+int
+plat_watch_files(const char *const *paths, int n, int seconds,
+                 void (*seen)(int, const char *, long, void *), void *ctx) {
+  int kq = kqueue(), *fds = calloc(n ? n : 1, sizeof(int));
+  if(kq < 0 || !fds) {
+    if(kq >= 0) close(kq);
+    free(fds);
+    return -1;
+  }
+  for(int i = 0; i < n; i++) {
+    struct kevent ev;
+    fds[i] = open(paths[i], O_RDONLY);
+    if(fds[i] < 0) continue;
+    EV_SET(&ev, fds[i], EVFILT_VNODE, EV_ADD | EV_CLEAR, NOTE_OPEN | NOTE_READ | NOTE_CLOSE, 0, (void *)(intptr_t)i);
+    if(kevent(kq, &ev, 1, NULL, 0, NULL)) {
+      close(fds[i]);
+      fds[i] = -1;
+    }
+  }
+  struct timespec start, now;
+  clock_gettime(CLOCK_MONOTONIC, &start);
+  for(;;) {
+    clock_gettime(CLOCK_MONOTONIC, &now);
+    long ms = (now.tv_sec - start.tv_sec) * 1000 + (now.tv_nsec - start.tv_nsec) / 1000000;
+    if(ms >= seconds * 1000L) break;
+    long left = seconds * 1000L - ms;
+    struct timespec wait = {left / 1000, (left % 1000) * 1000000};
+    struct kevent got[32];
+    int k = kevent(kq, NULL, 0, got, 32, &wait);
+    if(k < 0 && errno != EINTR) break;
+    clock_gettime(CLOCK_MONOTONIC, &now);
+    ms = (now.tv_sec - start.tv_sec) * 1000 + (now.tv_nsec - start.tv_nsec) / 1000000;
+    for(int e = 0; e < k; e++) {
+      int i = (int)(intptr_t)got[e].udata;
+      if(got[e].fflags & NOTE_OPEN) seen(i, "open", ms, ctx);
+      if(got[e].fflags & NOTE_READ) seen(i, "read", ms, ctx);
+      if(got[e].fflags & NOTE_CLOSE) seen(i, "close", ms, ctx);
+    }
+  }
+  for(int i = 0; i < n; i++) if(fds[i] >= 0) close(fds[i]);
+  free(fds);
+  close(kq);
+  return 0;
+}
+
+
+/* The kernel's process list (kern.proc), walked by each record's own size:
+   the console's records may be a different size from this SDK's. */
+static void
+each_process(void (*fn)(int pid, const char *name, void *ctx), void *ctx) {
+  int mib[4] = {CTL_KERN, KERN_PROC, KERN_PROC_PROC, 0};
+  size_t len = 0;
+  if(sysctl(mib, 4, NULL, &len, NULL, 0) || !len) return;
+  len += len / 4;   /* processes may start meanwhile */
+  char *buf = malloc(len);
+  if(!buf) return;
+  if(!sysctl(mib, 4, buf, &len, NULL, 0)) {
+    size_t need = offsetof(struct kinfo_proc, ki_comm) + COMMLEN + 1;
+    for(size_t at = 0; at + need <= len;) {
+      const struct kinfo_proc *p = (const struct kinfo_proc *)(buf + at);
+      if(p->ki_structsize < (int)need) break;
+      char name[COMMLEN + 1];
+      memcpy(name, p->ki_comm, COMMLEN);
+      name[COMMLEN] = 0;
+      fn(p->ki_pid, name, ctx);
+      at += (size_t)p->ki_structsize;
+    }
+  }
+  free(buf);
+}
+
+typedef struct { const char *name; int pid; } find_t;
+
+static void
+find_one(int pid, const char *name, void *ctx) {
+  find_t *f = ctx;
+  if(f->pid < 0 && !strcmp(name, f->name)) f->pid = pid;
+}
+
+int
+plat_find_process(const char *name) {
+  find_t f = {name, -1};
+  each_process(find_one, &f);
+  return f.pid;
+}
+
+#ifndef SZOMB
+#define SZOMB 5   /* ki_stat of a process that has exited (FreeBSD's sys/proc.h) */
+#endif
+
+/* Every thread of every process comes with KERN_PROC_ALL, each with its
+   own name; records are walked by their size here too. */
+/* kern.proc.all is missing on 13.42 (ENOENT); kern.proc.proc_td, every
+   process with its threads, is tried first. The records, or NULL. */
+static char *
+thread_records(size_t *len, const char **which) {
+  static const struct { int oid; const char *name; } nodes[] = {
+    {KERN_PROC_PROC | KERN_PROC_INC_THREAD, "kern.proc.proc_td"}, {KERN_PROC_ALL, "kern.proc.all"},
+  };
+  for(size_t k = 0; k < sizeof(nodes) / sizeof(*nodes); k++) {
+    int mib[3] = {CTL_KERN, KERN_PROC, nodes[k].oid};
+    *which = nodes[k].name;
+    *len = 0;
+    if(sysctl(mib, 3, NULL, len, NULL, 0) || !*len) continue;
+    *len += *len / 4;
+    char *buf = malloc(*len);
+    if(buf && !sysctl(mib, 3, buf, len, NULL, 0)) return buf;
+    free(buf);
+  }
+  return NULL;
+}
+
+int
+plat_find_named_thread(const char *name, int except) {
+  int found = -1;
+  size_t len;
+  const char *which;
+  char *buf = thread_records(&len, &which);
+  if(buf) {
+    size_t need = offsetof(struct kinfo_proc, ki_tdname) + sizeof(((struct kinfo_proc *)0)->ki_tdname);
+    for(size_t at = 0; found < 0 && at + need <= len;) {
+      const struct kinfo_proc *p = (const struct kinfo_proc *)(buf + at);
+      if(p->ki_structsize < (int)need) break;
+      char td[sizeof(p->ki_tdname) + 1];
+      memcpy(td, p->ki_tdname, sizeof(p->ki_tdname));
+      td[sizeof(p->ki_tdname)] = 0;
+      if(p->ki_pid != except && p->ki_stat != SZOMB && !strcmp(td, name)) found = p->ki_pid;
+      at += (size_t)p->ki_structsize;
+    }
+  }
+  free(buf);
+  return found;
+}
+
+unsigned long long
+plat_process_start(int pid) {
+  int mib[4] = {CTL_KERN, KERN_PROC, KERN_PROC_PID, pid};
+  static _Thread_local char buf[8192];
+  size_t len = sizeof(buf);
+  const struct kinfo_proc *p = (const struct kinfo_proc *)buf;
+  size_t need = offsetof(struct kinfo_proc, ki_stat) + 1;
+  if(pid <= 0 || sysctl(mib, 4, buf, &len, NULL, 0) || len < need || p->ki_structsize < (int)need ||
+     p->ki_pid != pid || p->ki_stat == SZOMB) {
+    return 0;
+  }
+  return (unsigned long long)p->ki_start.tv_sec * 1000000ull + (unsigned long long)p->ki_start.tv_usec + 1;
+}
+
+
+/* The mount table in a buffer of the caller's (getmntinfo keeps one
+   buffer for the whole process, and the ShellUI guard reads the table
+   while the main thread may). Free it; NULL with *n < 0 on failure. */
+static struct statfs *
+mount_table(int *n) {
+  for(int tries = 0; tries < 4; tries++) {
+    int want = getfsstat(NULL, 0, MNT_NOWAIT);
+    if(want < 0) break;
+    want += 32;   /* mounts may come meanwhile */
+    struct statfs *sf = malloc(sizeof(*sf) * (size_t)want);
+    if(!sf) break;
+    *n = getfsstat(sf, (long)(sizeof(*sf) * (size_t)want), MNT_NOWAIT);
+    if(*n >= 0 && *n < want) return sf;
+    free(sf);
+  }
+  *n = -1;
+  return NULL;
+}
+
+
+int
+plat_our_mounts(const char *stage_prefix, const char *under, char (*out)[1024], int max) {
+  int n, count = 0;
+  struct statfs *sf = mount_table(&n);
+  if(!sf) return -1;
+  for(int i = 0; i < n && count < max; i++) {
+    if(strcmp(sf[i].f_fstypename, "nullfs") || strncmp(sf[i].f_mntfromname, stage_prefix, strlen(stage_prefix)) ||
+       strncmp(sf[i].f_mntonname, under, strlen(under))) {
+      continue;
+    }
+    snprintf(out[count++], 1024, "%s", sf[i].f_mntonname);
+  }
+  free(sf);
+  return count;
+}
+
+
+void
+plat_dump_threads(FILE *out) {
+  size_t len;
+  const char *which;
+  char *buf = thread_records(&len, &which);
+  if(!buf) {
+    fprintf(out, "# no thread list (%s: %s)\n", which, strerror(errno));
+  } else {
+    fprintf(out, "# from %s\n", which);
+    size_t need = offsetof(struct kinfo_proc, ki_comm) + COMMLEN + 1;
+    int records = 0;
+    for(size_t at = 0; at + need <= len; records++) {
+      const struct kinfo_proc *p = (const struct kinfo_proc *)(buf + at);
+      if(p->ki_structsize < (int)need) break;
+      char td[TDNAMLEN + 2], comm[COMMLEN + 2];
+      snprintf(td, sizeof(td), "%.*s", TDNAMLEN + 1, p->ki_tdname);
+      snprintf(comm, sizeof(comm), "%.*s", COMMLEN + 1, p->ki_comm);
+      /* ki_tid and ki_numthreads come after fields whose size changed
+         between FreeBSD versions: shown as read, for comparison. */
+      size_t tail = offsetof(struct kinfo_proc, ki_tid) + sizeof(p->ki_tid);
+      if(p->ki_structsize >= (int)tail && at + tail <= len) {
+        fprintf(out, "%d %d %s / %s (stat %d, threads %d)\n", p->ki_pid, p->ki_tid, td, comm, p->ki_stat, p->ki_numthreads);
+      } else {
+        fprintf(out, "%d - %s / %s (stat %d)\n", p->ki_pid, td, comm, p->ki_stat);
+      }
+      at += (size_t)p->ki_structsize;
+    }
+    fprintf(out, "# %d record(s), %zu bytes, record size %d (this build's %zu)\n", records, len,
+            len >= sizeof(int) ? *(const int *)buf : 0, sizeof(struct kinfo_proc));
+  }
+  free(buf);
+}
+
+
+static void
+dump_one(int pid, const char *name, void *ctx) {
+  fprintf(ctx, "%d %s\n", pid, name);
+}
+
+void
+plat_dump_processes(FILE *out) {
+  each_process(dump_one, out);
+}
+
+
+/* One kqueue for the main thread's waits: mounts (EVFILT_FS) and the exit
+   of one watched process (EVFILT_PROC). */
+int
+plat_wait_events(int pid, int ms) {
+  static int kq = -1, watched = -1;
+  if(kq < 0) {
+    struct kevent ev;
+    kq = kqueue();
+    EV_SET(&ev, 0, EVFILT_FS, EV_ADD | EV_CLEAR, 0, 0, NULL);
+    if(kq >= 0 && kevent(kq, &ev, 1, NULL, 0, NULL)) {
+      close(kq);
+      kq = -1;
+    }
+  }
+  if(kq < 0) {
+    usleep(ms * 1000);
+    return 0;
+  }
+  if(pid != watched) {
+    struct kevent ev;
+    if(watched > 0) {
+      EV_SET(&ev, watched, EVFILT_PROC, EV_DELETE, 0, 0, NULL);
+      kevent(kq, &ev, 1, NULL, 0, NULL);
+    }
+    watched = -1;
+    EV_SET(&ev, pid, EVFILT_PROC, EV_ADD | EV_ONESHOT, NOTE_EXIT, 0, NULL);
+    if(pid > 0 && !kevent(kq, &ev, 1, NULL, 0, NULL)) watched = pid;
+  }
+  struct timespec wait = {ms / 1000, (ms % 1000) * 1000000L};
+  struct kevent got[16];
+  int k = kevent(kq, NULL, 0, got, 16, &wait), events = 0;
+  for(int i = 0; i < k; i++) {
+    if(got[i].filter == EVFILT_FS) events |= PLAT_EV_MOUNTS;
+    if(got[i].filter == EVFILT_PROC && (got[i].fflags & NOTE_EXIT)) {
+      events |= PLAT_EV_EXIT;
+      watched = -1;
+    }
+  }
+  return events;
+}
+
+
+/* Each calling thread has a kqueue of its own. */
+int
+plat_wait_exit(int pid, int ms) {
+  static _Thread_local int kq = -1, watched = -1;
+  struct kevent ev;
+  if(kq < 0 && (kq = kqueue()) < 0) {
+    usleep(ms * 1000);
+    return kill(pid, 0) && errno == ESRCH;
+  }
+  if(pid != watched) {
+    EV_SET(&ev, pid, EVFILT_PROC, EV_ADD | EV_ONESHOT, NOTE_EXIT, 0, NULL);
+    if(kevent(kq, &ev, 1, NULL, 0, NULL)) return errno == ESRCH;
+    watched = pid;
+  }
+  struct timespec wait = {ms / 1000, (ms % 1000) * 1000000L};
+  int k = kevent(kq, NULL, 0, &ev, 1, &wait);
+  if(k > 0 && ev.filter == EVFILT_PROC && (ev.fflags & NOTE_EXIT)) {
+    watched = -1;
+    return 1;
+  }
+  return 0;
+}
+
+
+int
+plat_unmount_once(const char *on) {
+  return unmount(on, 0);
 }
 
 
 int
 plat_list_views(plat_view_t *out, int max) {
-  struct statfs *sf = NULL;
-  int n = getmntinfo(&sf, MNT_NOWAIT), count = 0;
+  int n, count = 0;
+  struct statfs *sf = mount_table(&n);
 
   for(int i = 0; i < n && count < max; i++) {
     if(strcmp(sf[i].f_fstypename, "nullfs") && strcmp(sf[i].f_fstypename, "unionfs")) continue;
@@ -153,6 +465,7 @@ plat_list_views(plat_view_t *out, int max) {
     snprintf(out[count].on, sizeof(out[count].on), "%s", sf[i].f_mntonname);
     count++;
   }
+  free(sf);
   return count;
 }
 
@@ -172,12 +485,13 @@ plat_mount_count(void) {
 
 void
 plat_dump_mounts(FILE *out) {
-  struct statfs *sf = NULL;
-  int n = getmntinfo(&sf, MNT_NOWAIT);
+  int n;
+  struct statfs *sf = mount_table(&n);
   for(int i = 0; i < n; i++) {
     fprintf(out, "%-10s %s -> %s flags=0x%llx\n", sf[i].f_fstypename, sf[i].f_mntfromname,
             sf[i].f_mntonname, (unsigned long long)sf[i].f_flags);
   }
+  free(sf);
 }
 
 

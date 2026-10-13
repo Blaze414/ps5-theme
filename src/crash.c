@@ -203,6 +203,24 @@ stop_handler(int sig) {
 }
 
 
+/* SIGUSR1: a newer copy whose request over the web API went unanswered
+   asks this one to step aside (see take_over in main.c). */
+static void
+handoff_signal(int sig, siginfo_t *info, void *uc) {
+  (void)sig;
+  (void)uc;
+  request_handoff(info ? (int)info->si_pid : 0);
+}
+
+
+/* SIGUSR2: ps5-theme-stop asks this copy to stop and leave the theme. */
+static void
+stop_signal(int sig) {
+  (void)sig;
+  request_stop();
+}
+
+
 static stack_t previous_stack[CRUMB_COUNT];
 static void *own_stack[CRUMB_COUNT];
 
@@ -262,6 +280,17 @@ crash_install(void) {
   sigemptyset(&sa.sa_mask);
   sigaction(SIGTERM, &sa, NULL);
   sigaction(SIGINT, &sa, NULL);
+
+  memset(&sa, 0, sizeof(sa));
+  sa.sa_sigaction = handoff_signal;
+  sa.sa_flags = SA_SIGINFO;
+  sigemptyset(&sa.sa_mask);
+  sigaction(SIGUSR1, &sa, NULL);
+
+  memset(&sa, 0, sizeof(sa));
+  sa.sa_handler = stop_signal;
+  sigemptyset(&sa.sa_mask);
+  sigaction(SIGUSR2, &sa, NULL);
 
   /* A browser closing its connection must never kill the plugin. */
   signal(SIGPIPE, SIG_IGN);
