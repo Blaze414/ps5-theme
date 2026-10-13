@@ -30,6 +30,7 @@ etaHEN 2.5B (unified build) and on its own from PS5 Payload Manager.
 - [Install](#install)
 - [Running without etaHEN](#running-without-etahen)
 - [Your first theme](#your-first-theme)
+- [Changing game and app icons](#changing-game-and-app-icons)
 - [A tour of the manager](#a-tour-of-the-manager)
 - [How it works, and why](#how-it-works-and-why)
 - [Theme format](#theme-format)
@@ -177,6 +178,64 @@ what happened.
 
 To change only the music, make a theme with just **Home music**. Everything
 else stays stock.
+
+## Changing game and app icons
+
+Any installed game or app, homebrew included, can get its own icon,
+background and logo in a theme.
+
+1. Open the manager and press **Edit** on a theme, or create one first.
+2. Switch on **Games and apps**. Your installed games and apps are listed by
+   name; when there are many, type in the search box.
+3. Press the button for the picture you want to change:
+   - **Change icon**: the game's tile on the home screen and in the Game
+     Library.
+   - **Change background**: the picture shown behind the home screen while
+     the game is selected.
+   - **Change logo**: the game's name as artwork, where the game has one.
+   - **Change other artwork**: other pictures some games keep.
+
+   Hold the pointer over a button to see where its picture appears.
+4. Choose an image. Any size works: it's fitted as set in **How images are
+   fitted** at the top of the page (fill, fit or stretch), then written in
+   exactly the console's format into every file that holds that picture. The
+   message says how many files were changed.
+5. Do the same for other games, then press **Save** and **Apply to console**.
+6. The Game Library and the backgrounds show the new pictures straight away.
+   For the icons on the home screen, **put the console in rest mode and wake
+   it**; the notification after applying says so too. After a console
+   restart it's the same: the home row picks the icons up after the first
+   rest mode.
+
+**To undo** one game's pictures, press **Reset** on its row, then **Save**
+and **Apply to console**. **Restore stock** takes the whole theme off.
+
+**Good to know:**
+
+- Before installing an update for a game whose pictures the theme changes,
+  choose **Restore stock**, then apply the theme again afterwards: while the
+  theme is applied, the console can't update that game's pictures.
+- Some games' pictures come from PlayStation Network as WebP files. Safari
+  can't make those, so use Chrome, Edge or Firefox for them.
+- When two editions of a game share their PlayStation Network artwork, the
+  row says "shares pictures with" the other, and changing one changes both.
+- Games and apps keep starting while their pictures are changed. [Changing
+  game and app icons safely](#changing-game-and-app-icons-safely) explains
+  how.
+
+### The console's own tiles and interface icons
+
+- **Home screen tiles** (PlayStation Store, Game Library, the Media tab's
+  tiles and others): switch on **Home screen tiles**, then press **Change
+  icon** or **Change background** on a tile. Not sure which tile is which?
+  **Number tile icons** turns each icon into the number shown in front of its
+  name.
+- **Interface icons** (search, settings, the Control Center and more):
+  switch on **Interface icons**, type a picture's name (search, settings,
+  power and so on) in the lookup box, then choose an image. To find a
+  picture by sight, use **Number vector icons**: apply the theme, use rest
+  mode, then type the number you see into the lookup box.
+- Like game icons, both show on the home screen after rest mode.
 
 ## A tour of the manager
 
