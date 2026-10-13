@@ -24,7 +24,8 @@ import urllib.parse
 import zlib
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from rco_fixture import Rco, palette_png, png_chunk, sample as rco_sample  # noqa: E402
+from rco_fixture import Rco, SHAPES, palette_png, png_chunk, sample as rco_sample  # noqa: E402
+import font_fixture  # noqa: E402
 
 ASAN = "build-host/ps5-theme-asan"
 STOP_TOOL = "build-host/ps5-theme-stop"
@@ -37,6 +38,7 @@ OTHER = f"{APPS}/NPXS40028/assets/img"
 BULK = f"{APPS}/NPXS40010/assets/bulk"
 MEDIA = f"{APPS}/NPXS40012/assets"
 VSH = "/system_ex/vsh_asset"
+FONTS = "/preinst/common/font"           # the console's text fonts
 LOG = f"{BASE}/logs/log.txt"
 ENV = dict(os.environ, ASAN_OPTIONS="detect_leaks=0:halt_on_error=1:abort_on_error=0",
            UBSAN_OPTIONS="halt_on_error=1:print_stacktrace=1")
@@ -148,6 +150,19 @@ const R = new Function("esc", block + ";return { rcoParse, rcoPictures, rcoRebui
 })().catch(e => { console.error(e); process.exit(1); });
 """
 
+SHAPES_JS = """
+const fs = require("fs");
+const html = fs.readFileSync(process.argv[2], "utf8");
+const block = html.slice(html.indexOf("/* rco:begin */"), html.indexOf("/* rco:end */"));
+const R = new Function("esc", block + ";return { rcoParse, rcoRebuild, rcoShapes, shapesText };")(s => String(s));
+const r = R.rcoParse(new Uint8Array(fs.readFileSync(process.argv[3]))), sh = R.rcoShapes(r);
+if (R.shapesText(sh.text, sh.values) !== sh.text) throw new Error("unchanged numbers changed the text");
+const values = sh.values.map(([k, v]) => [k, k === "borderRadiusRatio" ? 3 : k === "switch.track" ? 0 : k === "slider.thumb" ? 12.5 : v]);
+const text = R.shapesText(sh.text, values);
+fs.writeFileSync(process.argv[4], R.rcoRebuild(r, new Map([[sh.f.el + "\\t" + sh.f.attr, new TextEncoder().encode(text)]])));
+console.log(JSON.stringify({ names: sh.values.map(v => v[0]) }));
+"""
+
 PICTURE_JS = """
 const fs = require("fs"), zlib = require("zlib");
 const html = fs.readFileSync(process.argv[2], "utf8");
@@ -206,7 +221,7 @@ def write(path, data):
 
 
 def build_console():
-    for d in ("/system_ex", "/mnt/rnps", "/data", "/user", "/tmp/notifications.txt", "/tmp/tile-registered"):
+    for d in ("/system_ex", "/mnt/rnps", "/data", "/user", "/preinst", "/tmp/notifications.txt", "/tmp/tile-registered"):
         if os.path.isdir(d):
             shutil.rmtree(d)
         elif os.path.exists(d):
@@ -224,7 +239,12 @@ def build_console():
         write(f"{BULK}/blob{i:03}.bin", rnd.randbytes(512 * 1024))
     write("/mnt/rnps/apps/NPXS40099/a.png", png(8, 8, (0, 0, 0)))
     write(f"{MEDIA}/sounds/move.wav", wav(48000, 1, 0.05, 8000))
-    write(f"{MEDIA}/fonts/ui.ttf", b"\x00\x01\x00\x00" + b"\0" * 60)
+    write(f"{MEDIA}/fonts/ui.ttf", font_fixture.font("tt"))
+    # The console's text fonts, as in /preinst/common/font: OpenType (CFF) and TrueType.
+    write(f"{FONTS}/SST-Roman.otf", font_fixture.font("cff", glyphs=120))
+    write(f"{FONTS}/SST-Bold.otf", font_fixture.font("cff", glyphs=120))
+    write(f"{FONTS}/DFHEI5-SONY.ttf", font_fixture.font("tt", glyphs=150))
+    write(f"{FONTS}/notes.txt", b"not a font")
     write(f"{MEDIA}/anim/spinner.json", b'{"v":"5.7","w":100,"h":100,"layers":[]}')
     write(f"{MEDIA}/icons/star.svg", b'<svg xmlns="http://www.w3.org/2000/svg" width="8" height="8"/>')
     write(f"{MEDIA}/video/loop.mp4", b"\x00\x00\x00\x18ftypisom" + b"\0" * 40)
@@ -424,7 +444,7 @@ S = {}  # shared state between ordered tests
 
 def t_startup():
     s = status()
-    assert s["fw"] == "13.42" and s["version"] == "1.53" and s["themes"] == [], s
+    assert s["fw"] == "13.42" and s["version"] == "1.55" and s["themes"] == [], s
     listing = open(f"{BASE}/dump/assets-v2-13.42.txt").read()
     assert f"{VSH}/bg_hub_default.dds.zst" in listing
     assert f"{HOME}/bg.png" in listing and "/mnt/rnps/apps/NPXS40099/a.png" in listing
@@ -434,7 +454,7 @@ def t_startup():
     assert open("/tmp/tile-registered").read().strip() == "THEM00001"
     assert "starting" in log_text()
     notes = open("/tmp/notifications.txt").read()
-    assert "ps5-theme 1.53 starting" in notes and "ps5-theme ready" in notes, notes
+    assert "ps5-theme 1.55 starting" in notes and "ps5-theme ready" in notes, notes
 
 
 def t_ui_and_icon_served():
@@ -1459,8 +1479,8 @@ def t_media_policy():
         ("sounds/move.wav", b"RIFFnope", 422, "valid WAV"),
         # A chunk size near 4 GB once made the chunk walk loop forever.
         ("sounds/move.wav", b"RIFF\x30\x00\x00\x00WAVE" + b"LIST\xf7\xff\xff\xff" + bytes(28), 422, "valid WAV"),
-        ("fonts/ui.ttf", b"\x00\x01\x00\x00" + b"\1" * 80, 200, None),
-        ("fonts/ui.ttf", b"wOFF" + b"\0" * 80, 422, "same format"),
+        ("fonts/ui.ttf", font_fixture.font("tt", glyphs=130), 200, None),
+        ("fonts/ui.ttf", b"wOFF" + b"\0" * 80, 422, "web fonts"),
         ("anim/spinner.json", b'{"v":"5.7","w":100,"h":100,"layers":[{"ty":4}]}', 200, None),
         ("anim/spinner.json", b'{"v":"5.7","w":120,"h":100,"layers":[]}', 422, "canvas"),
         ("anim/spinner.json", b'[1,2,3]', 422, "same structure"),
@@ -1481,7 +1501,7 @@ def t_media_policy():
     assert call("POST", "/api/apply", {"id": "media"})[0] == 200
     s = wait_applied("media")
     assert "5 files verified" in s["result"], s["result"]
-    assert open(f"{MEDIA}/fonts/ui.ttf", "rb").read() == b"\x00\x01\x00\x00" + b"\1" * 80
+    assert open(f"{MEDIA}/fonts/ui.ttf", "rb").read() == font_fixture.font("tt", glyphs=130)
     assert open(f"{MEDIA}/bundle.js", "rb").read() == b"console.log(1)"
     assert S["plugin"].alive()
 
@@ -1785,9 +1805,23 @@ def t_interface_pictures():
            (rco.replaced({("iconid_home", "src"): b'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"/>'}),
             "must keep the console's own <svg> opening"),
            (rco.replaced({("iconid_home", "src"): SVG_ICON.split(b">")[0] + b"><script>alert(1)</script></svg>"}), 'SVG contains "<script"'),
-           (rco.replaced({("snd_focus_move", "src"): bytes(2048)}), "only pictures can be changed"),
-           (rco.replaced({("color_default", "src"): b'{"button.fill.enabled": 1}'}), "only pictures can be changed"),
-           (rco.replaced({("en-US", "src"): b"strings" * 49 + b"STRING!"}), "only pictures can be changed"),
+           (rco.replaced({("snd_focus_move", "src"): bytes(2048)}), "only pictures and shapes can be changed"),
+           (rco.replaced({("color_default", "src"): b'{"button.fill.enabled": 1}'}), "only pictures and shapes can be changed"),
+           (rco.replaced({("en-US", "src"): b"strings" * 49 + b"STRING!"}), "only pictures and shapes can be changed"),
+           # Shapes: the same names, in order, each a number in range; nothing else.
+           (rco.replaced({("shape_default", "src"): SHAPES.replace(b'"bar.fill"', b'"bar.fills"')}), "must keep the console's 5 names"),
+           (rco.replaced({("shape_default", "src"): SHAPES.replace(b"\r\n}", b',\r\n  "tile": 9.0\r\n}')}),
+            "must keep the console's 5 names"),
+           (rco.replaced({("shape_default", "src"): SHAPES.replace(b'"switch.track": 16.0,\r\n', b"")}), "must keep the console's 5 names"),
+           (rco.replaced({("shape_default", "src"): SHAPES.replace(b"8.0", b"-1.0")}), "slider.thumb must be a number from 0 to 100"),
+           (rco.replaced({("shape_default", "src"): SHAPES.replace(b"8.0", b"1e9")}), "slider.thumb must be a number from 0 to 100"),
+           (rco.replaced({("shape_default", "src"): SHAPES.replace(b'"borderRadiusRatio": 1.0', b'"borderRadiusRatio": 11.0')}),
+            "borderRadiusRatio must be a number from 0 to 10"),
+           (rco.replaced({("shape_default", "src"): SHAPES.replace(b"8.0", b'"big"')}), "not a list of names and numbers"),
+           (rco.replaced({("shape_default", "src"): SHAPES.replace(b"8.0", b"[8]")}), "not a list of names and numbers"),
+           (rco.replaced({("shape_default", "src"): SHAPES.replace(b"8.0", b"NaN")}), "not a list of names and numbers"),
+           (rco.replaced({("shape_default", "src"): SHAPES + b"x"}), "not a list of names and numbers"),
+           (rco.replaced({("shape_default", "src"): SHAPES + b" " * 5000}), "not a list of names and numbers"),
            (bytes(renamed), "own resource file with only pictures changed"),
            (pointing(good, ("emoji_game", "src"), table_size), "points outside its data"),
            (pointing(good, ("emoji_game", "src"), 8), "points outside its data"),
@@ -1800,6 +1834,21 @@ def t_interface_pictures():
     assert code == 422 and "cannot read the system file" in r["error"], r
     assert put_file("ui", UI_RCO, good)[0] == 200
     assert put_file("ui", UI_RCO, stock)[0] == 200          # the console's own file, unchanged, is fine too
+    rounder = SHAPES.replace(b'"borderRadiusRatio": 1.0', b'"borderRadiusRatio": 3.5').replace(b"16.0", b"0")
+    assert put_file("ui", UI_RCO, rco.replaced({("shape_default", "src"): rounder}))[0] == 200
+
+    # The page's shape editor: unchanged numbers give the console's own text,
+    # new ones are written where the old ones stand, and the console accepts it.
+    write("/tmp/shapes.js", SHAPES_JS.encode())
+    out = subprocess.run(["node", "/tmp/shapes.js", WEB_PAGE, UI_RCO, "/tmp/shaped.rco"], capture_output=True, text=True)
+    assert out.returncode == 0, out.stderr
+    info = json.loads(out.stdout)
+    assert info["names"] == ["bar.fill", "slider.thumb", "switch.track", "tooltip.fill", "borderRadiusRatio"], info
+    shaped = open("/tmp/shaped.rco", "rb").read()
+    entry = next(Rco(shaped).data(f[5], f[6]) for f in Rco(shaped).files() if f[1] == "shape_default")
+    assert entry == SHAPES.replace(b'"borderRadiusRatio": 1.0', b'"borderRadiusRatio": 3.0').replace(b"16.0", b"0.0") \
+                        .replace(b'"slider.thumb": 8.0', b'"slider.thumb": 12.5'), entry
+    assert put_file("ui", UI_RCO, shaped)[0] == 200
 
     # The manager page's code: an unchanged rebuild is byte-identical, and
     # numbering every picture (compressed, and in stored blocks as browsers
@@ -1815,7 +1864,7 @@ def t_interface_pictures():
         numbered = open("/tmp/numbered.rco", "rb").read()
         new = {(f[1], f[3]): Rco(numbered).data(f[5], f[6]) for f in Rco(numbered).files()}
         for key, data in new.items():
-            if key[0] in ("default", "en-US", "snd_focus_move", "color_default"):
+            if key[0] in ("default", "en-US", "snd_focus_move", "color_default", "shape_default"):
                 assert data == old[key], key
             elif old[key].startswith(b"\x89PNG"):
                 assert data != old[key], key
@@ -1981,6 +2030,95 @@ def t_title_pictures():
             subprocess.run(["umount", "-l", box])
         clear_sandboxes()
     assert call("DELETE", "/api/themes", {"id": "games"})[0] == 200
+
+
+def t_fonts():
+    """Fonts: listed and checked (a whole TrueType or OpenType font with the
+    characters text needs; web fonts, collections and damaged or incomplete
+    files refused), and applied only in ShellUI's own view of the fonts folder,
+    once its process has been found (they come out of its sandbox when it
+    exits): not on the real folder, which games read too, and not in other
+    apps' views. The apply says to use rest mode."""
+    code, r = call("GET", "/api/assets", {"q": "/preinst"})
+    assert {a["path"]: a["kind"] for a in r["assets"]} == {
+        f"{FONTS}/SST-Roman.otf": "font", f"{FONTS}/SST-Bold.otf": "font", f"{FONTS}/DFHEI5-SONY.ttf": "font"}, r
+    assert r["protected"] == 1, r                       # notes.txt
+    assert call("POST", "/api/themes", {"id": "fonts", "name": "Fonts"})[0] == 200
+    assert put_file("fonts", f"{FONTS}/notes.txt", b"x")[0] == 403
+
+    good = font_fixture.font("cff", glyphs=200)
+    refused = [
+        (b"wOFF" + bytes(80), "web fonts"), (b"wOF2" + bytes(80), "web fonts"),
+        (font_fixture.collection(), "collections"), (b"not a font at all, just text" * 4, "not a TrueType or OpenType"),
+        (font_fixture.font()[:200], "cut short or damaged"), (font_fixture.font()[:10], "too short"),
+        (font_fixture.font(drop=("cmap",)), "no 'cmap' table"), (font_fixture.font(drop=("OS/2",)), "no 'OS/2' table"),
+        (font_fixture.font("tt", drop=("glyf",)), "'glyf' and 'loca'"), (font_fixture.font("cff", drop=("CFF ",)), "no 'CFF ' table"),
+        (font_fixture.font(duplicate="name"), "'name' table twice"), (font_fixture.font(head_magic=0), "header table is damaged"),
+        (font_fixture.font(em=0), "size grid"), (font_fixture.font(em=65000), "size grid"),
+        (font_fixture.font(missing="A"), "no 'A'"), (font_fixture.font(missing=" "), "no space"),
+        (font_fixture.font(glyphs=90), "no 'y'"), (font_fixture.font(nhm=0), "horizontal metrics"),
+        (font_fixture.font(hmtx_cut=40), "metrics table is cut short"), (font_fixture.font("tt", loca_cut=10), "glyph index table is cut short"),
+        (font_fixture.font(cmap_format=12, missing="e"), "no 'e'"), (font_fixture.font(platform=(1, 0)), "no Unicode character map"),
+    ]
+    for data, needle in refused:
+        code, r = put_file("fonts", f"{FONTS}/SST-Roman.otf", data)
+        assert code == 422 and needle in r["error"], (needle, code, r)
+    # Accepted: the same flavor, the other flavor (the console reads both), and a format 12 map.
+    mine_bold = font_fixture.font("tt", glyphs=210, cmap_format=12)
+    assert put_file("fonts", f"{FONTS}/SST-Roman.otf", good)[0] == 200
+    assert put_file("fonts", f"{FONTS}/SST-Bold.otf", mine_bold)[0] == 200
+    assert put_file("fonts", f"{HOME}/bg.png", S["bg"])[0] == 200            # and something else
+
+    shell, service = "/mnt/sandbox/NPXS40087_000", "/mnt/sandbox/NPXS40102_000"
+    views = [f"{shell}/lJtEgWhS1P/common/font", f"{shell}/sce_sbx/001/lJtEgWhS1P/common/font"]
+    other = f"{service}/lJtEgWhS1P/common/font"
+    boxes, shellui = [], None
+    stock = {n: zlib.crc32(open(f"{FONTS}/{n}", "rb").read()) for n in ("SST-Roman.otf", "SST-Bold.otf", "DFHEI5-SONY.ttf")}
+    if not EMULATED:
+        for view in views + [other]:
+            os.makedirs(view, exist_ok=True)
+            subprocess.run(["mount", "--bind", FONTS, view], check=True)
+        S["plugin"].term()
+        S["plugin"] = Plugin()
+        shellui = start_shellui()
+    try:
+        apply_and_wait("fonts")
+        result = status()["result"]
+        assert crc_file(f"{HOME}/bg.png") == zlib.crc32(S["bg"])         # the rest is applied
+        for n in stock:                                  # the real folder is never overlaid
+            assert crc_file(f"{FONTS}/{n}") == stock[n], n
+        if EMULATED:      # no ShellUI here: its process is never found
+            assert "Its font waits until the home screen's process is found." in result, result
+        else:
+            assert "put the console in rest mode and wake it" in result, result
+            assert "ps5-theme: To see the new font, put the console in rest mode" in open("/tmp/notifications.txt").read()
+            for view in views:
+                assert crc_file(f"{view}/SST-Roman.otf") == zlib.crc32(good), view
+                assert crc_file(f"{view}/SST-Bold.otf") == zlib.crc32(mine_bold), view
+                assert crc_file(f"{view}/DFHEI5-SONY.ttf") == stock["DFHEI5-SONY.ttf"], view     # the rest of the folder stays
+                assert open(f"{view}/notes.txt").read() == "not a font"
+            for n in stock:                              # another app's view stays the console's
+                assert crc_file(f"{other}/{n}") == stock[n], n
+        in_shell = [l for l in recorded_mounts() if l.startswith(shell) and l.split("\t")[0].endswith("/common/font")]
+        assert len(in_shell) == (0 if EMULATED else 2), recorded_mounts()
+        if not EMULATED:
+            # When ShellUI exits (rest mode) its fonts come out of its sandbox at once.
+            shellui.kill()
+            shellui.wait()
+            shellui = None
+            end = time.time() + 15
+            while crc_file(f"{views[0]}/SST-Roman.otf") != stock["SST-Roman.otf"]:
+                assert time.time() < end, ("fonts still in ShellUI's sandbox", log_text()[-1500:])
+                time.sleep(0.2)
+    finally:
+        if shellui:
+            shellui.kill()
+            shellui.wait()
+        apply_and_wait("night")
+        for view in reversed(views + [other]) if not EMULATED else []:
+            subprocess.run(["umount", "-l", view])
+        clear_sandboxes()
+    assert call("DELETE", "/api/themes", {"id": "fonts"})[0] == 200
 
 
 def kept_crc(name):
@@ -2383,7 +2521,7 @@ TESTS = [t_startup, t_ui_and_icon_served, t_mutations_need_token, t_create_theme
          t_firmware_mismatch_is_refused, t_delete_rules, t_concurrent_requests_during_apply,
          t_restore_stock_cleans_up, t_overlays_reach_system_views, t_crash_loop_takes_theme_down, t_busy_overlay_is_never_forced, t_recovers_after_hard_kill, t_update_from_payload_manager, t_update_from_plain_elf, t_update_hands_over, t_update_at_boot, t_web_comes_back_after_rest_mode, t_takeover_when_web_is_down, t_stop_tool_keeps_the_theme, t_failed_write_closes_its_file, t_survives_malformed_and_abusive_requests,
          t_slow_clients_do_not_block_others, t_log_rotates, t_media_policy, t_music, t_settings_and_duplicate, t_preview_pictures, t_save_and_discard,
-         t_home_background_textures, t_interface_pictures, t_title_pictures, t_shellui_exit_releases_sandbox, t_shellui_exits_during_apply, t_title_where, t_watch_files, t_home_music_at9, t_long_mount_paths_use_parent_folder, t_system_is_byte_identical_afterwards, t_crash_is_reported_and_recovered,
+         t_home_background_textures, t_interface_pictures, t_title_pictures, t_fonts, t_shellui_exit_releases_sandbox, t_shellui_exits_during_apply, t_title_where, t_watch_files, t_home_music_at9, t_long_mount_paths_use_parent_folder, t_system_is_byte_identical_afterwards, t_crash_is_reported_and_recovered,
          t_privilege_failure_exits_cleanly]
 
 

@@ -317,6 +317,27 @@ video_container(const uint8_t *p, size_t n) {
 }
 
 
+/* A font: the system's own is TrueType or OpenType, and a replacement may be
+   either (the console reads both), but must be a whole one with the
+   characters text needs (font_check_mem). Other stock formats keep the
+   rule that the container stays the same. */
+static int check_magic(const char *cand, const char *stock, int (*container)(const uint8_t *, size_t),
+                       const char *what, char *why, size_t len);
+
+static int
+check_font(const char *cand, const char *stock, char *why, size_t len) {
+  uint8_t head[16];
+  int kind = font_container(head, read_head(stock, head, sizeof(head)));
+  if(kind != 1 && kind != 2) return check_magic(cand, stock, font_container, "font", why, len);
+  size_t n;
+  uint8_t *data = slurp(cand, asset_size_limit(KIND_FONT), &n);
+  if(!data) { snprintf(why, len, "cannot read the font file"); return -1; }
+  int rc = font_check_mem(data, n, why, len);
+  free(data);
+  return rc;
+}
+
+
 static int
 check_magic(const char *cand, const char *stock, int (*container)(const uint8_t *, size_t),
             const char *what, char *why, size_t len) {
@@ -737,7 +758,7 @@ validate_now(const char *cand, const char *stock, char *why, size_t len) {
   }
   case KIND_SVG:   return check_svg(cand, why, len);
   case KIND_AUDIO: return check_audio(cand, stock, why, len);
-  case KIND_FONT:  return check_magic(cand, stock, font_container, "font", why, len);
+  case KIND_FONT:  return check_font(cand, stock, why, len);
   case KIND_JSON:  return check_json(cand, stock, why, len);
   case KIND_VIDEO: return check_magic(cand, stock, video_container, "video", why, len);
   case KIND_TEXTURE: return texture_validate(cand, stock, why, len);

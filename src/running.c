@@ -36,14 +36,20 @@ running_copy(int self) {
 }
 
 
-/* A mount point inside /user, in a sandbox's view of it or not: only games'
-   and apps' pictures are overlaid there. */
+/* A mount point that is overlaid only in the home screen's own views: inside
+   /user (games' and apps' pictures), in a sandbox's view of it or not, or a
+   sandbox's view of the fonts folder (FONT_DIR is never overlaid itself, so
+   only the sandbox form counts). */
 int
 title_mount_point(const char *on) {
-  if(!strncmp(on, "/mnt/sandbox/", 13)) {
+  int in_sandbox = !strncmp(on, "/mnt/sandbox/", 13);
+  if(in_sandbox) {
     on = strchr(on + 13, '/');
     if(!on) return 0;
   }
+  static const char fonts[] = "/common/font";
+  size_t n = strlen(on);
+  if(in_sandbox && n >= sizeof(fonts) - 1 && !strcmp(on + n - (sizeof(fonts) - 1), fonts)) return 1;
   return !strncmp(on, "/user/", 6) || !strncmp(on, "/original_user/", 15);
 }
 

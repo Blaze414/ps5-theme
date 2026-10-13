@@ -9,6 +9,7 @@ import zlib
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "../host"))
 from rco_fixture import Rco, palette_png, sample as rco_sample  # noqa: E402
+import font_fixture  # noqa: E402
 
 stock_dir, corpus = sys.argv[1], sys.argv[2]
 os.makedirs(stock_dir, exist_ok=True)
@@ -131,3 +132,13 @@ for name in ("stock", "pictures", "sound"):   # rco-data: the pointers, then the
 # SVG
 put("svg", "plain", b'<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10"><rect width="5" height="5"/></svg>')
 put("svg", "style", b'<?xml version="1.0"?><svg><style>.a{fill:red}</style><use xlink:href="#a"/></svg>')
+
+# fonts: the stock font, and one-thing-wrong variants for the mutator to start from
+open(f"{stock_dir}/stock.ttf", "wb").write(font_fixture.font("tt", glyphs=150))
+for name, data in [("cff", font_fixture.font("cff")), ("tt", font_fixture.font("tt")), ("cmap12", font_fixture.font(cmap_format=12)),
+                   ("no-a", font_fixture.font(missing="A")), ("few-glyphs", font_fixture.font(glyphs=90)),
+                   ("no-cmap", font_fixture.font(drop=("cmap",))), ("dup", font_fixture.font(duplicate="name")),
+                   ("short", font_fixture.font()[:300]), ("ttc", font_fixture.collection()), ("woff", b"wOFF" + bytes(80)),
+                   ("hmtx-cut", font_fixture.font(hmtx_cut=40)), ("loca-cut", font_fixture.font("tt", loca_cut=10)),
+                   ("mac-map", font_fixture.font(platform=(1, 0)))]:
+    put("font", name, data)

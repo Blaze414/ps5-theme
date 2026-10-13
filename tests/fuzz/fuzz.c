@@ -11,6 +11,8 @@
      rco      rco_validate against a stock resource file (interface pictures)
      png      png_check_against: a PNG against the console's own (a palette
               picture), which inflates and unfilters it
+     font     font_check_mem on the bytes, and the policy's font check against a
+              stock font (a replacement font for the console's text)
      rco-data the same, keeping the stock file's structure: the input gives
               the pointers into the file table (8 bytes each, in order) and
               then the file table itself, so the per-picture checks get
@@ -141,6 +143,10 @@ LLVMFuzzerTestOneInput(const uint8_t *d, size_t n) {
   } else if(!strcmp(target, "rco")) {
     put(d, n);
     rco_validate(cand, stock("stock.rco"), why, sizeof(why));
+  } else if(!strcmp(target, "font")) {
+    font_check_mem(d, n, why, sizeof(why));
+    put(d, n);
+    check_font(cand, stock("stock.ttf"), why, sizeof(why));
   } else if(!strcmp(target, "rco-data")) {
     size_t ptrs = (size_t)rco_nslots * 8;
     if(n < ptrs) return 0;

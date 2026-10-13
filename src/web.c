@@ -690,6 +690,26 @@ api_assets(request_t *req) {
     }
     if(titles) closedir(titles);
   }
+  /* The console's text fonts: the files directly in FONT_DIR. */
+  DIR *fonts = truncated ? NULL : opendir(FONT_DIR);
+  struct dirent *fe;
+  while(fonts && (fe = readdir(fonts))) {
+    char path[PATH_MAX];
+    struct stat st;
+    if(fe->d_name[0] == '.' || snprintf(path, sizeof(path), "%s/%s", FONT_DIR, fe->d_name) >= (int)sizeof(path)) continue;
+    if(lstat(path, &st) || !S_ISREG(st.st_mode) || (q[0] && !stristr(path, q))) continue;
+    int kind = asset_kind(path);
+    if(kind == KIND_BLOCKED) { protected++; continue; }
+    if(kinds[0] && !kind_in_list(kinds, asset_kind_name(kind))) continue;
+    if(count >= limit) { truncated = 1; break; }
+    if(!first) SB_LIT(&sb, ",");
+    first = 0;
+    SB_LIT(&sb, "{\"path\":");
+    sb_json_str(&sb, path);
+    sb_printf(&sb, ",\"size\":%lld,\"kind\":\"%s\"}", (long long)st.st_size, asset_kind_name(kind));
+    count++;
+  }
+  if(fonts) closedir(fonts);
   sb_printf(&sb, "],\"truncated\":%s,\"protected\":%d,\"concepts\":{", truncated ? "true" : "false", protected);
   concept_t *concepts = malloc(sizeof(*concepts) * MAX_CONCEPTS);
   int nc = concepts ? title_concepts(concepts) : 0;

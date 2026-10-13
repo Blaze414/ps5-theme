@@ -14,7 +14,7 @@ the plugin stops, and the plugin puts your theme back each time etaHEN starts.
 
 ![The theme library](docs/screenshots/library.png)
 
-Version 1.53. Developed and tested on a PS5 with firmware 13.42, both with
+Version 1.55. Developed and tested on a PS5 with firmware 13.42, both with
 etaHEN 2.5B (unified build) and on its own from PS5 Payload Manager.
 
 > **About the screenshots.** They were taken from the author's own console.
@@ -235,7 +235,15 @@ and **Apply to console**. **Restore stock** takes the whole theme off.
   power and so on) in the lookup box, then choose an image. To find a
   picture by sight, use **Number vector icons**: apply the theme, use rest
   mode, then type the number you see into the lookup box.
-- Like game icons, both show on the home screen after rest mode.
+- **Fonts**: in **Fonts**, replace the text fonts the home screen and Settings
+  use. **Use one font for all Latin interface text** changes the Latin text
+  in one step; fonts marked **Home screen** are the ones it draws with. See
+  [Fonts](#fonts).
+- **Corner shapes**: in **Interface icons**, change how round the
+  interface's buttons, switches, menus and other parts are, part by part
+  (0 makes a part square-cornered), then press **Use these shapes**. The
+  home screen's tiles keep their shape.
+- Like game icons, all of these show on the home screen after rest mode.
 
 ## A tour of the manager
 
@@ -376,8 +384,9 @@ of the apply, the section's note and a notification on the console say so.
 
 #### Fonts, animations, video and textures
 
-- **Fonts:** one font file per system font, in the same container (TTF, OTF,
-  TTC, WOFF, WOFF2).
+- **Fonts:** replace one of the console's text fonts (the interface's own
+  SST, and the Arabic, Thai, Vietnamese, Japanese, Korean and Chinese ones)
+  with a TTF or OTF font of your own. See [Fonts](#fonts) below.
 - **Animations:** JSON animation and data files. They must be valid and keep
   their canvas size.
 - **Video:** clips in the same container (MP4 or WebM).
@@ -415,6 +424,21 @@ Notifications, Game Base, Music, Downloads, Sound, Mic, Accessories and Power
 `iconid_game_base`, `iconid_music`, `iconid_download`,
 `iconid_sound_speaking`, `iconid_mic`, `iconid_game_controller_1`,
 `iconid_power`). Nothing is drawn beside the **Games** and **Media** tabs.
+
+**Corner shapes:** below the files, **Corner shapes** lists how
+round the interface's corners are, as the shape list in
+`Sce.PlayStation.PUI_UI3.rco` gives them: buttons, switches, slider handles,
+tooltips, menus, tags and so on, in pixels at 1080p, and at the end an
+**Overall multiplier** (`borderRadiusRatio`). Change any number and
+press **Use these shapes**; **Console's shapes** puts them back. Numbering
+the file's pictures keeps your shapes. The plugin accepts the list only with
+the console's own names, in the same order, each a plain number from 0 to
+100 (0 to 10 for the multiplier), and nothing else in the file may change.
+On the console, switches set to 0 came out square-cornered. The multiplier
+at 3 changed nothing that could be seen, and the home screen's tiles keep
+their shape whatever the numbers. Their corners are set in the home screen's program,
+not in a file it reads (its own resource files hold only pictures), and the
+plugin changes only pictures, sounds and data.
 
 #### Home screen tiles
 
@@ -661,7 +685,7 @@ applied:
 | SVG | Must contain `<svg`; scripts, external links, `foreignObject` and entities are refused |
 | WAV | Same codec, sample rate, channels and bit depth |
 | AT9 (ATRAC9) | Exactly the system file's format; every block of audio unpacks cleanly; only coding features the system file itself uses; no more than twice its length |
-| Fonts | Same container (TrueType, OTF, collection, WOFF, WOFF2) |
+| Fonts | A whole TrueType or OpenType (CFF) font: tables in bounds and none twice, the tables every font needs, outlines, glyph counts and metrics that agree, and a character map covering printable ASCII. Collections and WOFF are refused |
 | JSON | Valid (depth-limited parser); same top-level type; animations keep their `w`/`h` canvas |
 | MP4 / WebM | Same container |
 | DDS / `.dds.zst` textures | Fully decoded (built-in zstd decoder, checksum verified); the DDS header must be byte-identical to the system texture and the data exactly the right length |
@@ -682,8 +706,10 @@ harmless to every decoder that reads it:
 
 - **Fully read:** ATRAC9 (every block unpacked), textures (fully decoded,
   header compared byte for byte), JSON (parsed), WAV (chunks walked).
+- **Fonts:** the file's structure (see the table above), not its glyph
+  outlines: a font with sound tables but broken outlines would pass.
 - **Header only:** PNG, JPEG and WebP (format and pixel size; the image data
-  itself isn't decoded), fonts and video (the container's first bytes).
+  itself isn't decoded) and video (the container's first bytes).
 - **SVG** is checked against a list of refused constructs. That isn't a full
   SVG sanitizer.
 
@@ -915,6 +941,48 @@ just before where playback continues.
 bit allocation, Huffman coding) and a lot of CPU. It runs in a Web Worker so
 the page stays responsive, and it yields with `MessageChannel` instead of
 timers, which browsers throttle.
+
+### Fonts
+
+The console keeps its text fonts as TrueType and OpenType files in
+`/preinst/common/font`: `SST-*` for the interface's Latin text, with Arabic,
+Thai, Vietnamese, Japanese, Korean and Chinese files beside them. Games read
+the same folder, so a font put on the real folder would reach them. The
+plugin puts a theme's font only where the home screen reads it: in ShellUI's
+own view of the folder, as it does for game icons, once ShellUI's process
+has been found, and takes it out of that view the moment ShellUI exits.
+Other apps' views and the real folder keep the console's fonts.
+
+Before a font is accepted, `src/font.c` reads its structure in memory. It
+must be a whole TrueType or OpenType (CFF) font: its table list inside the
+file, every table in bounds and none listed twice, the tables every font
+needs (`cmap`, `head`, `hhea`, `hmtx`, `maxp`, `name`, `OS/2`, `post`) and its
+outlines (`glyf` and `loca`, or `CFF `), with the glyph count, metrics and
+glyph index tables agreeing, and a Unicode character map covering the
+printable ASCII characters, so text doesn't come out with gaps. Collections
+(`.ttc`) and WOFF files are refused. The console's own SST, Arabic and Thai
+fonts pass the check, and so do common Latin fonts; symbol fonts and
+single-script fonts without Latin punctuation don't.
+
+**Which fonts the home screen uses.** The first console test replaced
+`SST-Roman.otf` and nothing changed on the home screen, although the
+plugin's log showed the overlay in ShellUI's view, before and after rest
+mode. `ps5-fontscan.elf` (`tools/fonts`) lists the font files each process
+has open or mapped, read-only. On a 13.42 console it showed that ShellUI
+maps its fonts from the overlay's folder, so the overlay does reach it, and
+that it uses only the **Light** and **Bold** weights: `SST-Light` and
+`SST-Bold` for Latin text, with the Arabic, Thai, Vietnamese and Korean
+Light and Bold files and the Japanese medium and bold. The regular and
+medium Latin fonts (`SST-Roman`, `SST-Medium`) were mapped only by
+`SceNKWebProcess`, the web renderer, so replacing them shows nothing on the
+home screen. The manager marks the fonts the home screen uses and offers one
+font for all the Latin weights at once. The two fonts in the system's
+`font2` folders that ShellUI also maps (`DFHEI5-SONY2022.ttf`, `PS4Icon.ttf`)
+can't be themed.
+
+Fonts are read as the home screen starts, so apply the theme, then use rest
+mode. If the home screen keeps restarting with a font, the crash guard takes
+the theme down.
 
 ### Interface pictures in resource files
 
@@ -1621,7 +1689,7 @@ tests/host/run.sh
 ```
 
 Builds the real plugin sources for Linux with AddressSanitizer and UBSan and
-runs 46 end-to-end tests against a fake console tree in a privileged
+runs 47 end-to-end tests against a fake console tree in a privileged
 container. They cover:
 
 - upload checks and the media policy, including files crafted to hang or
@@ -1636,6 +1704,10 @@ container. They cover:
   the console has PNG data, sounds, strings, colours, structure, pointers),
   and the manager page's own code, run in Node, numbering every picture in
   the console's exact formats, compressed and in stored blocks;
+- the interface's shape list: new numbers accepted, and refused with a name
+  changed, added or missing, a number out of range, or anything that isn't
+  a plain number; the page's editor writes the numbers where the console's
+  stand, so unchanged numbers give the console's own text;
 - installed games' and apps' pictures: listed and accepted only in the
   console's exact formats (a game's `param.json`, license, keys, the rest of
   its installation and the plugin's own tile refused, PlayStation Network's
@@ -1644,6 +1716,12 @@ container. They cover:
   folders, `/original_user` or other apps' views; an overlay an older copy
   left on a real folder is taken down; the result and a notification say to
   use rest mode;
+- fonts: listed from the fonts folder, 22 kinds of unusable font refused with
+  a plain reason (web fonts, collections, cut-short files, a missing or
+  doubled table, a broken header, too few glyphs, no Latin letter, no Unicode
+  map) and TrueType, OpenType and format 12 maps accepted; applied only in
+  ShellUI's view of the folder (the real folder and other apps' views keep
+  the console's fonts) and out of its sandbox when it exits;
 - the home screen's process exiting: the overlays out of its sandbox at
   once, also with an overlay missing from the records, and also while the
   plugin is held in the middle of an apply, before or after mounting
@@ -1779,6 +1857,9 @@ After any failure the console was restarted before the next test.
 | 1.51 | Process found by its recorded ID | Two rest-mode cycles fine; `ps5-theme-stop` stopped it with the theme kept; starting it again brought the manager back |
 | 1.52 | Update over the running copy; theme switch both ways; Restore stock; restart with a theme | Carried on with the theme; every step fine; after the restart the Game Library showed the icons at once and the home row after the first rest mode |
 | 1.53 | Rest mode in the middle of an apply; the new reminders | The overlays came out of ShellUI's sandbox in 5 ms while the apply was running, nothing went into it afterwards, apps start; the rest mode and home music reminders appeared |
+| 1.54 | Corner shapes: multiplier at 3, switches at 0, then rest mode | Switches came out square-cornered; the multiplier changed nothing visible; the home screen's tiles didn't change |
+| 1.55 | Fonts: `SST-Roman` replaced, then rest mode; a scan of the fonts each process has mapped | No change on the home screen. The overlay was in ShellUI's view and ShellUI mapped its fonts from it, but only the Light and Bold weights; Roman and Medium were mapped by the web renderer alone |
+| 1.55 | Fonts: one font for all the Latin interface fonts, then rest mode | **The home screen's text changed** |
 
 ## Building from source
 
@@ -1804,6 +1885,7 @@ on Ubuntu 24.04. The `.plugin` file is the ELF with etaHEN's plugin header:
 | `src/policy.c` | What can be themed, and the checks for each kind of file |
 | `src/verify.c` | Image header parsing |
 | `src/rco.c` | Interface resource file checks |
+| `src/font.c` | The check a replacement font must pass |
 | `src/png.c`, `src/inflate.c` | PNG pictures checked against the console's own, and the inflate they need |
 | `src/texture.c` | DDS texture checks |
 | `src/zstd.c` | Zstandard decoder with XXH64 |
@@ -1815,6 +1897,7 @@ on Ubuntu 24.04. The `.plugin` file is the ELF with etaHEN's plugin header:
 | `web/atrac9.js` | ATRAC9 encoder and decoder (also the Web Worker) |
 | `tools/stop/` | `ps5-theme-stop.elf`: stops the plugin and leaves the theme on |
 | `tools/klog/` | `ps5-klog.elf`: the kernel log on TCP port 3232, for finding out what the system does |
+| `tools/fonts/` | `ps5-fontscan.elf`: lists the font files each process has open or mapped, read-only, for the font test |
 | `tools/` | Table generator, icon generator, plugin packer |
 | `tests/host/` | End-to-end tests and the fake console (`rco_fixture.py` builds resource files) |
 | `tests/atrac9/`, `tests/zstd/` | Codec cross-checks |
@@ -1890,12 +1973,13 @@ console with those rights. So that code gets the most testing.
 ### Fuzzing results
 
 The plugin's parsers for uploaded files were fuzzed with libFuzzer,
-AddressSanitizer and UBSan (`tests/fuzz/run.sh`) on 12 October 2026. Fonts
-and video aren't listed: only their first bytes are read. These are the
-numbers from those runs, made after the fixes below:
+AddressSanitizer and UBSan (`tests/fuzz/run.sh`) on 12 October 2026 (the font
+check on 13 October). Video isn't listed: only its first bytes are read. These
+are the numbers from those runs, made after the fixes below:
 
 | Parser | Inputs tried | Result |
 |---|---|---|
+| Font check | 7,279,891 in 2 min | no findings |
 | zstd decoder | 495,977 in 60 s | no findings |
 | DDS textures | 473,116 in 5 min | no findings |
 | ATRAC9 | 202,175 in 5 min | no findings |

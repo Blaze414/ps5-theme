@@ -5,7 +5,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#define PLUGIN_VERSION "1.53"
+#define PLUGIN_VERSION "1.55"
 #define TITLE_ID       "THEM00001"
 #define WEB_PORT       8095
 
@@ -94,6 +94,11 @@ int         png_check_against(const uint8_t *stock, size_t stock_len, const uint
 int         rco_validate(const char *candidate, const char *stock, char *why, size_t len);
 int         wav_probe(const char *path, wav_info_t *out);
 
+/* font.c: a replacement font must be a whole TrueType or OpenType font with
+   the characters text needs; 0 if so, else -1 and a plain reason. */
+int         font_check_mem(const uint8_t *buf, size_t n, char *why, size_t len);
+
+
 
 /* Theme music. The console plays its own home music, /system_ex/vsh_asset/
    bgm_home.at9 (ATRAC9), which a theme replaces like any other file; the
@@ -116,6 +121,7 @@ int         wav_probe(const char *path, wav_info_t *out);
    (one folder per title) and its game's (one folder per concept, which a
    game's editions share). The app database points some games' tiles at
    these instead (Death Stranding's at conceptmeta/234585 on 13.42). */
+#define FONT_DIR        "/preinst/common/font"    /* the console's text fonts (SST and others) */
 #define CATALOG_DIR     "/user/catalog_downloader"
 #define CATALOG_APPMETA_DIR CATALOG_DIR "/appmeta"
 #define CONCEPTMETA_DIR CATALOG_DIR "/conceptmeta"

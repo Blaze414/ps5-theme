@@ -10,12 +10,14 @@
    values). An attribute of type 8 points into the file table: (offset, size).
 
    A theme may replace one only with the console's own file in which pictures
-   were swapped. Everything but the file table's contents and the pointers
-   into it must be byte-identical; each PNG must match the console's own in
-   every respect but its pixels (png.c), since ShellUI crashed on start with
-   pictures whose format had changed; each SVG must keep the console's own
-   <svg> opening byte for byte and pass the SVG check; every other embedded
-   file (sounds, strings, colours) must be unchanged. */
+   were swapped, and the numbers of its shape list changed. Everything but
+   the file table's contents and the pointers into it must be byte-identical;
+   each PNG must match the console's own in every respect but its pixels
+   (png.c), since ShellUI crashed on start with pictures whose format had
+   changed; each SVG must keep the console's own <svg> opening byte for byte
+   and pass the SVG check; a shape list (shape_check) must keep its names, in
+   order, each with a number in range; every other embedded file (sounds,
+   strings, colours) must be unchanged. */
 
 #include <fcntl.h>
 #include <stdint.h>
@@ -35,6 +37,10 @@
 #define RCO_MAX_BYTES    (96ull << 20)
 #define RCO_PICTURE_MAX  (8u << 20)
 #define ATTR_FILE        8
+#define SHAPE_MAX_BYTES  4096
+#define SHAPE_MAX_NAMES  64
+#define SHAPE_MAX        100.0   /* a corner radius, in pixels at 1080p */
+#define SHAPE_RATIO_MAX  10.0    /* a multiplier, such as borderRadiusRatio */
 
 enum { T_TREE, T_IDSTR, T_IDINT, T_STR, T_CHAR, T_STYLE, T_INTARR, T_FLOATARR, T_FILE, T_COUNT };
 
@@ -137,8 +143,95 @@ svg_root_end(const uint8_t *d, size_t n) {
 }
 
 
+/* ShellUI's shape list (an entry of type "shape", shape_default on 13.42):
+   corner radii by component, as a JSON object of names and numbers only,
+   {"button.fill": 1.0, ..., "borderRadiusRatio": 1.0}. Its names and numbers
+   in order; the count, or -1 if `d` is not exactly such an object. */
+typedef struct { char name[48]; double value; } shape_t;
+
+static int
+shape_parse(const uint8_t *d, size_t n, shape_t *out) {
+  size_t i = 0;
+  int count = 0;
+#define SHAPE_SPACE() while(i < n && (d[i] == ' ' || d[i] == '\t' || d[i] == '\r' || d[i] == '\n')) i++
+  SHAPE_SPACE();
+  if(i >= n || d[i++] != '{') return -1;
+  for(;;) {
+    if(count == SHAPE_MAX_NAMES) return -1;
+    SHAPE_SPACE();
+    if(i >= n || d[i++] != '"') return -1;
+    size_t k = 0;
+    while(i < n && d[i] != '"') {
+      if(d[i] < 0x20 || d[i] == '\\' || k + 1 >= sizeof(out->name)) return -1;
+      out[count].name[k++] = (char)d[i++];
+    }
+    if(i++ >= n || !k) return -1;
+    out[count].name[k] = 0;
+    SHAPE_SPACE();
+    if(i >= n || d[i++] != ':') return -1;
+    SHAPE_SPACE();
+    /* A JSON number: -?digits[.digits][(e|E)[+-]digits] */
+    size_t start = i, mark;
+    if(i < n && d[i] == '-') i++;
+    for(mark = i; i < n && d[i] >= '0' && d[i] <= '9'; i++) {}
+    if(i == mark) return -1;
+    if(i < n && d[i] == '.') {
+      for(mark = ++i; i < n && d[i] >= '0' && d[i] <= '9'; i++) {}
+      if(i == mark) return -1;
+    }
+    if(i < n && (d[i] == 'e' || d[i] == 'E')) {
+      if(++i < n && (d[i] == '+' || d[i] == '-')) i++;
+      for(mark = i; i < n && d[i] >= '0' && d[i] <= '9'; i++) {}
+      if(i == mark) return -1;
+    }
+    char num[40];
+    if(i - start >= sizeof(num)) return -1;
+    memcpy(num, d + start, i - start);
+    num[i - start] = 0;
+    out[count++].value = strtod(num, NULL);
+    SHAPE_SPACE();
+    if(i < n && d[i] == ',') { i++; continue; }
+    if(i < n && d[i] == '}') { i++; break; }
+    return -1;
+  }
+  SHAPE_SPACE();
+#undef SHAPE_SPACE
+  return i == n ? count : -1;
+}
+
+
+/* The theme's shape list against the console's: the same names in the same
+   order, each a number from 0 to SHAPE_MAX (SHAPE_RATIO_MAX for a ratio). */
+static int
+shape_check(const uint8_t *sd, size_t ssize, const uint8_t *cd, size_t csize, const char *id, char *why, size_t len) {
+  shape_t s[SHAPE_MAX_NAMES], c[SHAPE_MAX_NAMES];   /* 7 KB: web workers have 512 KB stacks */
+  int ns = shape_parse(sd, ssize, s), nc = csize <= SHAPE_MAX_BYTES ? shape_parse(cd, csize, c) : -1;
+  if(ns <= 0) {
+    snprintf(why, len, "cannot read the system's shapes (%s) to compare against", id);
+    return -1;
+  }
+  if(nc < 0) {
+    snprintf(why, len, "shapes %s: not a list of names and numbers like the console's", id);
+    return -1;
+  }
+  for(int i = 0; i < ns || i < nc; i++) {
+    if(i >= ns || i >= nc || strcmp(s[i].name, c[i].name)) {
+      snprintf(why, len, "shapes %s must keep the console's %d names, in the same order", id, ns);
+      return -1;
+    }
+    double max = strstr(c[i].name, "Ratio") ? SHAPE_RATIO_MAX : SHAPE_MAX;
+    if(!(c[i].value >= 0 && c[i].value <= max)) {
+      snprintf(why, len, "shapes %s: %s must be a number from 0 to %g", id, c[i].name, max);
+      return -1;
+    }
+  }
+  return 1;
+}
+
+
 /* One embedded file of `c` against the same one in `s`. 1 if it is a
-   changed picture, 0 if unchanged, -1 (with `why`) if not allowed. */
+   changed picture or shape list, 0 if unchanged, -1 (with `why`) if not
+   allowed. */
 static int
 check_embedded(const rco_t *s, const rco_t *c, const char *ename, const char *etype, const char *id,
                uint32_t soff, uint32_t ssize, uint32_t coff, uint32_t csize, char *why, size_t len) {
@@ -187,7 +280,8 @@ check_embedded(const rco_t *s, const rco_t *c, const char *ename, const char *et
     }
     return 1;
   }
-  snprintf(why, len, "only pictures can be changed in a resource file (%s %s differs)", ename, id);
+  if(!strcmp(ename, "file") && !strcmp(etype, "shape")) return shape_check(sd, ssize, cd, csize, id, why, len);
+  snprintf(why, len, "only pictures and shapes can be changed in a resource file (%s %s differs)", ename, id);
   return -1;
 }
 

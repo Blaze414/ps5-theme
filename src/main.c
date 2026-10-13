@@ -62,8 +62,8 @@ static atomic_int shellui_seen;     /* found at least once: games' pictures may 
    (home screen backgrounds, sounds), and installed titles' metadata (their
    icons), including the sce_sys folders of their installations, which most
    PS5 games' records point to, and the pictures downloaded for them from
-   PlayStation Network. What may change inside them is decided by policy.c;
-   code and unknown types never can. */
+   PlayStation Network, and the console's text fonts. What may change inside
+   them is decided by policy.c; code and unknown types never can. */
 static const char *const allowed_prefixes[] = {
   "/system_ex/rnps/apps/",
   "/mnt/rnps/apps/",
@@ -72,6 +72,7 @@ static const char *const allowed_prefixes[] = {
   APP_DIR "/",              /* only <title>/sce_sys/ (app_path_ok) */
   CATALOG_APPMETA_DIR "/",
   CONCEPTMETA_DIR "/",
+  FONT_DIR "/",             /* only in the home screen's own views (home_view_only) */
 };
 #define NPREFIXES (sizeof(allowed_prefixes) / sizeof(*allowed_prefixes))
 
@@ -778,6 +779,8 @@ revert_mounts(const char *keep) {
                    "The Game Library and the backgrounds show them already."
 #define MUSIC_HINT "To hear the new home music, highlight a game or app that plays its own music, let it play, " \
                    "then go back to the home screen."
+#define FONTS_HINT "To see the new font, put the console in rest mode and wake it. If the text looks wrong, " \
+                   "choose Restore stock in the manager."
 
 static int
 title_target(const char *dir) {
@@ -785,13 +788,28 @@ title_target(const char *dir) {
          !strncmp(dir, CATALOG_DIR "/", sizeof(CATALOG_DIR));
 }
 
-/* Where a title's folder is overlaid: only in ShellUI's own views (`view`
-   on `on`), the one place it reads games' and apps' pictures from, and
-   only once its process has been found, so they come out of its sandbox
-   the moment it exits (shellui_guard). On 13.42 an overlay left in its
-   view of /user when it exited (rest mode) stopped every game and app from
-   starting (CE-105733-9) until the console restarted; overlays on the real
-   folders stopped the game itself from starting. */
+/* The console's text fonts folder. */
+static int
+font_target(const char *dir) {
+  size_t n = strlen(FONT_DIR);
+  return !strncmp(dir, FONT_DIR, n) && (!dir[n] || dir[n] == '/');
+}
+
+/* Folders overlaid only in the home screen's own views: installed titles',
+   and the text fonts (which games read too, so a font on the real folder
+   would reach them). */
+static int
+home_view_only(const char *dir) {
+  return title_target(dir) || font_target(dir);
+}
+
+/* Where such a folder is overlaid: only in ShellUI's own views (`view`
+   on `on`), the one place it reads games' and apps' pictures and its fonts
+   from, and only once its process has been found, so they come out of its
+   sandbox the moment it exits (shellui_guard). On 13.42 an overlay left in
+   its view of /user when it exited (rest mode) stopped every game and app
+   from starting (CE-105733-9) until the console restarted; overlays on the
+   real folders stopped the game itself from starting. */
 static int
 title_job_ok(int view, const char *on) {
   return view && !strncmp(on, SHELLUI_SANDBOX, sizeof(SHELLUI_SANDBOX) - 1) && atomic_load(&shellui_seen);
@@ -1512,8 +1530,8 @@ tidy_records(void) {
 
 /* Stopping on request (ps5-theme-stop, SIGUSR2): the theme stays for the
    next copy to carry on with, except the overlays of games' and apps'
-   pictures, which must not stay in ShellUI's view with no copy running to
-   take them out when ShellUI exits (see release_sandbox). Newest first;
+   pictures and of fonts, which must not stay in ShellUI's view with no copy
+   running to take them out when ShellUI exits (see release_sandbox). Newest first;
    one still in use stays. The number taken out. */
 static int
 release_titles(int *stuck) {
@@ -1651,15 +1669,15 @@ plan_jobs(job_t *jobs, int *failed, int quiet) {
   /* Every place the system shows a target folder gets an overlay: the real
      path, plus each nullfs view of it (ShellUI reads the system through its
      own sandbox views, where a mount on the real path is not visible).
-     Installed games' and apps' folders only where the placement allows
-     (title_job_ok). */
+     Installed games' and apps' folders, and the fonts, only in ShellUI's
+     own views (title_job_ok). */
   static plat_view_t views[MAX_VIEWS];
   int nviews = relevant_views(views, MAX_VIEWS);
   size_t mount_max = plat_mount_path_max();
   int njobs = 0;
 
   for(int i = 0; i < ntargets; i++) {
-    int title = title_target(targets[i]);
+    int title = home_view_only(targets[i]);
     for(int v = -1; v < nviews; v++) {
       const char *from = v < 0 ? "" : views[v].from;
       const char *on = v < 0 ? "" : views[v].on;
@@ -1917,16 +1935,26 @@ apply_theme(const char *name) {
   /* What to do to see the changes the home screen only picks up later:
      the home row reads its icons once, as ShellUI starts, and the home
      music starts again only after another app's music has played. */
-  int titles = 0;
-  for(int i = 0; i < count; i++) titles += title_target(targets[i]);
-  int icons = titles > 0, home_music = !access(home, F_OK);
-  char hints[400] = "";
+  int titles = 0, fonts = 0;
+  for(int i = 0; i < count; i++) {
+    titles += title_target(targets[i]);
+    fonts += font_target(targets[i]);
+  }
+  int icons = titles > 0, font_hint = fonts > 0, home_music = !access(home, F_OK);
+  char hints[640] = "";
   if(icons && !atomic_load(&shellui_seen)) {
     snprintf(games, sizeof(games), " Its game and app pictures wait until the home screen's process is found.");
     icons = 0;
   }
+  if(font_hint && !atomic_load(&shellui_seen)) {
+    snprintf(games + strlen(games), sizeof(games) - strlen(games), " Its font waits until the home screen's process is found.");
+    font_hint = 0;
+  }
   if(icons) {
     snprintf(hints + strlen(hints), sizeof(hints) - strlen(hints), " %s", ICONS_HINT);
+  }
+  if(font_hint) {
+    snprintf(hints + strlen(hints), sizeof(hints) - strlen(hints), " %s", FONTS_HINT);
   }
   if(home_music) {
     snprintf(hints + strlen(hints), sizeof(hints) - strlen(hints), " %s", MUSIC_HINT);
@@ -1943,6 +1971,7 @@ apply_theme(const char *name) {
     notify("ps5-theme: '%s' applied (%d files verified)", title, verified);
   }
   if(icons) notify("ps5-theme: %s", ICONS_HINT);
+  if(font_hint) notify("ps5-theme: %s", FONTS_HINT);
   if(home_music) notify("ps5-theme: %s", MUSIC_HINT);
   return 0;
 }
@@ -2009,7 +2038,7 @@ dump_assets_once(void) {
     char root[PATH_MAX];
     snprintf(root, sizeof(root), "%s", allowed_prefixes[i]);
     root[strlen(root) - 1] = 0;
-    if(!title_target(allowed_prefixes[i])) dump_listing(root, f, 0);   /* titles are listed live */
+    if(!home_view_only(allowed_prefixes[i])) dump_listing(root, f, 0);   /* titles and fonts are listed live */
   }
   fclose(f);
   fs_rename(tmp, path);

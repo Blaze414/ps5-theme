@@ -769,6 +769,28 @@ function groupAssets(list) {
 
 const isImage = a => a.kind === "image" || a.kind === "svg";
 
+/* The console's text fonts by what they draw, not by file name. */
+const FONT_FAMILIES = [
+  [/^SSTArabic/i, "Arabic text"], [/^SSTThai/i, "Thai text"], [/^SSTVietnamese/i, "Vietnamese text"],
+  [/^SSTTypewriter/i, "Typewriter-style text"], [/^SSTArib/i, "Japanese captions"],
+  [/^(SSTJpPro|SCE-RDC|SIE-RDC)/i, "Japanese text"], [/^(YoonGothic|SCEPS4Yoon)/i, "Korean text"],
+  [/^DFHEI/i, "Chinese text"], [/^SST/i, "Interface text (Latin)"],
+];
+/* The fonts the home screen (ShellUI) has in use on firmware 13.42, found by listing the font files the process
+   has mapped after its text was drawn: the Light and Bold weights of the Latin, Arabic, Thai, Vietnamese and
+   Korean fonts, and the Japanese medium and bold. The Regular and Medium Latin fonts are used by web pages. */
+const FONT_HOME = /^(SST|SSTArabic|SSTThai|SSTVietnamese)-(Light|Bold)\.otf$|^SIE-RDC-Pr5N-(M|B)-JPN\.otf$|^SCEPS4Yoongd-(Light|Bold)\.otf$/;
+const FONT_LATIN = /^SST-[A-Za-z]+\.otf$/;
+const fontRank = a => FONT_HOME.test(baseName(a.path)) ? (FONT_LATIN.test(baseName(a.path)) ? 0 : 1) : 2;
+function fontName(path) {
+  const f = baseName(path).replace(/\.[^.]+$/, "");
+  const fam = FONT_FAMILIES.find(([re]) => re.test(f));
+  if (!fam) return baseName(path);
+  const weight = /Bold|-Bd$|-B-/i.test(f) ? "bold" : /Light/i.test(f) ? "light" : /Medium|-M-/i.test(f) ? "medium" : /Roman|Regular|-R-/i.test(f) ? "regular" : "";
+  const extra = [weight, /Italic/i.test(f) ? "italic" : ""].filter(Boolean).join(" ");
+  return extra ? `${fam[1]}, ${extra}` : fam[1];
+}
+
 /* A readable name for where an asset is used, from its package folder:
    ".../assets/packages/mini-profile/..." -> "Mini profile". */
 const AREA_SKIP = new Set(["src", "assets", "packages", "modules", "node_modules", "lib", "dist", "images", "img", "screens", "components", "res", "resources"]);
@@ -872,6 +894,28 @@ function rcoPictures(r) {
     out.get(f.el).files.push({ ...f, kind: pictureKind(rcoData(r, f)) });
   }
   return [...out.values()].map(p => ({ ...p, kind: p.files.every(f => f.kind === "svg") ? "svg" : p.files.every(f => f.kind === "png") ? "png" : "" }));
+}
+
+/* The interface's shape list (an entry of type "shape", shape_default on
+   13.42): corner radii by component, {"button.fill": 1.0, ...,
+   "borderRadiusRatio": 1.0}. Its entry, text and [name, number] pairs in
+   order, or null. */
+const SHAPE_PAIR = /("([^"\\]+)"\s*:\s*)(-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?)/g;
+function rcoShapes(r) {
+  const f = r.files.find(x => x.elem === "file" && x.type === "shape");
+  if (!f) return null;
+  const text = new TextDecoder().decode(rcoData(r, f));
+  return { f, text, values: [...text.matchAll(SHAPE_PAIR)].map(m => [m[2], Number(m[3])]) };
+}
+
+/* A shape number as the console writes them: 3 -> "3.0", 2.5 -> "2.5". */
+const shapeNumber = v => Number.isInteger(v) ? v.toFixed(1) : String(Math.round(v * 100) / 100);
+
+/* The console's shape list with new numbers, each written where the old one
+   stands, so everything else stays byte for byte. */
+function shapesText(text, values) {
+  const map = new Map(values);
+  return text.replace(SHAPE_PAIR, (all, head, name, old) => map.has(name) && map.get(name) !== Number(old) ? head + shapeNumber(map.get(name)) : all);
 }
 
 /* A copy with some files replaced: `replace` maps "element\tattribute" to
@@ -1239,7 +1283,9 @@ async function numberPictures(path, vectorOnly) {
   try {
     const key = (await rcoKey((i, n, x) => p.set(`Reading ${baseName(x)}…`, i / n * 0.3))).filter(k => k.path === path);
     if (!key.length) throw new Error("this file has no pictures");
-    const replace = new Map();
+    /* Numbering replaces the theme's pictures in the file, but keeps its shapes. */
+    const sh = rcoShapes(key[0].r), shapes = sh && (await rcoChanges(path)).get(`${sh.f.el}\t${sh.f.attr}`);
+    const replace = new Map(shapes ? [[`${sh.f.el}\t${sh.f.attr}`, shapes]] : []);
     let done = 0, skipped = 0;
     for (const k of key) {
       if (vectorOnly && k.pic.kind !== "svg") continue;
@@ -1628,12 +1674,13 @@ function rcoBody(asp) {
   const all = aspectAssets(asp);
   if (!all.length) return `<p class="note">This firmware has no interface files that can be themed.</p>`;
   setTimeout(rcoEnsureLoaded);
+  setTimeout(rcoShapesShow);
   const rows = all.slice().sort((a, b) => a.path.localeCompare(b.path)).map(a => {
     const rep = state.files.has(a.path), r = state.rco && state.rco.get(a.path);
     const pics = r ? rcoPictures(r) : null, svgs = pics ? pics.filter(x => x.kind === "svg").length : 0;
     const what = pics ? `${plural(pics.length, "picture")}${svgs ? `, ${svgs} of them vector icons` : ""}` : "Reading…";
     return `<div class="row-item${rep ? " replaced" : ""}">
-      <div class="info"><div class="file">${esc(baseName(a.path))}${rep ? ` <span class="tag on">Numbered</span>` : ""}</div>
+      <div class="info"><div class="file">${esc(baseName(a.path))}${rep ? ` <span class="tag on">Changed</span>` : ""}</div>
         <div class="dir">${what} · ${fmtSize(a.size)}</div></div>
       <div class="acts">${pics && pics.length ? `
         ${svgs ? `<button class="btn sm" data-act="rco-number" data-path="${esc(a.path)}" data-vector="1">Number vector icons</button>` : ""}
@@ -1651,9 +1698,74 @@ function rcoBody(asp) {
     <p class="note"><b>Use your own pictures:</b> find a picture by a number from the test or by name (search, settings,
       home, power, trophies…) and choose an image for it. It is written in exactly the format of the console's picture;
       for a vector icon, your picture is drawn inside the console's own SVG. Numbering a file again replaces your pictures in it.</p>
+    <div id="rco-shapes"></div>
     <div class="toolbar"><input type="search" id="rco-lookup" placeholder="A number from the screen, or a name" aria-label="Look up a picture"
       value="${esc(state.rcoLookup || "")}"></div>
     <div id="rco-lookup-result"><p class="note">Looking up…</p></div>`;
+}
+
+/* ---- Corner shapes: the interface's shape list (rcoShapes) ---- */
+const SHAPE_NAMES = {
+  "borderRadiusRatio": "Overall multiplier (no change seen on the console)", "bar.fill": "Bars",
+  "slider.thumb": "Slider handles", "slider.thumb.focused": "Slider handles, selected", "button.fill": "Buttons",
+  "button.indicator.fill": "Button indicators", "checkbox.stroke": "Checkboxes", "dialog.fill": "Dialogs",
+  "key-guide.fill": "Button guides", "menu.fill": "Menus", "menu.item.fill": "Menu items", "switch.track": "Switches",
+  "switch.thumb": "Switch knobs", "tag.small": "Tags, small", "tag.medium": "Tags, medium", "tag.large": "Tags, large",
+  "tooltip.fill": "Tooltips", "tooltip.error.stroke": "Error tooltips' outline", "tab.vertical": "Tabs, vertical",
+  "tab.horizontal": "Tabs, horizontal", "list.item": "List items", "form": "Forms",
+};
+const shapeMax = name => /Ratio/.test(name) ? 10 : 100;
+const shapeValues = text => new Map([...text.matchAll(SHAPE_PAIR)].map(m => [m[2], Number(m[3])]));
+
+async function rcoShapesShow() {
+  if (!$("#rco-shapes")) return;
+  let html = "";
+  try {
+    for (const path of aspectAssets(aspectById("interface")).map(a => a.path).sort()) {
+      const r = await rcoStock(path).catch(() => null), sh = r && rcoShapes(r);
+      if (!sh || !sh.values.length) continue;
+      const mine = (await rcoChanges(path)).get(`${sh.f.el}\t${sh.f.attr}`);
+      const now = mine ? shapeValues(new TextDecoder().decode(mine)) : new Map(sh.values);
+      const rows = sh.values.map(([name, stock], i) => {
+        const ratio = /Ratio/.test(name), cur = now.has(name) ? now.get(name) : stock;
+        return `<label for="shape-${i}" style="${cur !== stock ? "font-weight:600" : ""}">${esc(SHAPE_NAMES[name] || name)}</label>
+          <input type="number" id="shape-${i}" data-shape="${esc(name)}" min="0" max="${shapeMax(name)}" step="${ratio ? 0.1 : 0.5}"
+            value="${cur}" style="width:100%">
+          <span class="muted" style="font-size:.875rem">console: ${stock}</span>`;
+      }).join("");
+      html += `<p class="note"><b>Corner shapes</b> (${esc(baseName(path))}): how round the interface's corners are, in
+          pixels at 1080p; 0 makes a part square-cornered. The overall multiplier at the end showed no change on the console.
+          The home screen's tiles keep their shape: the home screen sets their corners itself. Apply the theme, then put
+          the console in rest mode and wake it.</p>
+        <div style="display:grid;grid-template-columns:minmax(0,1fr) 96px auto;gap:6px 12px;align-items:center;max-width:520px">${rows}</div>
+        <div class="toolbar"><button class="btn sm primary" data-act="shapes-save" data-path="${esc(path)}">Use these shapes</button>
+          ${mine ? `<button class="btn sm ghost danger" data-act="shapes-reset" data-path="${esc(path)}">Console's shapes</button>` : ""}</div>`;
+    }
+  } catch (e) { html = `<p class="note">${esc(e.message)}</p>`; }
+  const box = $("#rco-shapes");
+  if (box) box.innerHTML = html;
+}
+
+async function saveShapes(path, reset) {
+  try {
+    const r = await rcoStock(path), sh = rcoShapes(r), k = `${sh.f.el}\t${sh.f.attr}`, changes = await rcoChanges(path);
+    if (reset) changes.delete(k);
+    else {
+      const values = sh.values.map(([name, stock]) => {
+        const input = document.querySelector(`[data-shape="${CSS.escape(name)}"]`);
+        const v = input && input.value.trim() !== "" ? Number(input.value) : stock;
+        if (!Number.isFinite(v) || v < 0 || v > shapeMax(name)) {
+          throw new Error(`${SHAPE_NAMES[name] || name}: use a number from 0 to ${shapeMax(name)}`);
+        }
+        return [name, v];
+      });
+      const text = shapesText(sh.text, values);
+      if (text === sh.text) changes.delete(k); else changes.set(k, new TextEncoder().encode(text));
+    }
+    await rcoSave(path, changes);
+    toast(reset ? "The console's own shapes are back." : "Shapes saved and verified. Apply the theme, then put the console in rest mode and wake it.", "ok");
+  } catch (e) { toast(e.message, "err"); }
+  renderAspect(aspectById("interface"));
 }
 
 let rcoLookupTimer = 0;
@@ -1702,8 +1814,8 @@ const ASPECTS = [
     sub: "System sounds and music clips. Any audio file is converted to each sound's own format (WAV or ATRAC9) and loudness.",
     filter: a => a.kind === "audio" && a.path !== HOME_MUSIC, accept: "audio/*,.wav,.at9" },
   { id: "fonts", title: "Fonts", mode: "rows",
-    sub: "A font file per system font, in the same format (TTF, OTF, WOFF and so on).",
-    filter: a => a.kind === "font", accept: ".ttf,.otf,.ttc,.woff,.woff2" },
+    sub: "The console's text fonts: replace one with a font of your own (TTF or OTF).",
+    filter: a => a.kind === "font", accept: ".ttf,.otf" },
   { id: "animations", title: "Animations", mode: "rows",
     sub: "Animation and data files (JSON). Structure and canvas size must stay the same.",
     filter: a => a.kind === "json", accept: ".json,application/json" },
@@ -2713,14 +2825,28 @@ function aspectBody(asp) {
       ${all.some(a => state.files.has(a.path)) ? `<div><button class="btn sm ghost danger" data-act="reset-aspect" data-aspect="${asp.id}">Reset all ${esc(asp.title.toLowerCase())}</button></div>` : ""}`;
   }
 
-  return `${search}<div class="rows">${shown.map(g => {
+  const fontNote = asp.id === "fonts" ? `<p class="note">The text the home screen and its menus are drawn in. Replace one with a
+      TrueType or OpenType font (<b>.ttf</b> or <b>.otf</b>) that has the full Latin alphabet, digits and punctuation; fonts in
+      other formats, and ones that are damaged or lack those characters, are refused. A font goes only into the home screen,
+      not into games. It is read as the home screen starts: apply the theme, then put the console in rest mode and wake it.
+      If the home screen keeps restarting with a font, the plugin takes the theme down by itself.</p>
+    <p class="note">On a console tested with firmware 13.42, the home screen and Settings draw their text in the
+      <b>light</b> and <b>bold</b> weights (marked <b>Home screen</b> below). The regular and medium Latin fonts are used by
+      web pages only, so changing those shows nothing on the home screen. To see a change, replace
+      <b>Interface text (Latin), light</b> and <b>bold</b>, or use one font for all the Latin weights:</p>
+    <div class="toolbar"><button class="btn" data-act="fonts-latin" data-aspect="fonts">Use one font for all Latin interface text</button></div>` : "";
+  const list = asp.id === "fonts"
+    ? shown.slice().sort((x, y) => fontRank(x.assets[0]) - fontRank(y.assets[0]) || fontName(x.assets[0].path).localeCompare(fontName(y.assets[0].path)))
+    : shown;
+  return `${search}${fontNote}<div class="rows">${list.map(g => {
       const rep = g.assets.filter(a => state.files.has(a.path)).length;
       const a0 = g.assets[0];
+      const isFont = asp.id === "fonts";
       const play = asp.id === "sounds" && ext(a0.path) === "wav"
         ? `<audio controls preload="none" src="${esc(rep ? `/api/theme/file?${q({ id: state.editId, path: a0.path })}&v=${stamp}` : `/api/asset?${q({ path: a0.path })}`)}"></audio>` : "";
       return `<div class="row-item${rep ? " replaced" : ""}" data-drop-group="${esc(g.key)}" data-aspect="${asp.id}">
-        <div class="info"><div class="file">${esc(g.name)}${rep ? ` <span class="tag on">Replaced</span>` : ""}</div>
-          <div class="dir">${esc(g.dir)}${g.assets.length > 1 ? ` · ${plural(g.assets.length, "variant")}` : ""}</div></div>
+        <div class="info"><div class="file">${esc(isFont ? fontName(a0.path) : g.name)}${isFont && FONT_HOME.test(baseName(a0.path)) ? ` <span class="tag">Home screen</span>` : ""}${rep ? ` <span class="tag on">Replaced</span>` : ""}</div>
+          <div class="dir">${isFont ? `${esc(baseName(a0.path))} · ${fmtSize(a0.size)}` : esc(g.dir)}${g.assets.length > 1 ? ` · ${plural(g.assets.length, "variant")}` : ""}</div></div>
         <div class="acts">${play}
           <button class="btn sm" data-act="attach-group" data-group="${esc(g.key)}" data-aspect="${asp.id}">${rep ? "Replace" : "Attach"}</button>
           ${rep ? `<button class="btn sm ghost danger" data-act="reset-group" data-group="${esc(g.key)}" data-aspect="${asp.id}">Reset</button>` : ""}
@@ -3619,6 +3745,12 @@ document.addEventListener("click", async e => {
       if (file) attachToAspect(asp, file);
       return;
     }
+    case "fonts-latin": {
+      const file = await pickFile(asp.accept);
+      if (!file) return;
+      await attachTo(aspectAssets(asp).filter(a => FONT_LATIN.test(baseName(a.path))), file, "Latin interface text");
+      return renderAspect(asp);
+    }
     case "attach-group": {
       const file = await pickFile(asp.accept);
       if (file) attachToGroup(asp, el.dataset.group, file);
@@ -3646,6 +3778,8 @@ document.addEventListener("click", async e => {
       return;
     }
     case "rco-unpick": return resetPicture(el.dataset.path, +el.dataset.el);
+    case "shapes-save": return saveShapes(el.dataset.path, false);
+    case "shapes-reset": return saveShapes(el.dataset.path, true);
     case "tiles-number": return numberTileIcons();
     case "title-pic": {
       const file = await pickFile("image/*");
