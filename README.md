@@ -1191,6 +1191,94 @@ there made the clock disappear. **Keep the clock and icons clear** (on by
 default for the corner piece) leaves the top 26% empty and puts the picture
 below it.
 
+#### How the anniversary assets are stored
+
+Measured on 13.42 from the plugin's checked copy of the console's own files
+(`/data/ps5-theme/stock/13.42/system/vsh_asset/`), for anyone building on
+them.
+
+**Where they are.**
+
+| What | Where |
+|---|---|
+| The artwork: 12 textures, three per theme | `/system/vsh_asset/control_center_<theme>_bottom.dds`, `control_center_<theme>_top.dds` and `homeui_<theme>.dds`, `<theme>` being `ps`, `ps2`, `ps3` or `ps4` |
+| The rest of that folder | the Welcome hub's backgrounds (22 JPEGs with thumbnails, 6 MP4s with thumbnails and placeholders) and a few PNGs (emoji, privacy and play-style pictures): 86 files, about 60 MB |
+| The previews in **Settings > Appearance and Sound** | `/system_ex/rnps/apps/NPXS40008/assets/src/modules/system/appearance/assets/texture/30thAnniv_Settings_Preview_<PS\|PS2\|PS3\|PS4\|PS5>_<CC\|list>.png`: for each theme, a picture of its Control Center (`CC`) and of its list |
+
+`/system/vsh_asset` is the `/system` partition's own folder, not the
+`/system_ex/vsh_asset` that holds the home backgrounds (there is a third,
+`/preinst/vsh_asset`, with the boot movie). There is a **PS5** preview but no
+`ps5` textures: the console's default look is drawn without these files, so
+with it selected none of them is used.
+
+**The container.** Each file is one zstd frame holding a whole DDS file,
+under a plain `.dds` name (no `.zst`). All twelve start
+`28 b5 2f fd a0`: descriptor `0xa0`, a single segment with a 4-byte content
+size (the DDS file's length), no dictionary and no checksum. Sony's use
+compressed blocks; the console also reads a frame of stored (uncompressed)
+blocks with the same header, which is what the page writes. Other textures
+use other forms (the home backgrounds in `/system_ex/vsh_asset` are mostly
+windowed, `0x80`, and one has a checksum, `0xa4`), so a replacement copies
+the form of the file it replaces.
+
+**The DDS header** is 148 bytes: `DDS `, the 124-byte header and the 20-byte
+DX10 header.
+
+| Field | Value in all twelve |
+|---|---|
+| flags | `0x00081007` (caps, height, width, pixel format, linear size) |
+| linear size | the data's length: 16 bytes for every 4 by 4 block |
+| depth, mip levels | 0 and 1 (no mipmaps) |
+| pixel format | fourcc `DX10` |
+| caps | `0x1000` (texture) |
+| DXGI format | 98, `BC7_UNORM` (not the sRGB 99) |
+| dimension, array size, misc | 3 (2D), 1, 0 |
+
+After the header come the BC7 blocks, row by row, and nothing else.
+
+**The sizes** (width by height; the decoded DDS, and the file on disk):
+
+| Theme | Bottom panel | Top-right piece | Home artwork |
+|---|---|---|---|
+| `ps` | 2560 by 880 (2.25 MB, 280 KB) | 1000 by 560 (560 KB, 25 KB) | 2560 by 800 (2.05 MB, 263 KB) |
+| `ps2` | 2560 by 820 (2.10 MB, 333 KB) | 980 by 620 (608 KB, 40 KB) | 2560 by 800 (2.05 MB, 365 KB) |
+| `ps3` | 2560 by 900 (2.30 MB, 277 KB) | 800 by 320 (256 KB, 6 KB) | 2560 by 880 (2.25 MB, 261 KB) |
+| `ps4` | 2560 by 848 (2.17 MB, 174 KB) | 1048 by 592 (621 KB, 29 KB) | 2560 by 832 (2.13 MB, 179 KB) |
+
+Every piece is 2560 wide except the corner pieces, and no two themes share
+all three sizes, so nothing can assume them: read each file's header.
+
+**The pixels.**
+
+- **BC7, mostly modes 5 and 6** (the two that carry alpha with the colour),
+  with some 4 and 7 and a handful of 0 to 3: a full encoder's output. Any
+  valid mode is read; a block whose first byte is 0 is a reserved mode, and
+  the plugin refuses it.
+- **Mostly clear.** 44% to 79% of each texture's pixels are fully
+  transparent. The PlayStation 3 artwork has almost no fully opaque pixel:
+  55% of it is half-transparent.
+- **Straight alpha, with colour in the clear pixels.** Many half-transparent
+  pixels have a colour brighter than their alpha, which premultiplied alpha
+  can't, and the fully clear pixels keep a colour: white in most, grey in
+  some (the PlayStation 2 bottom panel's average 169, 173, 180), so the
+  edges blend without dark fringes when the texture is filtered.
+- **Shapes.** A bottom panel is opaque from 45% to 63% of its height down to
+  its bottom edge and clear above. A home artwork is solid from the top to
+  39% to 54% of its height and clear by 54% to 77%. A corner piece is
+  mostly clear, with what shows in its top half (the PlayStation 2 glass
+  bar at 7% to 22% of it).
+
+**How the console uses them.** The home screen reads the selected theme's
+three files as the interface starts, then closes them (they are never
+mapped), so a change shows after rest mode, and only for that theme.
+
+**To replace one,** then: keep its name, read its header and copy it, make a
+picture of exactly its size, encode BC7 with straight alpha and colour in the
+clear pixels, wrap it in a zstd frame with the same descriptor and its length
+as the content size, check it by decoding it again, and put it in place with
+an overlay rather than writing `/system`. That is what the page and the
+plugin do.
+
 #### The three pieces, and how each is made
 
 | Piece | File (`/system/vsh_asset/`) | Size (PlayStation 2) | What it is | Placed against | Options |
