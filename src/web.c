@@ -211,6 +211,7 @@ respond_error(int fd, int status, const char *msg) {
   sb_json_str(&sb, msg);
   SB_LIT(&sb, "}");
   if(status >= 500) log_err("web: %d %s", status, msg);
+  else if(status == 409 || status == 413 || status == 414 || status == 422) log_msg("web: refused (%d): %s", status, msg);
   respond_json(fd, status, &sb);
 }
 
@@ -292,6 +293,11 @@ get_param(const char *query, const char *key, char *out, size_t size) {
           out[o++] = *v == '+' ? ' ' : *v;
           v++;
         }
+      }
+      if(*v && *v != '&') {
+        /* longer than its field: never act on a cut-down value (a shorter path is a different file) */
+        out[0] = 0;
+        return -2;
       }
       out[o] = 0;
       return 0;
@@ -939,6 +945,16 @@ theme_file_path(const char *id, const char *asset, char *out, size_t size) {
 }
 
 
+/* The temporary file an upload is received into: its own for each request, so two uploads of the same file at
+   once never write into each other. It ends in ".part", which listings and checks skip. */
+static atomic_uint upload_seq;
+
+static void
+part_name(char *out, size_t size, const char *dst) {
+  snprintf(out, size, "%s.%u.part", dst, atomic_fetch_add(&upload_seq, 1));
+}
+
+
 /* Stream the request body into `part` (no lock held while the network is
    slow), checking it against the browser's checksum. 0 on success; on failure
    the error has been sent and `part` removed. */
@@ -1039,9 +1055,9 @@ place_upload(request_t *req, const char *id, const char *part, const char *dst, 
              uint64_t *size, int keep, uint64_t length) {
   uint32_t stored = 0;
   themes_lock();
-  int placed = theme_exists(id) && (!keep || !keep_snapshot(id)) && !fs_rename(part, dst) &&
-               !fs_crc32_file(dst, &stored, size) && stored == crc &&
-               *size == length;
+  int moved = theme_exists(id) && (!keep || !keep_snapshot(id)) && !fs_rename(part, dst);
+  int placed = moved && !fs_crc32_file(dst, &stored, size) && stored == crc && *size == length;
+  if(moved && !placed) fs_unlink(dst);   /* it didn't read back as sent: never leave it in the theme */
   themes_unlock();
   if(!placed) {
     fs_unlink(part);
@@ -1055,7 +1071,7 @@ place_upload(request_t *req, const char *id, const char *part, const char *dst, 
 /* Receive, verify, then atomically place one replacement file. */
 static void
 api_put_file(request_t *req) {
-  char id[128], asset[512], dst[PATH_MAX], part[PATH_MAX + 8], dir[PATH_MAX], msg[256], crc_hex[9];
+  char id[128], asset[512], dst[PATH_MAX], part[PATH_MAX + 24], dir[PATH_MAX], msg[256], crc_hex[9];
   uint32_t crc;
   uint64_t size = 0;
 
@@ -1075,7 +1091,7 @@ api_put_file(request_t *req) {
 
   snprintf(dir, sizeof(dir), "%s", dst);
   *strrchr(dir, '/') = 0;
-  snprintf(part, sizeof(part), "%s.part", dst);
+  part_name(part, sizeof(part), dst);
   if(fs_mkdirs(dir)) return respond_error(req->fd, 500, "could not create folder");
   if(receive_upload(req, part, &crc, crc_hex)) return;
 
@@ -1124,7 +1140,7 @@ music_path(const char *id, char *out, size_t size) {
 
 static void
 api_put_music(request_t *req) {
-  char id[128], dst[PATH_MAX], part[PATH_MAX + 8], msg[200], crc_hex[9];
+  char id[128], dst[PATH_MAX], part[PATH_MAX + 24], msg[200], crc_hex[9];
   uint32_t crc;
   uint64_t size = 0;
   wav_info_t wav;
@@ -1136,7 +1152,7 @@ api_put_music(request_t *req) {
     return respond_error(req->fd, 413, "music is larger than 128 MB (about 11 minutes)");
   }
   music_path(id, dst, sizeof(dst));
-  snprintf(part, sizeof(part), "%s.part", dst);
+  part_name(part, sizeof(part), dst);
   if(receive_upload(req, part, &crc, crc_hex)) return;
   if(!music_wav_ok(part, &wav, msg, sizeof(msg))) {
     fs_unlink(part);
@@ -1234,7 +1250,7 @@ preview_ok(const char *path, char *why, size_t len) {
 
 static void
 api_put_preview(request_t *req) {
-  char id[128], kind[16], dst[PATH_MAX], part[PATH_MAX + 8], msg[160], crc_hex[9];
+  char id[128], kind[16], dst[PATH_MAX], part[PATH_MAX + 24], msg[160], crc_hex[9];
   uint32_t crc;
   uint64_t size = 0;
 
@@ -1246,7 +1262,7 @@ api_put_preview(request_t *req) {
   if((uint64_t)req->content_length > PREVIEW_MAX_BYTES) {
     return respond_error(req->fd, 413, "the preview picture is larger than 4 MB");
   }
-  snprintf(part, sizeof(part), "%s.part", dst);
+  part_name(part, sizeof(part), dst);
   if(receive_upload(req, part, &crc, crc_hex)) return;
   if(!preview_ok(part, msg, sizeof(msg))) {
     fs_unlink(part);
@@ -1670,8 +1686,8 @@ originals_off(const char *id) {
   return snprintf(path, sizeof(path), "%s/%s/originals-off", THEMES_DIR, id) < (int)sizeof(path) && !access(path, F_OK);
 }
 
-/* What the kept originals of a theme take on the disk: each distinct file once (one picture attached at several
-   sizes is a set of links to one file). */
+/* What the kept originals of a theme take on the disk: each distinct file once (where the filesystem has hard
+   links, one picture attached at several sizes is a set of links to one file; elsewhere each is a copy). */
 static uint64_t
 sources_bytes(const char *id) {
   char dir[PATH_MAX];
@@ -1699,7 +1715,7 @@ sources_bytes(const char *id) {
 
 static void
 api_put_source(request_t *req) {
-  char id[128], asset[512], dst[PATH_MAX], part[PATH_MAX + 8], dir[PATH_MAX], crc_hex[9];
+  char id[128], asset[512], dst[PATH_MAX], part[PATH_MAX + 24], dir[PATH_MAX], crc_hex[9];
   uint32_t crc;
   uint64_t size = 0;
   image_info_t info;
@@ -1713,7 +1729,7 @@ api_put_source(request_t *req) {
   get_param(req->query, "same_as", same, sizeof(same));
   if(same[0]) {
     /* the same picture as one already kept for another file of this theme (one picture attached at several
-       sizes): no second copy, a hard link to it */
+       sizes): linked or copied here, not sent again */
     char from[PATH_MAX];
     if(!asset_path_valid(same) || !source_kind_ok(same) || source_path(id, same, from, sizeof(from)) || access(from, F_OK) ||
        source_path(id, asset, dst, sizeof(dst))) {
@@ -1724,8 +1740,10 @@ api_put_source(request_t *req) {
     themes_lock();
     int rc = !theme_exists(id) || fs_mkdirs(dir) || keep_snapshot(id);
     if(!rc && strcmp(from, dst)) {
+      /* a hard link where the filesystem has them (the console's /data hasn't), else a copy made here, so the
+         picture never crosses the network twice */
       fs_unlink(dst);
-      rc = link(from, dst);
+      rc = fs_link(from, dst) && fs_copy_file(from, dst);
     }
     themes_unlock();
     if(rc) return respond_error(req->fd, 500, "could not keep the picture");
@@ -1737,7 +1755,7 @@ api_put_source(request_t *req) {
   if(source_path(id, asset, dst, sizeof(dst))) return respond_error(req->fd, 400, "path too long");
   snprintf(dir, sizeof(dir), "%s", dst);
   *strrchr(dir, '/') = 0;
-  snprintf(part, sizeof(part), "%s.part", dst);
+  part_name(part, sizeof(part), dst);
   if(fs_mkdirs(dir)) return respond_error(req->fd, 500, "could not create folder");
   if(receive_upload(req, part, &crc, crc_hex)) return;
   if(image_probe(part, &info) || !info.width || !info.height || info.width > SOURCE_MAX_SIDE || info.height > SOURCE_MAX_SIDE) {
@@ -2156,10 +2174,13 @@ handle(worker_t *w, int fd) {
     return respond_error(fd, 400, "bad request line");
   }
   char *q = strchr(target, '?');
-  if(q) {
-    *q = 0;
-    snprintf(req.query, sizeof(req.query), "%s", q + 1);
+  if(q) *q = 0;
+  /* An address longer than its fields is refused, never cut: a cut-down path or value is a different one. */
+  if(strlen(target) + (q ? strlen(q + 1) + 1 : 0) >= sizeof(target) - 1 || strlen(target) >= sizeof(req.path) ||
+     (q && strlen(q + 1) >= sizeof(req.query))) {
+    return respond_error(fd, 414, "the request's address is too long");
   }
+  if(q) snprintf(req.query, sizeof(req.query), "%s", q + 1);
   snprintf(req.path, sizeof(req.path), "%s", target);
 
   for(char *line = strstr(buf, "\r\n"); line; line = strstr(line, "\r\n")) {

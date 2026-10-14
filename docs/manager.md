@@ -57,7 +57,8 @@ between themes.
 - **How images are fitted:** fill (crop the edges), fit (keep the whole
   picture) or stretch. When you attach a picture to a texture or an image,
   the theme keeps your original too (never applied to the console; one
-  picture attached at several sizes is stored once). Changing this setting
+  picture attached at several sizes is sent once, and the console keeps a copy
+  for each). Changing this setting
   then makes every picture and texture that has a kept original again with
   the new fit, with a progress bar, and without attaching anything again.
   Pictures attached before originals were kept stay as they are, and a
@@ -69,7 +70,7 @@ between themes.
   space: new pictures are then not kept, and fit and placement options apply
   when you attach a picture (as before). The line beside the switch shows how
   many originals are kept and what they take (a picture attached at several
-  sizes counts once), with **Remove them** (click twice) to free the space;
+  sizes counts once where the storage links them), with **Remove them** (click twice) to free the space;
   the theme's own files are not touched. The choice is stored with the theme
   (a file `originals-off` in its folder) and goes with a copy of it.
 - **Export** and **Apply to console** act on the theme as it is now. They are

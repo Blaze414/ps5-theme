@@ -44,6 +44,7 @@ int  fs_unlink(const char *path);
 int  fs_rmdir(const char *path);
 int  fs_symlink(const char *target, const char *path);
 int  fs_link(const char *existing, const char *path);
+int  fs_copy_file(const char *existing, const char *path);
 int  fs_rm_rf_under(const char *root, const char *path);
 int  fs_write_file(const char *path, const void *data, size_t len);
 int  fs_is_dir(const char *path);

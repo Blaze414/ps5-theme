@@ -769,6 +769,13 @@ def t_stage_folders_reused_without_links():
     S["plugin"].term()
     S["plugin"] = Plugin(env={"PS5THEME_TEST_NO_LINKS": "1"})
     wait_applied("night")
+    # The same picture kept for a second file: without hard links, a copy made on the console (not sent again).
+    pic = png(40, 20, (1, 2, 3))
+    assert call("PUT", "/api/theme/source", {"id": "night", "path": f"{HOME}/bg.png", "crc": f"{zlib.crc32(pic):08x}"}, pic)[0] == 200
+    assert call("PUT", "/api/theme/source", {"id": "night", "path": f"{HOME}/icon.png", "same_as": f"{HOME}/bg.png"}, b"")[0] == 200
+    assert call("GET", "/api/theme/source", {"id": "night", "path": f"{HOME}/icon.png"})[1] == pic
+    assert call("DELETE", "/api/theme/sources", {"id": "night"})[0] == 200
+    assert call("POST", "/api/theme/save", {"id": "night"})[0] == 200        # as it was: no unsaved changes left
     # A changed file: the folder is built again, with copies.
     assert put_file("night", f"{HOME}/bg.png", S["bg"] + b"")[0] == 200   # same bytes, a new file
     last = apply_and_wait("night")
@@ -1436,6 +1443,27 @@ def t_survives_malformed_and_abusive_requests():
     assert call("GET", "/api/theme/file", {"id": "night", "path": "/etc/passwd"})[0] == 404
     assert call("GET", "/api/asset", {"path": "/etc/passwd"})[0] == 403
     assert call("GET", "/api/crash", {"name": "../logs/log.txt"})[0] == 404
+    # An address longer than the server's fields is refused, never cut; a value longer than its field is never
+    # read as a shorter one (a cut-down path is a different file).
+    assert call("GET", "/api/status", {"x": "a" * 2100})[0] == 414
+    assert call("GET", "/api/theme/file", {"id": "night", "path": f"{HOME}/bg.png" + "/x" * 300})[0] == 404
+    assert call("GET", "/api/theme/file", {"id": "night", "path": f"{HOME}/bg.png" + "?" * 600})[0] == 404
+
+    # Two uploads of the same file at once: each is received into its own temporary file, so both succeed and the
+    # file ends up as one of them, whole (1.58 and before shared one name, and one upload could read the other's
+    # half-written bytes: "empty or unreadable file").
+    assert call("POST", "/api/themes", {"id": "race", "name": "Race"})[0] == 200
+    pics = [png(480, 270, (200, 10, 10)), png(480, 270, (10, 10, 200))]
+    for _ in range(6):
+        codes = []
+        threads = [threading.Thread(target=lambda d=d: codes.append(put_file("race", f"{HOME}/bg.png", d)[0])) for d in pics]
+        for t in threads: t.start()
+        for t in threads: t.join()
+        assert codes == [200, 200], codes
+        assert open(f"{BASE}/themes/race/files{HOME}/bg.png", "rb").read() in pics
+    assert not [f for f in os.listdir(f"{BASE}/themes/race/files{HOME}") if f.endswith(".part")]
+    assert call("DELETE", "/api/themes", {"id": "race"})[0] == 200
+    assert "web: refused (414)" in log_text()
     assert S["plugin"].alive()
     assert status()["applied"] == "night"
 

@@ -516,7 +516,7 @@ Then getting them right:
   bar spans 7% to 22% of it, its glow 35%).
 - **Options that needed the picture again.** A changed placement took
   effect only when the picture was attached again. **Solution:** the theme
-  keeps the original picture (once for all sizes, switchable to save
+  keeps the original picture (sent once for all sizes, switchable to save
   space) and the page makes the texture again from it at once; a piece
   attached before that is read back from its own texture.
 - **Nothing changed after applying.** The interface reads these files as

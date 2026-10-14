@@ -209,6 +209,44 @@ fs_link(const char *existing, const char *path) {
 }
 
 
+/* A copy of a regular file inside the plugin's own folders, written through the guard; 0 on success. */
+int
+fs_copy_file(const char *existing, const char *path) {
+  struct stat st;
+  if(!fs_read_within(existing, BASE_DIR) || lstat(existing, &st) || !S_ISREG(st.st_mode)) {
+    return deny("copy from", existing);
+  }
+  int in = open(existing, O_RDONLY);
+  if(in < 0) return -1;
+  int out = fs_open_write(path);
+  if(out < 0) {
+    close(in);
+    return -1;
+  }
+  char buf[16 * 1024];
+  int ret = 0;
+  uint64_t copied = 0;
+  for(;;) {
+    ssize_t n = read(in, buf, sizeof(buf));
+    if(n < 0 && errno == EINTR) continue;
+    if(n < 0) { ret = -1; break; }
+    if(n == 0) break;
+    for(ssize_t off = 0; off < n; ) {
+      ssize_t w = write(out, buf + off, n - off);
+      if(w < 0 && errno == EINTR) continue;
+      if(w <= 0) { ret = -1; break; }
+      off += w;
+    }
+    if(ret) break;
+    copied += (uint64_t)n;
+  }
+  close(in);
+  if(close(out) || copied != (uint64_t)st.st_size) ret = -1;
+  if(ret) fs_unlink(path);
+  return ret;
+}
+
+
 int
 fs_is_dir(const char *path) {
   struct stat st;

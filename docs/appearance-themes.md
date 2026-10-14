@@ -143,7 +143,8 @@ attach.
 - **Disk space:** the textures are stored without compression in the theme
   (BC7 is one byte per pixel: about 2 MB for the bottom panel, under 1 MB for
   the corner piece). With **Keep original pictures** on, the originals take
-  their size too, once however many files they were attached to.
+  their size too: one copy for each file a picture was attached to (it is sent
+  only once; the console's storage has no hard links, so each is a copy).
 
 ## Colours
 

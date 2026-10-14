@@ -470,6 +470,14 @@ function toast(msg, kind = "", ms = 4500) {
   if (ms) setTimeout(() => el.remove(), ms);
   return el;
 }
+/* An action that fails where nothing catches it would leave the page silent, the button doing nothing: say what
+   went wrong instead. */
+window.addEventListener("unhandledrejection", e => {
+  const why = e.reason && e.reason.message ? e.reason.message : String(e.reason || "");
+  console.error(e.reason);
+  toast(why ? `Something went wrong: ${why}` : "Something went wrong. Reload the page and try again.", "err", 9000);
+});
+
 function progressToast(label) {
   const el = toast("", "", 0);
   el.innerHTML = `<div class="label"></div><div class="progress"><i></i></div>`;
@@ -776,7 +784,7 @@ async function loadOriginals(id = state.editId) {
 function originalsField() {
   const n = state.sources.size;
   const kept = n ? `${plural(n, "original")} kept, ${fmtSize(state.originalsBytes)}. <button class="btn sm ghost" data-act="remove-originals" type="button">Remove them</button>` : "";
-  return `<label class="note" title="With the original picture kept, the fit or placement of what you attached can be changed later without attaching it again. It takes space on the console: about the size of the picture, once for all sizes.">
+  return `<label class="note" title="With the original picture kept, the fit or placement of what you attached can be changed later without attaching it again. It takes space on the console: about the size of the picture, for each file it went to (it is sent once).">
       <input type="checkbox" id="keep-originals"${state.keepOriginals ? " checked" : ""}> Keep original pictures</label>
     <span class="note">${state.keepOriginals ? "" : "New pictures are not kept: options apply when you attach one. "}${kept}</span>`;
 }
@@ -799,8 +807,8 @@ async function keepSource(path, file, sameAs = null) {
 const keepsOriginal = a => a.kind === "texture" || isImage(a);
 
 /* The kept original of a file, as a File; null when there is none. */
-async function sourceFile(path) {
-  const res = await fetch(`/api/theme/source?${q({ id: state.editId, path })}`);
+async function sourceFile(path, id = state.editId) {
+  const res = await fetch(`/api/theme/source?${q({ id, path })}`);
   if (!res.ok) { state.sources.delete(path); return null; }
   const bytes = new Uint8Array(await res.arrayBuffer());
   const type = sniffImage(bytes) || "image/png";
@@ -837,7 +845,7 @@ async function refitPictures() {
         const a = targets[i];
         attachProgress = f => p.set(`Fitting ${baseName(a.path)}… ${Math.round(f * 100)}%`, (i + f) / targets.length);
         try {
-          const file = await sourceFile(a.path);
+          const file = await sourceFile(a.path, id);
           if (!file) throw new Error("its original is gone");
           await uploadVerified("/api/theme/file", { id, path: a.path }, await fileForAsset(file, a));
           textureCache.clear();
@@ -850,7 +858,7 @@ async function refitPictures() {
       /* the card's picture follows the background */
       const bg = backgroundFile(targets.map(a => a.path));
       if (bg && !errors.length && state.editId === id) {
-        try { const f = await sourceFile(bg); if (f) await previewFromFile(id, f, false); } catch (e) { /* the old preview stays */ }
+        try { const f = await sourceFile(bg, id); if (f) await previewFromFile(id, f, false); } catch (e) { /* the old preview stays */ }
       }
       p.done(errors.length ? `${ok} of ${targets.length} made again. ${errors.slice(0, 2).join("; ")}${leftNote}`
         : `${plural(ok, "picture")} made again with the new fit, from their originals. Apply the theme to use ${ok === 1 ? "it" : "them"}.${leftNote}`,
@@ -1609,14 +1617,21 @@ async function pictureFromImage(file, stock, kind) {
 
 /* The theme's changes to a resource file: entry ("element\tattribute") ->
    bytes, for every embedded picture that differs from the console's. */
+/* The theme's copy of each resource file, parsed: one per file (a resource file is up to 40 MB; keeping one per
+   change would fill the browser's memory, the console's own browser first). */
 const rcoThemeCache = new Map();
+function rcoThemeCacheSet(key, value) {
+  const file = key.slice(0, key.lastIndexOf("|") + 1);
+  for (const k of [...rcoThemeCache.keys()]) if (k.slice(0, k.lastIndexOf("|") + 1) === file) rcoThemeCache.delete(k);
+  rcoThemeCache.set(key, value);
+}
 async function rcoChanges(path) {
   const r = await rcoStock(path), out = new Map();
   if (!r || !state.files.has(path)) return out;
   const cacheKey = `${state.editId}|${path}|${stamp}`;
   if (!rcoThemeCache.has(cacheKey)) {
     const res = await fetch(`/api/theme/file?${q({ id: state.editId, path })}&v=${stamp}`);
-    rcoThemeCache.set(cacheKey, res.ok ? rcoParse(new Uint8Array(await res.arrayBuffer())) : null);
+    rcoThemeCacheSet(cacheKey, res.ok ? rcoParse(new Uint8Array(await res.arrayBuffer())) : null);
   }
   const t = rcoThemeCache.get(cacheKey);
   if (!t) return out;
@@ -1640,7 +1655,7 @@ async function rcoSave(path, changes) {
   }
   stamp = Date.now();
   /* the file just sent is the theme's now: the next change starts from it without fetching it again */
-  if (made) rcoThemeCache.set(`${state.editId}|${path}|${stamp}`, rcoParse(made));
+  if (made) rcoThemeCacheSet(`${state.editId}|${path}|${stamp}`, rcoParse(made));
   await refreshStatus();
 }
 
@@ -3033,6 +3048,8 @@ async function textureForAsset(file, assetPath, progress) {
   dds.set(header); dds.set(data, header.length);
   const out = new Blob([info.zstd ? zstdStored(dds, info.frame ? b64bytes(info.frame) : null) : dds]);
   textureCache.set(key, out);
+  /* the last few only: a 4K texture is 16 MB */
+  while (textureCache.size > 4) textureCache.delete(textureCache.keys().next().value);
   return out;
 }
 

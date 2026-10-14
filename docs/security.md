@@ -82,6 +82,42 @@ make sure it catches the bug.
 | **A file left open when saving failed.** `fsync(fd) \|\| close(fd)` skipped the close when `fsync` failed. | Review | 25 failed saves raised the plugin's open files from 8 to 33, one leaked per failure. | No file left open (the test allows a margin of 3 for open connections), `theme.ini` intact, no temporary file left behind. |
 | **The interface crashing on start with numbered pictures** (1.31's test). | Console log | ShellUI restarted 10 times in 90 s (new sandboxes `NPXS40087_001` to `_010`) and the console stayed in rest mode. | Not yet confirmed on the console. That copy's pictures are refused by the new check (on 13.42's real file: "its size or pixel format differs", and Sony's `<svg>` opening not kept), while the new test copies are accepted. A host test shows a theme taken down after 3 restarts; with the guard switched off it fails ("the theme was not taken down"). |
 | **No plugin running after a restart.** An older copy started by etaHEN started a newer one, then kept the newer one waiting while it put the theme back. | Console log | 13:49:43 newer copy starts; 13:50:03 it gives up; 13:50:31 the old copy steps aside anyway. Nothing ran until it was started again at 14:14. The host test fails: "the old copy applied before handing over". | On the console with 1.30: the old copy started 1.30 at 15:41:58, finished putting the theme back at 15:42:45 and handed over at 15:42:46, and 1.30 kept running. |
+| **Two uploads of the same file at once wrote into one temporary file.** Every upload was received into `<file>.part`, so a second upload of the same file truncated and overwrote the first one's half-received bytes. | Console log: four uploads of the interface file failed together ("500 could not store the file", 14 October 18:42:48) when several palette buttons were pressed while a save was still running; the manager showed "empty or unreadable file" and "not a resource file (.rco) of this kind", the checks having read the other upload's half-written file. | Two simultaneous uploads in the host test both failed: `[500, 500]`. | Each upload is received into a temporary file of its own. Six rounds of two simultaneous uploads all succeed, the file ends up as one of them whole, and no temporary file is left (1.59). |
+
+Also fixed in 1.59 after a review of the whole plugin and manager page:
+
+- **A file that didn't read back as sent stayed in the theme.** After moving an
+  upload into place, the plugin reads it back; when that failed it removed the
+  temporary name, which no longer existed, and left the bad file. It is now
+  removed. (No test can force a read-back failure.)
+- **Too-long requests were cut, not refused.** An address longer than the
+  server's fields was cut silently, and a value longer than its field (a path
+  over 511 characters) was cut to a shorter one, which is a different path.
+  Both are refused now ("414: the request's address is too long", or an empty
+  value that every check refuses). Host test: a 2,100-character address gets
+  414, and 660-character paths that start with a real file's path aren't read
+  as that file.
+- **"The same picture as" failed on the console.** Keeping one original for a
+  picture attached at several sizes used a hard link, which the console's
+  `/data` doesn't have (its log: "hard links aren't available here"), and
+  bypassed the write guard. It now links through the guard where it can and
+  otherwise copies the file on the console, so the picture still crosses the
+  network once. Host test: with hard links switched off, the second original
+  is a copy, byte for byte.
+- **The manager page's memory only grew.** It kept a parsed copy of the
+  interface file (up to 40 MB) for every change made to a theme, and every
+  texture it had made (up to 16 MB each). It keeps one copy per file and the
+  last four textures now. (Checked in the page's code; no automated test.)
+- **Failures nothing caught were silent.** An action failing where no code
+  caught it left the button doing nothing. The page now says what went wrong.
+- **Interface file changes could undo each other** (two palette buttons
+  pressed while a save was running): they are queued in the page, each
+  starting from the file as the one before left it, and the plugin no longer
+  mixes the uploads either (above).
+- **The refit could read another theme's picture** if you switched themes
+  while it ran. It now reads from the theme it started with.
+- **Refusals weren't in the log.** Checks the plugin refused (and other
+  conflicts) now show in **Activity** as "web: refused (code): reason".
 
 ## What isn't covered
 
