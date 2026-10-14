@@ -514,7 +514,7 @@ S = {}  # shared state between ordered tests
 
 def t_startup():
     s = status()
-    assert s["fw"] == "13.42" and s["version"] == "1.57" and s["themes"] == [], s
+    assert s["fw"] == "13.42" and s["version"] == "1.58" and s["themes"] == [], s
     listing = open(f"{BASE}/dump/assets-v2-13.42.txt").read()
     assert f"{VSH}/bg_hub_default.dds.zst" in listing
     assert f"{HOME}/bg.png" in listing and "/mnt/rnps/apps/NPXS40099/a.png" in listing
@@ -524,7 +524,7 @@ def t_startup():
     assert open("/tmp/tile-registered").read().strip() == "THEM00001"
     assert "starting" in log_text()
     notes = open("/tmp/notifications.txt").read()
-    assert "ps5-theme 1.57 starting" in notes and "ps5-theme ready" in notes, notes
+    assert "ps5-theme 1.58 starting" in notes and "ps5-theme ready" in notes, notes
 
 
 def t_ui_and_icon_served():
@@ -2498,7 +2498,7 @@ def t_appearance_textures():
     # A remembered check result is made by a version and a revision of the rules: results of other rules are
     # not trusted (the same version can ship twice while a feature is built).
     remembered = open(f"{BASE}/checked").read().splitlines()
-    assert remembered and all(re.match(r"1\.57r\d+\t", l) for l in remembered), remembered[:2]
+    assert remembered and all(re.match(r"1\.58r\d+\t", l) for l in remembered), remembered[:2]
     assert put_file("appear", f"{HOME}/bg.png", S["bg"])[0] == 200
 
     shell = "/mnt/sandbox/NPXS40087_000"
