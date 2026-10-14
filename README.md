@@ -1875,6 +1875,72 @@ no browser can write either. **Solution:** a BC7 encoder in the page that
 checks its own output, a zstd frame writer, and a full zstd decoder in the
 plugin to verify every texture before it's used.
 
+#### The Appearance themes' artwork
+
+With the PlayStation 2 Appearance theme selected, the Control Center has a
+cloud backdrop and the clock sits in a glass capsule. Neither changed with
+any theme. **Finding them:**
+
+- **Not interface pictures.** The numbered test, which turns every picture in
+  the interface's resource files into a number, left both as they were, so
+  they are not in those files.
+- **Not a file the tracker could see.** `ps5-assetwatch` (in `tools/`) lists
+  the files the home screen and the web renderer have mapped, twice a second
+  for two minutes, while you open the Control Center. It saw nothing new: the
+  home screen reads these files and closes them, so they are never mapped.
+- **The theme's name.** Knowing the theme in use was the PlayStation 2 one
+  led to the textures named after it: `control_center_ps2_bottom.dds`,
+  `control_center_ps2_top.dds` and `homeui_ps2.dds` in `/system/vsh_asset`
+  (not the `vsh_asset` under `/system_ex` that the backgrounds are in), with
+  the same three for `ps`, `ps3` and `ps4`. The home screen's code names
+  these paths, and they are plain files, so a theme can replace them as it
+  replaces backgrounds. **Solution:** `/system/vsh_asset` became a themable
+  folder, overlaid like the others, and its pieces are listed live under
+  **Appearance themes** with plain names.
+
+Then getting them right:
+
+- **Byte for byte.** The files are BC7 and zstd-compressed although their
+  names end in `.dds`, in three different zstd frame forms on 13.42.
+  **Solution:** the page copies the system file's DDS header and frame
+  header, and its XXH64 checksum when it has one, and the plugin refuses a
+  texture that differs from the system file in anything but its picture.
+- **Applied partly, twice.** The first strict build refused every texture
+  made before it, because their frame header was of the old form. The
+  next build fixed that, but still said "applied partly": the plugin
+  remembers each file's check result by version, and every build said 1.56,
+  so the first build's refusal was handed back. **Solution:** a texture
+  right in all but its frame header is written again with the system file's
+  header; remembered results carry a revision of the rules too.
+- **See-through edges.** About half of a panel's pixels are clear, and
+  Sony's files keep colour in them (straight alpha), so edges blend without
+  dark fringes. The first encoder gave fully opaque pixels an alpha of 254.
+  **Solution:** BC7 mode 6 with an alpha channel, alpha weighted far above
+  colour when each block's parity bits and indices are chosen, and clear
+  pixels filled with the nearest visible colour before encoding, as Sony's
+  are.
+- **Clouds that lost their middle.** A 16:9 cloud strip, centred on the 2560
+  by 820 panel, lost its lower middle clouds and met the screen's edge flat.
+  **Solution:** each piece is placed against the screen's edge it meets
+  (bottom, top right, top), with **Fill**, **Fill with padding**, **Fit**
+  and **Stretch**.
+- **The clock that disappeared.** The same cloud on the corner piece hid the
+  clock: it is white, and drawn over that piece. **Solution:** **Keep the
+  clock and icons clear** leaves the top 26% of the piece empty (Sony's glass
+  bar spans 7% to 22% of it, its glow 35%).
+- **Options that needed the picture again.** A changed placement took
+  effect only when the picture was attached again. **Solution:** the theme
+  keeps the original picture (once for all sizes, switchable to save
+  space) and the page makes the texture again from it at once; a piece
+  attached before that is read back from its own texture.
+- **Nothing changed after applying.** The interface reads these files as
+  it starts. **Solution:** the manager and a console notification say to
+  use rest mode after every change to a piece.
+
+[Appearance themes](#appearance-themes) is the guide, and [How the
+Appearance textures are made](#how-the-appearance-textures-are-made) the
+details.
+
 #### Music no one could hear
 
 The first music feature played audio from the plugin itself, and the console
