@@ -84,7 +84,15 @@ Switching a section off asks before removing its files.
 A **?** beside a setting, a section or a file says what it changes: point at
 it, or tap it on a phone. Anything that takes a while (making a texture,
 sending a file, numbering pictures) shows what it is doing in a message at the
-top right, with a percentage, until it is done and verified.
+top right, with a percentage, until it is done and verified. The bar only moves
+forward, and changing a piece's placement shows its progress at once.
+
+Parts of the page that wait for a large file from the console (the colours in
+Appearance themes, the interface files, their corner shapes and the picture
+lookup) show what they are reading and how far it has got. The interface files
+are read once while the page stays open, and the file that holds the colours
+and shapes is read first. If one can't be read, the page says so, with
+**Try again**.
 
 ### Preview picture
 

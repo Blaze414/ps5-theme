@@ -371,6 +371,16 @@ details[open] > :not(summary) { animation: in .2s var(--ease); }
 .toast .row .label { flex: 1; min-width: 0; }
 .toast .pct { font-variant-numeric: tabular-nums; color: var(--muted); font-size: .8125rem; }
 
+/* Loading markers: where something being read from the console will show, with how far it has got */
+.loading { margin: 8px 0 12px; padding: 14px 16px; border-radius: var(--radius); background: var(--surface); font-size: .9375rem; animation: in .2s var(--ease); }
+.loading .row { display: flex; gap: 12px; align-items: baseline; }
+.loading .row .label { flex: 1; min-width: 0; }
+.loading .pct { font-variant-numeric: tabular-nums; color: var(--muted); font-size: .8125rem; }
+.loading .note { margin-top: 6px; }
+.loading.unknown .progress i { width: 35%; animation: sweep 1.2s var(--ease) infinite; }
+@keyframes sweep { from { transform: translateX(-100%); } to { transform: translateX(290%); } }
+.stale { opacity: .45; pointer-events: none; user-select: none; }
+
 @media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }
 .visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
 </style>
@@ -591,12 +601,14 @@ window.addEventListener("unhandledrejection", e => {
   toast(why ? `Something went wrong: ${why}` : "Something went wrong. Reload the page and try again.", "err", 9000);
 });
 
-/* The progress messages showing, newest last: an upload made meanwhile reports how far it has got into the newest. */
+/* The progress messages showing, newest last: an upload made meanwhile reports how far it has got into the newest.
+   The bar is the whole task's: set(text, from, to) starts a step at `from`, and an upload made in that step fills
+   the bar up to `to` (the end, unless said), so the bar never goes back. */
 const progressStack = [];
 function progressToast(label) {
   const el = toast("", "", 0);
   el.innerHTML = `<div class="row"><div class="label"></div><div class="pct"></div></div><div class="progress"><i></i></div>`;
-  let text = label, frac = 0;
+  let text = label, frac = 0, upTo = 1;
   const show = (t, f) => {
     const pct = Math.max(0, Math.min(100, Math.round(f * 100)));
     $(".label", el).textContent = t.replace(/\s*\d{1,3}%$/, "");   /* the percentage has its own place */
@@ -605,9 +617,10 @@ function progressToast(label) {
   };
   const p = {
     el,
-    set(t, f) { text = t; frac = f; show(t, f); },
-    /* how far an upload made in this step has got: the step's own text, and the bar for the upload */
-    upload(f) { show(/^Sending\b/.test(text) ? text : `${text.replace(/\s*\d{1,3}%$/, "")}\nSending to the console…`, f); },
+    get frac() { return frac; },
+    set(t, f, to = 1) { text = t; frac = f; upTo = Math.max(f, to); show(t, f); },
+    /* how far an upload made in this step has got: the step's own text, and the bar from the step's start to its end */
+    upload(f) { show(/^Sending\b/.test(text) ? text : `${text.replace(/\s*\d{1,3}%$/, "")}\nSending to the console…`, frac + (upTo - frac) * f); },
     done(msg, kind) {
       const i = progressStack.indexOf(p);
       if (i >= 0) progressStack.splice(i, 1);
@@ -618,6 +631,80 @@ function progressToast(label) {
   progressStack.push(p);
   p.set(label, 0);
   return p;
+}
+
+/* Loading markers: something being read from the console, shown where it will appear, with how far the download
+   has got. A marker follows its download even when its section is drawn again meanwhile. */
+const loads = new Map();   /* "stock:<path>" or "theme:<path>" -> the part read, 0 to 1 (-1 while the size is unknown) */
+function loadFraction(key) {
+  if (key !== "rco:all") return loads.has(key) ? loads.get(key) : 0;
+  let done = 0, total = 0;   /* every interface file, by size */
+  for (const a of aspectAssets(aspectById("interface"))) {
+    const f = state.rco && state.rco.has(a.path) ? 1 : Math.max(0, loads.get(`stock:${a.path}`) || 0);
+    done += f * a.size; total += a.size;
+  }
+  return total ? done / total : -1;
+}
+function loadingMarker(key, label, detail = "") {
+  return `<div class="loading" role="status" data-loading="${esc(key)}">
+      <div class="row"><span class="label">${esc(label)}</span><span class="pct"></span></div>
+      <div class="progress" role="progressbar" aria-label="${esc(label)}" aria-valuemin="0" aria-valuemax="100"><i></i></div>
+      ${detail ? `<p class="note">${esc(detail)}</p>` : ""}</div>`;
+}
+/* The short form, for a line in a row: "Reading… 45%", then "Ready". */
+const loadingInline = key => `<span data-loading="${esc(key)}" data-inline></span>`;
+function paintLoading(el) {
+  const key = el.dataset.loading, f = loadFraction(key), pct = Math.round(Math.max(0, Math.min(1, f)) * 100);
+  if (el.hasAttribute("data-inline")) {
+    el.textContent = !loads.has(key) ? "Waiting to be read…" : f >= 1 ? "Ready" : f < 0 ? "Reading…" : `Reading… ${pct}%`;
+    return;
+  }
+  el.classList.toggle("unknown", f < 0);
+  $(".pct", el).textContent = f > 0 ? `${pct}%` : "";
+  $(".progress i", el).style.width = f < 0 ? "" : `${pct}%`;
+  const bar = $(".progress", el);
+  if (f < 0) bar.removeAttribute("aria-valuenow"); else bar.setAttribute("aria-valuenow", String(pct));
+}
+function paintLoads(root = document) { for (const el of root.querySelectorAll("[data-loading]")) paintLoading(el); }
+function loadProgress(key, f) {
+  const before = loads.get(key);
+  loads.set(key, f);
+  if (before !== undefined && Math.round(before * 100) === Math.round(f * 100)) return;   /* a whole percent at a time */
+  for (const el of document.querySelectorAll("[data-loading]")) {
+    const k = el.dataset.loading;
+    if (k === key || (k === "rco:all" && key.startsWith("stock:"))) paintLoading(el);
+  }
+}
+
+/* A response's bytes, reporting how far the download has got. Without a size or a stream to follow, the marker
+   shows that it is reading without a percentage. A download that stops part way is an error, never a short file. */
+async function readBytes(res, onProgress) {
+  /* a compressed response announces its compressed size: no percentage then, and no size check */
+  const total = res.headers.get("Content-Encoding") ? 0 : Number(res.headers.get("Content-Length")) || 0;
+  if (!total || !res.body || typeof res.body.getReader !== "function") {
+    if (onProgress) onProgress(-1);
+    const bytes = new Uint8Array(await res.arrayBuffer());
+    if (onProgress) onProgress(1);
+    return bytes;
+  }
+  const reader = res.body.getReader();
+  let buf = new Uint8Array(total), got = 0;
+  if (onProgress) onProgress(0);
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    if (got + value.length > buf.length) {   /* more than announced: keep all of it */
+      const bigger = new Uint8Array(Math.max(buf.length * 2, got + value.length));
+      bigger.set(buf.subarray(0, got));
+      buf = bigger;
+    }
+    buf.set(value, got);
+    got += value.length;
+    if (onProgress) onProgress(Math.min(1, got / total));
+  }
+  if (got < total) throw new Error("the download stopped part way");
+  if (onProgress) onProgress(1);
+  return got === buf.length ? buf : buf.slice(0, got);
 }
 
 /* ================================================================ status & routing */
@@ -941,19 +1028,20 @@ async function keepSource(path, file, sameAs = null) {
 const keepsOriginal = a => a.kind === "texture" || isImage(a);
 
 /* The kept original of a file, as a File; null when there is none. */
-async function sourceFile(path, id = state.editId) {
+async function sourceFile(path, id = state.editId, onProgress = null) {
   const res = await fetch(`/api/theme/source?${q({ id, path })}`);
   if (!res.ok) { state.sources.delete(path); return null; }
-  const bytes = new Uint8Array(await res.arrayBuffer());
+  const bytes = await readBytes(res, onProgress);
   const type = sniffImage(bytes) || "image/png";
   return new File([bytes], `picture.${type.split("/")[1]}`, { type });
 }
-async function remakeFromSource(path) {
+async function remakeFromSource(path, p = null) {
   const asset = (state.assets || []).find(a => a.path === path);
   if (!asset || !state.sources.has(path)) return false;
-  const file = await sourceFile(path);
+  const from = p ? p.frac : 0;
+  const file = await sourceFile(path, state.editId, p ? f => p.set("Reading the picture kept in the theme…", from + 0.1 * Math.max(0, f)) : null);
   if (!file) return false;
-  await attachTo([asset], file, appearanceName(path), null, true);
+  await attachTo([asset], file, appearanceName(path), null, true, p);
   return true;
 }
 
@@ -977,12 +1065,15 @@ async function refitPictures() {
       const errors = [];
       for (let i = 0; i < targets.length && state.editId === id; i++) {
         const a = targets[i];
-        attachProgress = f => p.set(`Fitting ${baseName(a.path)}… ${Math.round(f * 100)}%`, (i + f) / targets.length);
+        const at = x => (i + x) / targets.length;
+        attachProgress = f => p.set(`Fitting ${baseName(a.path)}… ${Math.round(f * 100)}%`, at(0.1 + 0.6 * f));
         try {
-          const file = await sourceFile(a.path, id);
+          p.set(`Reading the original of ${baseName(a.path)}…`, at(0));
+          const file = await sourceFile(a.path, id, f => p.set(`Reading the original of ${baseName(a.path)}…`, at(0.1 * Math.max(0, f))));
           if (!file) throw new Error("its original is gone");
+          p.set(`Fitting ${baseName(a.path)}…`, at(0.1));
           const made = await fileForAsset(file, a);
-          p.set(`Sending ${baseName(a.path)} to the console…`, i / targets.length);
+          p.set(`Sending ${baseName(a.path)} to the console…`, at(0.7), at(1));
           await uploadVerified("/api/theme/file", { id, path: a.path }, made);
           textureCache.clear();
           ok++;
@@ -1007,14 +1098,15 @@ async function refitPictures() {
 
 /* A piece attached before the original picture was kept: the picture inside its texture becomes the original, so
    its options work without attaching anything again. What the earlier placement cropped away is not in it. */
-async function recoverSource(path) {
+async function recoverSource(path, p = null) {
   const res = await fetch(`/api/theme/file?${q({ id: state.editId, path })}&v=${stamp}`);
   if (!res.ok) return false;
-  let bytes = new Uint8Array(await res.arrayBuffer());
+  let bytes = await readBytes(res, p ? f => p.set("Reading the picture inside the texture…", 0.1 * Math.max(0, f)) : null);
   if (bytes[0] === 0x28) bytes = unzstdStored(bytes);
   const canvas = await ddsCanvas(bytes, true);
   const blob = await new Promise(done => canvas.toBlob(done, "image/png"));
   if (!blob) return false;
+  if (p) p.set("Keeping it as the original…", 0.1, 0.2);
   await keepSource(path, new File([blob], "picture.png", { type: "image/png" }));
   return state.sources.has(path);
 }
@@ -1632,28 +1724,55 @@ async function zlibDeflate(data) {
   return new Uint8Array(await new Response(stream).arrayBuffer());
 }
 
-/* The console's own resource files, read once per page (they are large). */
-async function rcoStock(path) {
+/* The console's own resource files, read once per page (they are large, up to 40 MB). Parts of the page waiting
+   for the same file share one download, and its loading markers follow it. */
+const rcoReading = new Map();
+function rcoStock(path) {
   state.rco = state.rco || new Map();
-  if (!state.rco.has(path)) {
-    const res = await fetch(`/api/asset?${q({ path })}`);
-    if (!res.ok) throw new Error(`cannot read ${baseName(path)} from the console`);
-    let parsed = null;
-    try { parsed = rcoParse(new Uint8Array(await res.arrayBuffer())); } catch (e) { /* another kind of .rco: left out */ }
-    state.rco.set(path, parsed);
+  if (state.rco.has(path)) return Promise.resolve(state.rco.get(path));
+  if (!rcoReading.has(path)) {
+    const key = `stock:${path}`;
+    rcoReading.set(path, (async () => {
+      loadProgress(key, 0);
+      let res;
+      try { res = await fetch(`/api/asset?${q({ path })}`); } catch (e) { throw new Error("the console could not be reached"); }
+      if (!res.ok) throw new Error(`cannot read ${baseName(path)} from the console`);
+      const bytes = await readBytes(res, f => loadProgress(key, f));
+      let parsed = null;
+      try { parsed = rcoParse(bytes); } catch (e) { /* another kind of .rco: left out */ }
+      state.rco.set(path, parsed);
+      return parsed;
+    })().catch(e => { loads.delete(key); throw e; }).finally(() => rcoReading.delete(path)));
   }
-  return state.rco.get(path);
+  return rcoReading.get(path);
 }
 
-/* Read every resource file once, then show the section with what each
-   holds (files of another kind are left out). */
+/* The interface file that holds the colour palettes and the shape list (on 13.42), read before the others: the
+   colours and the shapes show as soon as it is in, and the other files are read for them only if it has none. */
+const RCO_MAIN = "Sce.PlayStation.PUI_UI3.rco";
+function rcoPaths() {
+  return aspectAssets(aspectById("interface")).map(a => a.path)
+    .sort((a, b) => (baseName(b) === RCO_MAIN) - (baseName(a) === RCO_MAIN) || a.localeCompare(b));
+}
+
+/* Read every resource file once, then show the section with what each holds (files of another kind are left
+   out). A file that could not be read says so on its row, with Try again; it is not taken for another kind. */
 let rcoLoading = null;
+const rcoFailed = new Map();   /* path -> why it could not be read */
 function rcoEnsureLoaded() {
-  const paths = aspectAssets(aspectById("interface")).map(a => a.path);
-  if (rcoLoading || paths.every(p => state.rco && state.rco.has(p))) return;
+  const paths = rcoPaths();
+  if (rcoLoading || paths.every(p => (state.rco && state.rco.has(p)) || rcoFailed.has(p))) return;
   rcoLoading = (async () => {
-    for (const p of paths) await rcoStock(p).catch(() => state.rco.set(p, null));
+    for (const p of paths) {
+      if (rcoFailed.has(p)) continue;
+      await rcoStock(p).catch(e => rcoFailed.set(p, e.message));
+    }
   })().finally(() => { rcoLoading = null; renderAspect(aspectById("interface")); });
+}
+function rcoRetry() {
+  rcoFailed.clear();
+  renderAspect(aspectById("interface"));
+  if (aspectOn(aspectById("appearance"))) renderAspect(aspectById("appearance"));
 }
 
 /* Every picture in every resource file, numbered from 1 in a fixed order
@@ -1761,15 +1880,30 @@ function rcoThemeCacheSet(key, value) {
   for (const k of [...rcoThemeCache.keys()]) if (k.slice(0, k.lastIndexOf("|") + 1) === file) rcoThemeCache.delete(k);
   rcoThemeCache.set(key, value);
 }
+/* Whether the theme's copy of a file is at hand (rcoChanges then needs no download). */
+const rcoThemeReady = path => !state.files.has(path) || rcoThemeCache.has(`${state.editId}|${path}|${stamp}`);
+const rcoThemeReading = new Map();
 async function rcoChanges(path) {
   const r = await rcoStock(path), out = new Map();
   if (!r || !state.files.has(path)) return out;
   const cacheKey = `${state.editId}|${path}|${stamp}`;
-  if (!rcoThemeCache.has(cacheKey)) {
-    const res = await fetch(`/api/theme/file?${q({ id: state.editId, path })}&v=${stamp}`);
-    rcoThemeCacheSet(cacheKey, res.ok ? rcoParse(new Uint8Array(await res.arrayBuffer())) : null);
+  let t;
+  if (rcoThemeCache.has(cacheKey)) t = rcoThemeCache.get(cacheKey);
+  else {
+    if (!rcoThemeReading.has(cacheKey)) {
+      const key = `theme:${path}`, url = `/api/theme/file?${q({ id: state.editId, path })}&v=${stamp}`;
+      rcoThemeReading.set(cacheKey, (async () => {
+        loadProgress(key, 0);
+        let res;
+        try { res = await fetch(url); } catch (e) { throw new Error("the console could not be reached"); }
+        const parsed = res.ok ? rcoParse(await readBytes(res, f => loadProgress(key, f))) : null;
+        rcoThemeCacheSet(cacheKey, parsed);
+        return parsed;
+      })().finally(() => rcoThemeReading.delete(cacheKey)));
+    }
+    /* the file as read, even if a newer one has replaced it in the cache since */
+    t = await rcoThemeReading.get(cacheKey);
   }
-  const t = rcoThemeCache.get(cacheKey);
   if (!t) return out;
   const theirs = new Map(t.files.map(f => [`${f.el}\t${f.attr}`, f]));
   for (const f of r.files) {
@@ -1910,8 +2044,8 @@ async function tileIcon(title, file) {
 async function numberTileIcons() {
   const groups = tileGroups(), p = progressToast("Numbering the tile icons…");
   try {
-    for (const g of groups) {
-      p.set(`Numbering tile ${g.n} of ${groups.length}…`, g.n / groups.length);
+    for (const [i, g] of groups.entries()) {
+      p.set(`Numbering tile ${g.n} of ${groups.length}…`, i / groups.length, (i + 1) / groups.length);
       await tileIconFiles(g, async stock => {
         const out = await numberPicture(g.n, stock, zlibDeflate);
         if (!out) throw new Error(`tile ${g.n}'s icon format can't be written`);
@@ -2093,13 +2227,14 @@ function rcoBody(asp) {
   setTimeout(rcoEnsureLoaded);
   setTimeout(rcoShapesShow);
   const rows = all.slice().sort((a, b) => a.path.localeCompare(b.path)).map(a => {
-    const rep = state.files.has(a.path), r = state.rco && state.rco.get(a.path);
+    const rep = state.files.has(a.path), r = state.rco && state.rco.get(a.path), failed = rcoFailed.get(a.path);
     const pics = r ? rcoPictures(r) : null, svgs = pics ? pics.filter(x => x.kind === "svg").length : 0;
-    const what = pics ? `${plural(pics.length, "picture")}${svgs ? `, ${svgs} of them vector icons` : ""}` : "Reading…";
+    const what = pics ? `${plural(pics.length, "picture")}${svgs ? `, ${svgs} of them vector icons` : ""}`
+      : failed ? `Could not be read: ${esc(failed)}` : loadingInline(`stock:${a.path}`);
     return `<div class="row-item${rep ? " replaced" : ""}">
       <div class="info"><div class="file">${esc(baseName(a.path))}${help("One of the interface's resource files: its pictures, sounds, strings, colours and shapes. Number vector icons and Number all are tests that turn its pictures into numbers, so you can look up which is which; Remove puts the console's own file back in the theme.")}${rep ? ` <span class="tag on">Changed</span>` : ""}</div>
         <div class="dir">${what} · ${fmtSize(a.size)}</div></div>
-      <div class="acts">${pics && pics.length ? `
+      <div class="acts">${failed ? `<button class="btn sm" data-act="rco-retry">Try again</button>` : ""}${pics && pics.length ? `
         ${svgs ? `<button class="btn sm" data-act="rco-number" data-path="${esc(a.path)}" data-vector="1">Number vector icons</button>` : ""}
         <button class="btn sm" data-act="rco-number" data-path="${esc(a.path)}">Number all</button>` : ""}
         ${rep ? `<button class="btn sm ghost danger" data-act="rco-reset" data-path="${esc(a.path)}">Remove</button>` : ""}
@@ -2110,7 +2245,7 @@ function rcoBody(asp) {
     <p class="note">Look up a picture by its number or its name (search, settings, home, power…), then choose an image.${help("Your image is written in exactly the format of the console's picture; for a vector icon it is drawn inside the console's own SVG. Numbering a file again replaces your pictures in it.")}</p>
     <div class="toolbar"><input type="search" id="rco-lookup" placeholder="A number from the screen, or a name" aria-label="Look up a picture"
       value="${esc(state.rcoLookup || "")}"></div>
-    <div id="rco-lookup-result"><p class="note">Looking up…</p></div>
+    <div id="rco-lookup-result"></div>
     <div id="rco-shapes"></div>`;
 }
 
@@ -2128,12 +2263,17 @@ const shapeMax = name => /Ratio/.test(name) ? 10 : 100;
 const shapeValues = text => new Map([...text.matchAll(SHAPE_PAIR)].map(m => [m[2], Number(m[3])]));
 
 async function rcoShapesShow() {
-  if (!$("#rco-shapes")) return;
+  const box = $("#rco-shapes");
+  if (!box) return;
+  const wait = (key, label) => { if (box.isConnected) { box.innerHTML = loadingMarker(key, label); paintLoads(box); } };
   let html = "";
   try {
-    for (const path of aspectAssets(aspectById("interface")).map(a => a.path).sort()) {
-      const r = await rcoStock(path).catch(() => null), sh = r && rcoShapes(r);
+    for (const path of rcoPaths()) {
+      if (rcoFailed.has(path)) throw new Error(rcoFailed.get(path));
+      if (!(state.rco && state.rco.has(path))) wait(`stock:${path}`, "Reading the corner shapes…");
+      const r = await rcoStock(path), sh = r && rcoShapes(r);
       if (!sh || !sh.values.length) continue;
+      if (!rcoThemeReady(path)) wait(`theme:${path}`, "Reading this theme's corner shapes…");
       const mine = (await rcoChanges(path)).get(`${sh.f.el}\t${sh.f.attr}`);
       const now = mine ? shapeValues(new TextDecoder().decode(mine)) : new Map(sh.values);
       const rows = sh.values.map(([name, stock], i) => {
@@ -2147,22 +2287,45 @@ async function rcoShapesShow() {
         <div style="display:grid;grid-template-columns:minmax(0,1fr) 96px auto;gap:6px 12px;align-items:center;max-width:520px">${rows}</div>
         <div class="toolbar"><button class="btn sm primary" data-act="shapes-save" data-path="${esc(path)}">Use these shapes</button>
           ${mine ? `<button class="btn sm ghost danger" data-act="shapes-reset" data-path="${esc(path)}">Console's shapes</button>` : ""}</div>`;
+      break;
     }
-  } catch (e) { html = `<p class="note">${esc(e.message)}</p>`; }
-  const box = $("#rco-shapes");
-  if (box) box.innerHTML = html;
+  } catch (e) {
+    html = `<div class="banner err" role="alert">The corner shapes could not be read: ${esc(e.message.replace(/\.$/, ""))}.
+      <button class="btn sm" data-act="rco-retry">Try again</button></div>`;
+  }
+  if (box.isConnected) box.innerHTML = html;
 }
 
 /* The Appearance themes' colours: each theme's palette, kept in the interface's resource file, with the colour
    test per palette and its key. */
+let colorsLast = null;   /* the colours as last shown, and for which theme: shown again at once when the section is redrawn */
+function colorsWaitNote(path) {
+  const a = aspectAssets(aspectById("interface")).find(x => x.path === path);
+  return a ? `The console keeps them in a ${fmtSize(a.size)} file. It is read once while this page stays open.` : "";
+}
+function colorsBox() {
+  if (colorsLast && colorsLast.id === state.editId) return colorsLast.html;
+  const first = rcoPaths()[0];
+  return first ? loadingMarker(`stock:${first}`, "Reading the console's colours…", colorsWaitNote(first)) : "";
+}
 async function appearanceColorsShow() {
   const box = $("#appearance-colors");
   if (!box) return;
-  let html = "", testOn = false;
+  const id = state.editId, shown = colorsLast && colorsLast.id === id ? colorsLast.html : "";
+  /* While a file is read: its marker, above the colours as last shown (dimmed, and not usable meanwhile). */
+  const wait = (key, label, path) => {
+    if (!box.isConnected) return;
+    box.innerHTML = loadingMarker(key, label, shown ? "" : colorsWaitNote(path)) + (shown ? `<div class="stale" inert aria-hidden="true">${shown}</div>` : "");
+    paintLoads(box);
+  };
+  let html = "", testOn = false, failed = false;
   try {
-    for (const path of aspectAssets(aspectById("interface")).map(a => a.path).sort()) {
-      const r = await rcoStock(path).catch(() => null), pals = r ? rcoColors(r).sort((x, y) => paletteRank(x.id) - paletteRank(y.id)) : [];
+    for (const path of rcoPaths()) {
+      if (rcoFailed.has(path)) throw new Error(rcoFailed.get(path));
+      if (!(state.rco && state.rco.has(path))) wait(`stock:${path}`, "Reading the console's colours…", path);
+      const r = await rcoStock(path), pals = r ? rcoColors(r).sort((x, y) => paletteRank(x.id) - paletteRank(y.id)) : [];
       if (!pals.length) continue;
+      if (!rcoThemeReady(path)) wait(`theme:${path}`, "Reading this theme's colours…", path);
       const changes = await rcoChanges(path), group = colorTestValues(pals), panel = colorPanelValues(pals);
       /* Only the default look's palette is offered: the console uses it for the widgets, the Control Center and the button
          hints with every Appearance theme, and no change to a theme's own palette has shown on the console. A theme
@@ -2172,7 +2335,7 @@ async function appearanceColorsShow() {
           <i style="width:14px;height:14px;border-radius:3px;background:#${rgb.toString(16).padStart(6, "0")}"></i>${esc(word)}: ${esc(name)}</span>`).join("");
       const key = COLOR_TEST.map(g => `<span style="display:inline-flex;align-items:center;gap:6px;margin:2px 14px 2px 0">
           <i style="width:14px;height:14px;border-radius:3px;background:#${g.rgb.toString(16).padStart(6, "0")}"></i>${esc(g.label)}</span>`).join("");
-      html += `<h3 class="sub-head">Colours</h3>
+      html = `<h3 class="sub-head">Colours</h3>
         <div class="banner">For the widgets' colours, turn off <b>Use System Appearance for Widgets</b> in the Welcome hub's settings.${help("With it on, the Welcome hub picks the widgets' colours for each Appearance theme itself and ignores these.")}</div>
         <p class="note">The same colours with every Appearance theme. Apply, then use rest mode.${help(`They are the default look's palette; each Appearance theme has one of its own too, but changes to those didn't show on the console, so they aren't offered. Each colour keeps the console's transparency, and Console's colours puts them back. They are kept in the interface's resource file (${baseName(path)}), so Interface icons shows that file as changed too.`)}</p>
         ${hiddenChanged.length ? `<div class="banner">This theme also changes the colours of ${plural(hiddenChanged.length, "Appearance theme")}
@@ -2216,9 +2379,17 @@ async function appearanceColorsShow() {
         <div style="display:flex;flex-wrap:wrap">${panelKey}</div>
         <div class="toolbar"><button class="btn sm" data-act="colors-test" data-path="${esc(path)}" data-palette="color_default">Colour test</button>
           <button class="btn sm" data-act="colors-panel" data-path="${esc(path)}" data-palette="color_default">Panel test</button></div></details>`;
+      break;
     }
-  } catch (e) { html = `<p class="note">${esc(e.message)}</p>`; }
+    if (!html) html = `<h3 class="sub-head">Colours</h3><p class="note">This firmware's interface files have no colours that can be changed.</p>`;
+  } catch (e) {
+    failed = true;
+    html = `<h3 class="sub-head">Colours</h3><div class="banner err" role="alert">The colours could not be read: ${esc(e.message.replace(/\.$/, ""))}.
+      <button class="btn sm" data-act="rco-retry">Try again</button></div>`;
+  }
+  if (!box.isConnected || state.editId !== id) return;
   box.innerHTML = html;
+  if (!failed) colorsLast = { id, html };
 }
 
 function saveColorEdit(path, palette) { return rcoQueued("Saving the colours", () => saveColorEditNow(path, palette)); }
@@ -2301,7 +2472,15 @@ async function saveShapesNow(path, reset) {
 let rcoLookupTimer = 0;
 async function rcoLookup() {
   const text = (state.rcoLookup || "").trim().toLowerCase();
-  if (!$("#rco-lookup-result")) return;
+  const box = $("#rco-lookup-result");
+  if (!box) return;
+  /* The lookup needs every interface file: while they are read, how far that has got, when there will be something
+     to show (a search, or the pictures this theme changes). */
+  const paths = rcoPaths();
+  if (!paths.every(p => state.rco && state.rco.has(p)) && (text || paths.some(p => state.files.has(p)))) {
+    box.innerHTML = loadingMarker("rco:all", "Reading the interface files…", "The lookup needs all of them; they are read once while this page stays open.");
+    paintLoads(box);
+  }
   let html;
   try {
     const key = await rcoKey(), changed = new Map();
@@ -2325,7 +2504,10 @@ async function rcoLookup() {
         <div class="acts">${k.pic.kind ? `<button class="btn sm" data-act="rco-pick" data-path="${esc(k.path)}" data-el="${k.pic.el}">${rep ? "Replace" : "Use my picture"}</button>` : ""}
           ${rep ? `<button class="btn sm ghost danger" data-act="rco-unpick" data-path="${esc(k.path)}" data-el="${k.pic.el}">Reset</button>` : ""}</div></div>`;
     }).join("")}</div>${more ? `<p class="note">and ${more} more.</p>` : ""}` : `<p class="note">No picture ${/^\d+$/.test(text) ? "has that number" : "matches"}.</p>`;
-  } catch (e) { html = `<p class="note">${esc(e.message)}</p>`; }
+  } catch (e) {
+    html = `<div class="banner err" role="alert">The lookup could not read the interface files: ${esc(e.message.replace(/\.$/, ""))}.
+      <button class="btn sm" data-act="rco-retry">Try again</button></div>`;
+  }
   /* The section may have been redrawn, or the text changed, while reading. */
   const out = $("#rco-lookup-result");
   if (out && (state.rcoLookup || "").trim().toLowerCase() === text) out.innerHTML = html;
@@ -3156,7 +3338,7 @@ async function textureForAsset(file, assetPath, progress) {
   if (o !== data.length) throw new Error("texture size did not verify");
   if (sampled) {
     const psnr = 10 * Math.log10(255 * 255 / Math.max(1e-9, sampleErr / sampled));
-    if (psnr < 24) throw new Error(`texture quality check failed (${psnr.toFixed(1)} dB)`);
+    if (psnr < 24) throw new Error("the texture came out too unlike your picture to use (too much fine detail for its size); try a smoother picture");
   }
   if (alphaN && Math.sqrt(alphaErr / alphaN) > 24) throw new Error("the see-through parts did not encode well");
   const dds = new Uint8Array(header.length + data.length);
@@ -3180,26 +3362,31 @@ let attachProgress = null;
 /* Put one file onto a set of system assets (for example all size variants).
    `copies`: the same picture already written to that many other files, for
    a message that counts files instead of sizes. */
-async function attachTo(assets, file, label, copies = null, remake = false) {
+async function attachTo(assets, file, label, copies = null, remake = false, shown = null) {
   const big = assets.length > 2 || assets.some(a => a.kind === "texture" || ext(a.path) === "at9");
-  const p = big ? progressToast(`Adding ${label}…`) : null;
+  const p = shown || (big ? progressToast(`Adding ${label}…`) : null);
+  const base = shown ? shown.frac : 0;   /* a task begun before (reading a kept picture) keeps its part of the bar */
   let ok = 0, keptFirst = null;
   const errors = [];
   for (let i = 0; i < assets.length; i++) {
-    const a = assets[i];
-    attachProgress = p ? f => p.set(`Encoding ${baseName(a.path)}… ${Math.round(f * 100)}%`, (i + f) / assets.length) : null;
+    const a = assets[i], at = x => base + (1 - base) * (i + x) / assets.length;
+    attachProgress = p ? f => p.set(`Encoding ${baseName(a.path)}… ${Math.round(f * 100)}%`, at(0.7 * f)) : null;
+    /* each step says what it is as it starts */
+    if (p) p.set(`${a.kind === "texture" || a.kind === "audio" || isImage(a) ? "Encoding" : "Preparing"} ${baseName(a.path)}…`, at(0));
     try {
       const blob = await fileForAsset(file, a);
-      if (p) p.set(`Sending ${baseName(a.path)} to the console…`, i / assets.length);
+      const keep = !remake && state.keepOriginals && keepsOriginal(a) && blob !== file;   /* so an option changed later needs no new upload */
+      if (p) p.set(`Sending ${baseName(a.path)} to the console…`, at(0.7), at(keep ? 0.9 : 1));
       await uploadVerified("/api/theme/file", { id: state.editId, path: a.path }, blob);
       state.files.add(a.path);
-      if (!remake && state.keepOriginals && keepsOriginal(a) && blob !== file) {   /* so an option changed later needs no new upload */
+      if (keep) {
+        if (p) p.set(keptFirst ? `Keeping your original for ${baseName(a.path)}…` : "Keeping your original picture…", at(0.9), at(1));
         await keepSource(a.path, file, keptFirst);
         if (!keptFirst && state.sources.has(a.path)) keptFirst = a.path;
       }
       ok++;
     } catch (e) { errors.push(`${baseName(a.path)}: ${e.message}`); }
-    if (p) p.set(`Adding ${label}… ${i + 1}/${assets.length}`, (i + 1) / assets.length);
+    if (p) p.set(`${remake ? "Making" : "Adding"} ${label}${remake ? " again" : ""}… ${i + 1}/${assets.length}`, at(1));
   }
   stamp = Date.now();
   if (!remake && state.keepOriginals) await loadOriginals();
@@ -3209,7 +3396,7 @@ async function attachTo(assets, file, label, copies = null, remake = false) {
   const msg = errors.length
     ? `${label}: ${ok} of ${assets.length} added and verified. ${errors.slice(0, 2).join("; ")}`
     : copies !== null ? `${label} replaced in ${plural(ok + copies, "file")} and verified. ${use}`
-    : `${label} added and verified${assets.length > 1 ? ` at ${plural(ok, "size")}` : ""}. ${use}`;
+    : `${label} ${remake ? "made again" : "added"} and verified${assets.length > 1 ? ` at ${plural(ok, "size")}` : ""}. ${use}`;
   const kind = errors.length ? (ok ? "" : "err") : "ok";
   if (p) p.done(msg, kind); else toast(msg, kind, errors.length ? 9000 : 4500);
   await refreshStatus();
@@ -3463,7 +3650,9 @@ async function renderEditor() {
   }
   if (!themeById(state.editId)) state.editId = themes[0].id;
   const t = themeById(state.editId);
-  view.innerHTML = `<p class="muted">Loading…</p>`;
+  loads.set("open", -1);
+  view.innerHTML = loadingMarker("open", `Opening ${t.name}…`);
+  paintLoads(view);
   await Promise.all([loadAssets(), loadThemeFiles(t.id)]);
   const on = state.status.applied === t.id;
   const fwAny = t.fw === "any";
@@ -3528,6 +3717,7 @@ function renderAspect(asp) {
         <button class="btn sm ghost" data-act="cancel-off" data-aspect="${asp.id}">Keep</button></div>` : ""}
     </div>
     <div class="aspect-body" ${on ? "" : "hidden"}>${on ? aspectBody(asp) : ""}</div>`;
+  paintLoads(el);
   if (asp.mode === "music" && state.trim) setupTrim();
 }
 
@@ -3664,7 +3854,7 @@ function aspectBody(asp) {
           <button class="btn sm" data-act="attach-group" data-group="${esc(g.key)}" data-aspect="${asp.id}">${rep ? "Replace" : "Attach"}</button>
           ${rep ? `<button class="btn sm ghost danger" data-act="reset-group" data-group="${esc(g.key)}" data-aspect="${asp.id}">Reset</button>` : ""}
         </div></div>`;
-    }).join("")}</div>${more}${asp.id === "appearance" ? `<div id="appearance-colors"></div>` : ""}`;
+    }).join("")}</div>${more}${asp.id === "appearance" ? `<div id="appearance-colors">${colorsBox()}</div>` : ""}`;
 }
 
 const gainLabel = g => (g ? `${g > 0 ? "+" : "−"}${Math.abs(g)} dB` : "same loudness as the console's music");
@@ -4131,7 +4321,10 @@ async function saveTrim() {
   const toEnd = v => (v >= t.duration - 0.05 ? 0 : Math.round(v * 1000));
   const p = progressToast("Saving the music…");
   try {
-    if (t.fresh) await uploadVerified("/api/theme/music", { id: t.id }, pcmWav(t.chans, t.rate));
+    if (t.fresh) {
+      p.set("Sending the music to the console…", 0, 0.2);
+      await uploadVerified("/api/theme/music", { id: t.id }, pcmWav(t.chans, t.rate));
+    }
     await api("POST", "/api/theme/settings", {
       id: t.id, start: Math.round(part.start * 1000), end: toEnd(part.end),
       play_from: part.playFrom === null ? -1 : Math.round(part.playFrom * 1000),
@@ -4194,7 +4387,7 @@ async function checkHomeMusic(id) {
 async function convertHomeMusic(id, built, rate, gain, p) {
   const r = await at9For(HOME_MUSIC, built.chans, rate, gain, f => p.set(`Encoding home music… ${Math.round(f * 100)}%`, 0.2 + f * 0.7),
                          built.intro / rate);
-  p.set("Uploading home music…", 0.92);
+  p.set("Sending the home music to the console…", 0.92);
   await uploadVerified("/api/theme/file", { id, path: HOME_MUSIC }, r.blob);
   if (id === state.editId) state.files.add(HOME_MUSIC);
   return r;
@@ -4443,6 +4636,7 @@ async function importEntries(entries, fallbackName) {
   const convert = music && !files.some(f => f.asset === HOME_MUSIC);   /* exported before 1.10 */
   const total = files.length + (music ? 1 : 0) + (convert ? 1 : 0);
   for (let i = 0; i < files.length; i++) {
+    p.set(`Importing ${name}… ${i + 1}/${total}`, i / total, (i + 1) / total);
     try { await uploadVerified("/api/theme/file", { id, path: files[i].asset }, await files[i].blob()); ok++; added.push(files[i].asset); }
     catch (e) { skipped++; why.push(`${baseName(files[i].asset)}: ${e.message}`); }
     p.set(`Importing ${name}… ${i + 1}/${total}`, (i + 1) / total);
@@ -4450,6 +4644,7 @@ async function importEntries(entries, fallbackName) {
   if (music) {
     try {
       const blob = await music.blob();
+      p.set(`Importing ${name}: the music…`, files.length / total, (files.length + 1) / total);
       await uploadVerified("/api/theme/music", { id }, blob);
       ok++;
       if (convert) {
@@ -4545,6 +4740,7 @@ document.addEventListener("click", async e => {
       return;
     }
     case "confirm-off":
+      el.disabled = true; el.textContent = "Removing…";
       state.confirming = "";
       if (asp.mode === "music") await removeMusic();
       else await resetAssets(aspectAssets(asp));
@@ -4570,11 +4766,14 @@ document.addEventListener("click", async e => {
       return;
     }
     case "reset-group": {
+      el.disabled = true; el.textContent = "Resetting…";
       const g = findGroup(asp, el.dataset.group);
-      if (g) { await resetAssets(g.assets); renderAspect(asp); if (asp.id === "appearance") restReminder(); }
+      if (g) await resetAssets(g.assets);
+      renderAspect(asp);
+      if (g && asp.id === "appearance") restReminder();
       return;
     }
-    case "reset-aspect": await resetAssets(aspectAssets(asp)); renderAspect(asp); if (asp.id === "appearance") restReminder(); return;
+    case "reset-aspect": el.disabled = true; el.textContent = "Resetting…"; await resetAssets(aspectAssets(asp)); renderAspect(asp); if (asp.id === "appearance") restReminder(); return;
     case "remove-originals": {
       if (!armed.get("originals")) {
         armed.set("originals", true);
@@ -4603,6 +4802,7 @@ document.addEventListener("click", async e => {
       return renderAspect(aspectById("music"));
     case "choose-part": return openThemePart(state.editId);
     case "rco-number": return numberPictures(el.dataset.path, el.dataset.vector === "1");
+    case "rco-retry": return rcoRetry();
     case "rco-reset": await resetAssets([{ path: el.dataset.path }]); return renderAspect(aspectById("interface"));
     case "rco-pick": {
       const file = await pickFile("image/*,.svg");
@@ -4687,24 +4887,45 @@ document.addEventListener("submit", async e => {
 
 let filterTimer = 0;
 /* A placement option changed for a piece: its texture is made again from the kept picture, if there is one. */
-async function placementChanged(path, redraw) {
+/* A piece's placement, padding or clock band changed: the piece is made again with it, at once, with its progress
+   showing from the first moment. Changes are made one at a time; a piece changed again while it waits is made once,
+   with the latest choice (each run reads the options as they are when it starts). */
+let placeWork = Promise.resolve();
+const placeWaiting = new Set();
+function placementChanged(path, redraw) {
+  if (redraw) renderAspect(aspectById("appearance"));   /* "Fill with padding" shows its padding box at once */
+  if (!state.files.has(path) || placeWaiting.has(path)) return placeWork;
+  placeWaiting.add(path);
+  const id = state.editId;
+  placeWork = placeWork.then(() => {
+    placeWaiting.delete(path);
+    return state.editId === id ? placementChangedNow(path) : null;
+  }).catch(e => toast(e.message, "err"));
+  return placeWork;
+}
+async function placementChangedNow(path) {
   const asp = aspectById("appearance");
-  if (state.files.has(path) && !state.sources.has(path) && !state.keepOriginals) {
+  if (!state.files.has(path)) return;
+  if (!state.sources.has(path) && !state.keepOriginals) {
     toast("This theme does not keep original pictures, so this applies the next time you attach a picture.", "", 7000);
-  } else if (state.files.has(path)) {
-    let recovered = false;
-    if (!state.sources.has(path)) {
-      try { recovered = await recoverSource(path); } catch (e) { /* a texture this page did not make: it needs its picture attached */ }
-    }
-    if (state.sources.has(path)) {
-      try {
-        await remakeFromSource(path);
-        if (recovered) toast("Made again from the picture in the texture. Attach the original once more if you want back what the earlier placement cropped away.", "", 9000);
-      } catch (e) { toast(e.message, "err"); }
-      await refreshStatus();
-    }
+    return;
   }
-  if (redraw || state.files.has(path)) renderAspect(asp);
+  const p = progressToast(`Making ${appearanceName(path)} again…`);
+  let recovered = false;
+  try {
+    if (!state.sources.has(path)) {
+      try { recovered = await recoverSource(path, p); }
+      catch (e) { /* a texture this page did not make: it needs its picture attached */ }
+    }
+    if (!state.sources.has(path)) {
+      p.done("This piece's picture can't be read back from the console. Attach the picture again to use the new option.", "err");
+      return;
+    }
+    if (!(await remakeFromSource(path, p))) p.done("The picture kept in the theme is gone. Attach the picture again to use the new option.", "err");
+    else if (recovered) toast("Made again from the picture in the texture. Attach the original once more if you want back what the earlier placement cropped away.", "", 9000);
+  } catch (e) { p.done(e.message, "err"); }
+  await refreshStatus();
+  renderAspect(asp);
 }
 
 document.addEventListener("input", e => {
