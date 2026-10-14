@@ -783,6 +783,7 @@ revert_mounts(const char *keep) {
                    "then go back to the home screen."
 #define FONTS_HINT "To see the new font, put the console in rest mode and wake it. If the text looks wrong, " \
                    "choose Restore stock in the manager."
+#define ARTWORK_HINT "To see the new Appearance artwork, put the console in rest mode and wake it."
 
 static int
 title_target(const char *dir) {
@@ -791,6 +792,13 @@ title_target(const char *dir) {
 }
 
 /* The console's text fonts folder. */
+/* The Appearance themes' textures (and the welcome backgrounds beside them): read as the interface starts. */
+static int
+artwork_target(const char *dir) {
+  size_t n = strlen(SYS_ASSET_DIR);
+  return !strncmp(dir, SYS_ASSET_DIR, n) && (!dir[n] || dir[n] == '/');
+}
+
 static int
 font_target(const char *dir) {
   size_t n = strlen(FONT_DIR);
@@ -1937,10 +1945,11 @@ apply_theme(const char *name) {
   /* What to do to see the changes the home screen only picks up later:
      the home row reads its icons once, as ShellUI starts, and the home
      music starts again only after another app's music has played. */
-  int titles = 0, fonts = 0;
+  int titles = 0, fonts = 0, artwork = 0;
   for(int i = 0; i < count; i++) {
     titles += title_target(targets[i]);
     fonts += font_target(targets[i]);
+    artwork += artwork_target(targets[i]);
   }
   int icons = titles > 0, font_hint = fonts > 0, home_music = !access(home, F_OK);
   char hints[640] = "";
@@ -1958,6 +1967,9 @@ apply_theme(const char *name) {
   if(font_hint) {
     snprintf(hints + strlen(hints), sizeof(hints) - strlen(hints), " %s", FONTS_HINT);
   }
+  if(artwork) {
+    snprintf(hints + strlen(hints), sizeof(hints) - strlen(hints), " %s", ARTWORK_HINT);
+  }
   if(home_music) {
     snprintf(hints + strlen(hints), sizeof(hints) - strlen(hints), " %s", MUSIC_HINT);
   }
@@ -1974,6 +1986,7 @@ apply_theme(const char *name) {
   }
   if(icons) notify("ps5-theme: %s", ICONS_HINT);
   if(font_hint) notify("ps5-theme: %s", FONTS_HINT);
+  if(artwork) notify("ps5-theme: %s", ARTWORK_HINT);
   if(home_music) notify("ps5-theme: %s", MUSIC_HINT);
   return 0;
 }

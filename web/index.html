@@ -2805,14 +2805,22 @@ async function attachTo(assets, file, label, copies = null, remake = false) {
   }
   stamp = Date.now();
   if (!remake && state.keepOriginals) await loadOriginals();
+  /* The interface reads the Appearance artwork as it starts: it shows after rest mode. */
+  const use = assets.some(a => APPEARANCE_RE.test(a.path))
+    ? "Apply the theme, then put the console in rest mode and wake it to see the change." : "Apply the theme to use it.";
   const msg = errors.length
     ? `${label}: ${ok} of ${assets.length} added and verified. ${errors.slice(0, 2).join("; ")}`
-    : copies !== null ? `${label} replaced in ${plural(ok + copies, "file")} and verified. Apply the theme to use it.`
-    : `${label} added and verified${assets.length > 1 ? ` at ${plural(ok, "size")}` : ""}. Apply the theme to use it.`;
+    : copies !== null ? `${label} replaced in ${plural(ok + copies, "file")} and verified. ${use}`
+    : `${label} added and verified${assets.length > 1 ? ` at ${plural(ok, "size")}` : ""}. ${use}`;
   const kind = errors.length ? (ok ? "" : "err") : "ok";
   if (p) p.done(msg, kind); else toast(msg, kind, errors.length ? 9000 : 4500);
   await refreshStatus();
   return ok;
+}
+
+/* After the Appearance artwork goes back to the console's own in the theme. */
+function restReminder() {
+  toast("Back to the console's own artwork in this theme. Apply the theme, then put the console in rest mode and wake it to see the change.", "ok", 7000);
 }
 
 async function removeMusic() {
@@ -3203,14 +3211,15 @@ function aspectBody(asp) {
       (<b>Settings &gt; Appearance and Sound</b>), so select the theme you change. Each picture is encoded to the texture's exact format
       and size (the panels are about 2560 pixels wide) and <b>keeps its transparency</b>: use a PNG with a see-through background for the parts
       that should stay clear. The Control Center panel sits behind its row of icons along the bottom; the top-right corner piece sits
-      behind the clock. Choose how your picture is placed with <b>Placement</b> beside each piece, before you attach it:
+      behind the clock. Choose how your picture is placed with <b>Placement</b> beside each piece:
       <b>Fill</b> crops the picture to the piece, keeping the part against the screen's edge (the bottom for the panel,
       the top for the home screen's artwork);
       <b>Fill with padding</b> does the same but leaves a clear margin at that edge, set in percent;
       <b>Fit</b> shows the whole picture with clear sides; <b>Stretch</b> squeezes it to the piece.
       The clock and the search and settings icons are drawn over the top of the top-right piece, so a white or solid picture
       there hides them: <b>Keep the clock and icons clear</b> (on by default) leaves that band empty and puts the picture below it.
-      Apply the theme, then put the console in rest mode and wake it.</p>` : "";
+      A change made to a picture already attached takes effect at once: the texture is made again from the original the theme keeps.
+      If one doesn't, change the option and attach the picture again. Apply the theme, then put the console in rest mode and wake it.</p>` : "";
   const fontNote = asp.id === "fonts" ? `<p class="note">The text the home screen and its menus are drawn in. Replace one with a
       TrueType or OpenType font (<b>.ttf</b> or <b>.otf</b>) that has the full Latin alphabet, digits and punctuation; fonts in
       other formats, and ones that are damaged or lack those characters, are refused. A font goes only into the home screen,
@@ -3235,7 +3244,7 @@ function aspectBody(asp) {
           <div class="dir">${isFont || isAppearance ? `${esc(baseName(a0.path))} · ${fmtSize(a0.size)}` : esc(g.dir)}${g.assets.length > 1 ? ` · ${plural(g.assets.length, "variant")}` : ""}</div></div>
         <div class="acts">${play}${isAppearance ? (() => {
           const pl = placementFor(a0.path);
-          return `<label class="note" title="How your picture is placed on this piece. Applies when you attach a picture.">Placement
+          return `<label class="note" title="How your picture is placed on this piece. Changing it makes the texture again at once from the picture kept in the theme.">Placement
             <select data-place="${esc(a0.path)}" aria-label="Placement">
               <option value="fill"${pl.mode === "fill" ? " selected" : ""}>Fill (crop to the piece)</option>
               ${pl.hasEdge ? `<option value="pad"${pl.mode === "pad" ? " selected" : ""}>Fill with padding</option>` : ""}
@@ -4159,10 +4168,10 @@ document.addEventListener("click", async e => {
     }
     case "reset-group": {
       const g = findGroup(asp, el.dataset.group);
-      if (g) { await resetAssets(g.assets); renderAspect(asp); }
+      if (g) { await resetAssets(g.assets); renderAspect(asp); if (asp.id === "appearance") restReminder(); }
       return;
     }
-    case "reset-aspect": await resetAssets(aspectAssets(asp)); return renderAspect(asp);
+    case "reset-aspect": await resetAssets(aspectAssets(asp)); renderAspect(asp); if (asp.id === "appearance") restReminder(); return;
     case "remove-originals": {
       if (!armed.get("originals")) {
         armed.set("originals", true);

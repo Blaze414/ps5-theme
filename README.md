@@ -14,7 +14,7 @@ the plugin stops, and the plugin puts your theme back each time etaHEN starts.
 
 ![The theme library](docs/screenshots/library.png)
 
-Version 1.56. Developed and tested on a PS5 with firmware 13.42, both with
+Version 1.57. Developed and tested on a PS5 with firmware 13.42, both with
 etaHEN 2.5B (unified build) and on its own from PS5 Payload Manager.
 
 > **About the screenshots.** They were taken from the author's own console.
@@ -1201,7 +1201,9 @@ Sony's own 30th anniversary Appearance themes already ship in
 7. **Apply to console**, then select the same Appearance theme in
    **Settings > Appearance and Sound** if it isn't, and put the console in
    **rest mode** and wake it. Press the PS button for the Control Center, and
-   look at the home screen for the artwork.
+   look at the home screen for the artwork. The manager says this after every
+   change to a piece (attach, option change or reset), and the console shows
+   a notification when the theme is applied.
 8. **Go back.** **Reset** on a row removes your picture (and its kept
    original) from the theme; apply again. **Restore stock** takes the whole
    theme off the console.
