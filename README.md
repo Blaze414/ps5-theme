@@ -297,6 +297,9 @@ between themes.
   the new fit, with a progress bar, and without attaching anything again.
   Pictures attached before originals were kept stay as they are, and a
   message says how many. The Appearance pieces have their own placement.
+  If a changed fit does not show on the console after you apply the theme
+  again, change the setting and then attach the pictures again: attaching
+  always uses the setting as it is.
 - **Keep original pictures:** on by default. Switch it off in a theme to save
   space: new pictures are then not kept, and fit and placement options apply
   when you attach a picture (as before). The line beside the switch shows how
@@ -1026,6 +1029,16 @@ parts), keeps it as the original and makes the texture again from it. Nothing
 is attached again; what the earlier placement had cropped away, or left clear,
 is not in that picture, so attach the original once more to get it back. Only
 textures the page itself made can be read back this way.
+
+**If an option doesn't take effect.** When a changed option does not make the
+texture again by itself, or the look does not change after you apply the
+theme again, change the option and then **attach the picture again** (Replace
+on that piece). Attaching always makes the texture fresh with the options as
+they are at that moment, so it works whenever the automatic step did not.
+Then **Apply** the theme again and put the console in rest mode. The options
+(placement, padding, the clock band) are remembered by the browser you used,
+so in another browser they start at their defaults: set them first, then
+attach.
 
 **The clock.** The corner piece is drawn over the clock and the search and
 settings icons, which sit in its top band (the PlayStation 2 glass bar behind
