@@ -270,13 +270,16 @@ made](#how-the-appearance-textures-are-made) explains the technical side.
 
 1. **Make the picture.** A PNG or WebP, with transparent parts wherever the
    console's own artwork is clear (a JPEG covers the whole piece). Any size
-   works, since it is fitted to the piece, but these match the pieces exactly:
+   works, since it is fitted to the piece. The sizes below are the
+   PlayStation 2 theme's; the other themes' pieces differ a little (the
+   original PlayStation's bottom panel is 2560 by 880, its corner piece 1000
+   by 560), and the page reads each piece's size from the console:
 
-   | Piece | Size | Notes |
+   | Piece | Size (PlayStation 2) | Notes |
    |---|---|---|
    | Bottom panel | 2560 by 820 | Sits behind the row of Control Center icons: keep it calm and not too light, so the icons stay readable. |
    | Top-right piece | 980 by 620 | The clock and the search and settings icons are drawn over its top band: a light picture there hides them. |
-   | Home screen artwork | 2560 wide | Hangs from the top of the home screen. Sony's own is solid at the top and fades to clear by about two thirds of the way down: do the same, so the home screen's own background shows below it. |
+   | Home screen artwork | 2560 by 800 | Hangs from the top of the home screen. Sony's own is solid at the top and fades to clear by about two thirds of the way down: do the same, so the home screen's own background shows below it. |
 
    The home screen artwork is the Appearance theme's own layer, not the
    **Background** section's picture; the two are changed separately.
@@ -367,7 +370,7 @@ attach.
 - **For the corner piece:** a picture that is light at the top hides the
   clock; leave **Keep the clock and icons clear** on, or use a dark one.
 - **Disk space:** the textures are stored without compression in the theme
-  (BC7 is one byte per pixel: about 3 MB for the bottom panel, under 1 MB for
+  (BC7 is one byte per pixel: about 2 MB for the bottom panel, under 1 MB for
   the corner piece). With **Keep original pictures** on, the originals take
   their size too, once however many files they were attached to.
 
@@ -1133,15 +1136,17 @@ PlayStation, PlayStation 2, 3 and 4) draw their artwork from DDS textures in
 `control_center_<theme>_bottom.dds` is the panel behind the Control Center's
 row of icons, `control_center_<theme>_top.dds` the piece in the top-right
 corner by the clock, and `homeui_<theme>.dds` the home screen's artwork
-(`ps` is the original PlayStation). They are 2560 pixels wide (the top piece
-980 by 620) and BC7. The home screen's code names them. They are plain files,
+(`ps` is the original PlayStation). They are BC7; the PlayStation 2 theme's
+are 2560 by 820 (bottom), 980 by 620 (corner) and 2560 by 800 (artwork), and
+the other themes' differ a little. The home screen's code names them. They are plain files,
 so a theme can replace them.
 
 How they were found: the clock's capsule and the Control Center's backdrop
 didn't turn into numbers in the numbered test, so they are not pictures in
 the interface files. The file-level tracker (`ps5-assetwatch`) saw no file
 load at all, because the home screen reads such files and closes them.
-Naming the theme in use (PlayStation 2) led to the folder.
+Naming the theme in use (PlayStation 2) led to the folder: [The Appearance
+themes' artwork](#the-appearance-themes-artwork) tells the whole story.
 
 Two things had to be right for a replacement to be accepted, and both follow
 the console's own files byte for byte (a texture made before 1.56, with the
@@ -1188,11 +1193,11 @@ below it.
 
 #### The three pieces, and how each is made
 
-| Piece | File (`/system/vsh_asset/`) | Size | What it is | Placed against | Options |
+| Piece | File (`/system/vsh_asset/`) | Size (PlayStation 2) | What it is | Placed against | Options |
 |---|---|---|---|---|---|
 | **Bottom** | `control_center_<theme>_bottom.dds` | 2560 by 820 | The panel behind the Control Center's row of icons (the PS button menu, on the home screen and in games) | the bottom edge | Placement, padding |
 | **Top right** | `control_center_<theme>_top.dds` | 980 by 620 | The corner piece by the clock, with the search and settings icons | the top and right edges | Placement, padding, **Keep the clock and icons clear** |
-| **Home screen artwork** | `homeui_<theme>.dds` | 2560 wide | The artwork that hangs from the top of the home screen (solid at the top, fading to clear below) | the top edge | Placement, padding |
+| **Home screen artwork** | `homeui_<theme>.dds` | 2560 by 800 | The artwork that hangs from the top of the home screen (solid at the top, fading to clear below) | the top edge | Placement, padding |
 
 `<theme>` is `ps`, `ps2`, `ps3` or `ps4`. Each Appearance theme has its own
 three files, so a picture made for the PlayStation 2 pieces shows only while
@@ -1879,24 +1884,69 @@ plugin to verify every texture before it's used.
 
 With the PlayStation 2 Appearance theme selected, the Control Center has a
 cloud backdrop and the clock sits in a glass capsule. Neither changed with
-any theme. **Finding them:**
+any theme, and the question was where they come from.
 
-- **Not interface pictures.** The numbered test, which turns every picture in
-  the interface's resource files into a number, left both as they were, so
-  they are not in those files.
-- **Not a file the tracker could see.** `ps5-assetwatch` (in `tools/`) lists
-  the files the home screen and the web renderer have mapped, twice a second
-  for two minutes, while you open the Control Center. It saw nothing new: the
-  home screen reads these files and closes them, so they are never mapped.
-- **The theme's name.** Knowing the theme in use was the PlayStation 2 one
-  led to the textures named after it: `control_center_ps2_bottom.dds`,
-  `control_center_ps2_top.dds` and `homeui_ps2.dds` in `/system/vsh_asset`
-  (not the `vsh_asset` under `/system_ex` that the backgrounds are in), with
-  the same three for `ps`, `ps3` and `ps4`. The home screen's code names
-  these paths, and they are plain files, so a theme can replace them as it
-  replaces backgrounds. **Solution:** `/system/vsh_asset` became a themable
-  folder, overlaid like the others, and its pieces are listed live under
-  **Appearance themes** with plain names.
+**What was observed along the way:**
+
+1. **They looked like icons, and weren't.** The first reading of a photo of
+   the two areas took them for interface icons: the search and settings
+   icons, and the Control Center's row. Those are icons, but what was meant
+   was the artwork behind them. How something looks on screen says little
+   about where it is stored.
+2. **What didn't change said the most.** The numbered test turns every
+   picture in the interface's resource files into a number. On the photo of
+   it, every icon, pill and badge had a number, and the capsule and the
+   backdrop had none. So they are not PNG or SVG pictures in those files.
+3. **Every texture already known was accounted for.** An inventory of every
+   DDS texture in the folders the plugin listed found the 16 home
+   backgrounds in `/system_ex/vsh_asset` (all full-screen 3840 by 2160), 14
+   `.gnf` files in Sony's GPU format (particles, indicators, VR marks), the
+   apps' controller and VR artwork, and the avatars, emoji and mats inside
+   the interface files. None was the capsule or the panel, so they had to be
+   somewhere the plugin wasn't looking.
+4. **Watching what loads was blind to them.** `ps5-assetwatch` (in
+   `tools/`) samples the files the home screen and the web renderer have
+   mapped, twice a second for two minutes. While the Control Center, menus
+   and tabs were opened it took 227 samples and saw no file appear or go
+   away: the home screen had only 14 files mapped the whole time, all fonts.
+   It reads its pictures and textures by loading them and closing the file,
+   so a file-level tracker cannot see textures at all.
+
+**The thought that solved it.** Every step so far had asked what the console
+does: what it draws, what it loads. The turn came from a small remark: the
+look was the **PlayStation 2 theme from Appearance and Sound**, one of the
+console's 30th anniversary themes. If that theme can be chosen in Settings,
+its artwork must already be on the console, as files, and probably named
+after it. So the question became what must exist, and the search went by
+name instead of by behaviour:
+
+- The console's file lists had `30thAnniv_Settings_Preview_PS2_CC.png` and
+  its siblings for each theme: the previews Settings shows of each theme's
+  Control Center. Previews of the Control Center per theme meant the real
+  artwork per theme existed somewhere.
+- A read-only look at the console's top-level folders showed that `/system`
+  has a `vsh_asset` folder of its own, beside the `/system_ex/vsh_asset` that
+  holds the backgrounds and the `/preinst/vsh_asset` with the boot movie.
+  Every earlier search had been aimed at the folders the plugin knew.
+- In it, among the welcome pictures, were twelve textures:
+  `control_center_<theme>_bottom.dds`, `control_center_<theme>_top.dds` and
+  `homeui_<theme>.dds` for `ps`, `ps2`, `ps3` and `ps4`. The home screen's
+  code names these paths.
+
+Decoding them confirmed it. They start with zstd's magic although named
+`.dds`; inside is BC7, 2560 by 820 for the PlayStation 2 bottom panel, 980
+by 620 for its corner piece and 2560 by 800 for the artwork, with the other
+themes' sizes a little different; most of each panel is clear, and the clear
+pixels still carry colour. And they are plain files, so a theme can replace
+them as it replaces backgrounds. **Solution:** `/system/vsh_asset` became a
+themable folder, overlaid like the others, and its pieces are listed live
+under **Appearance themes** with plain names.
+
+The lesson: when watching the system can't find something, ask what has to
+exist for what you see to be possible, and look for that by name. Here, the
+anniversary themes being selectable at all meant their artwork had to be on
+the console; that one thought replaced a search by behaviour that could not
+work.
 
 Then getting them right:
 
