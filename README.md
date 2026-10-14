@@ -31,6 +31,7 @@ etaHEN 2.5B (unified build) and on its own from PS5 Payload Manager.
 - [Running without etaHEN](#running-without-etahen)
 - [Your first theme](#your-first-theme)
 - [Changing game and app icons](#changing-game-and-app-icons)
+- [Appearance themes](#appearance-themes)
 - [A tour of the manager](#a-tour-of-the-manager)
 - [How it works, and why](#how-it-works-and-why)
 - [Theme format](#theme-format)
@@ -243,7 +244,162 @@ and **Apply to console**. **Restore stock** takes the whole theme off.
   interface's buttons, switches, menus and other parts are, part by part
   (0 makes a part square-cornered), then press **Use these shapes**. The
   home screen's tiles keep their shape.
+- **Appearance themes** (the Control Center's bottom panel and top-right
+  piece, and the home screen artwork of the PlayStation 1 to 4 themes): see
+  [Appearance themes](#appearance-themes).
 - Like game icons, all of these show on the home screen after rest mode.
+
+## Appearance themes
+
+The 30th anniversary Appearance themes (**Settings > Appearance and Sound**:
+PlayStation, PlayStation 2, 3 and 4) each have three pieces of artwork a
+theme can replace (version 1.56 and later):
+
+- **Bottom panel:** the panel behind the Control Center's row of icons (the
+  menu the PS button opens, on the home screen and in games).
+- **Top-right piece:** the corner piece behind the clock and the search and
+  settings icons.
+- **Home screen artwork:** the artwork that hangs from the top of the home
+  screen.
+
+A piece shows only while its own Appearance theme is selected on the
+console, and after rest mode. [How the Appearance textures are
+made](#how-the-appearance-textures-are-made) explains the technical side.
+
+### Step by step
+
+1. **Make the picture.** A PNG or WebP, with transparent parts wherever the
+   console's own artwork is clear (a JPEG covers the whole piece). Any size
+   works, since it is fitted to the piece, but these match the pieces exactly:
+
+   | Piece | Size | Notes |
+   |---|---|---|
+   | Bottom panel | 2560 by 820 | Sits behind the row of Control Center icons: keep it calm and not too light, so the icons stay readable. |
+   | Top-right piece | 980 by 620 | The clock and the search and settings icons are drawn over its top band: a light picture there hides them. |
+   | Home screen artwork | 2560 wide | Hangs from the top of the home screen. Sony's own is solid at the top and fades to clear by about two thirds of the way down: do the same, so the home screen's own background shows below it. |
+
+   The home screen artwork is the Appearance theme's own layer, not the
+   **Background** section's picture; the two are changed separately.
+2. **Open the manager** at `http://<console-ip>:8095` on a computer or
+   phone, make a theme (or press **Edit** on an existing one), and switch on
+   **Appearance themes**. Each piece is a row named after its theme, for
+   example **PlayStation 2: Control Center, bottom panel**, **PlayStation 2:
+   Control Center, top-right corner** and **PlayStation 2: Home screen
+   artwork**. Use the rows of the theme you have selected on the console.
+3. **Choose how the picture is placed**, on the row, before or after
+   attaching:
+   - **Fill** crops the picture to the piece and keeps the part against the
+     screen's edge it meets (the bottom for the panel, the top for the
+     artwork and the corner piece).
+   - **Fill with padding** does the same and leaves a clear margin at that
+     edge: set it in percent (0 to 40).
+   - **Fit** shows the whole picture with clear sides, **Stretch** squeezes
+     it to the piece.
+   - **Keep the clock and icons clear** (corner piece, on by default) leaves
+     the top band empty and puts the picture below it. Turn it off only for a
+     picture that is dark there.
+4. **Attach the picture:** press **Attach** on the row, or drop the file on
+   it. The page makes the texture, the plugin checks it, and the row shows
+   **Replaced** with a message that it was added and verified.
+5. **Adjust it.** Change the placement, the padding or the clock band and the
+   texture is made again at once from the original the theme keeps (see
+   [Changing a piece later](#changing-a-piece-later) for when it isn't,
+   and what to do). Judge the result on the console.
+6. **Save** the theme (the bar at the bottom) when you are happy, or
+   **Discard** to go back to the last save.
+7. **Apply to console**, then select the same Appearance theme in
+   **Settings > Appearance and Sound** if it isn't, and put the console in
+   **rest mode** and wake it. Press the PS button for the Control Center, and
+   look at the home screen for the artwork. The manager says this after every
+   change to a piece (attach, option change or reset), and the console shows
+   a notification when the theme is applied.
+8. **Go back.** **Reset** on a row removes your picture (and its kept
+   original) from the theme; apply again. **Restore stock** takes the whole
+   theme off the console.
+
+If it doesn't look right: a piece that stays as it was usually means a
+different Appearance theme is selected on the console or the console wasn't
+put through rest mode; a message that the theme was **applied partly** names
+the file that was refused and why, in the **Activity** list.
+
+### Changing a piece later
+
+A piece's options (placement, padding, the clock band) apply the moment
+they are changed: the plugin keeps the original
+picture in the theme (`sources/`, not applied) and the page makes the texture
+again from it, so nothing is attached twice. A picture attached before that
+was added has no original kept, so the first change takes the picture back out
+of the texture itself (the page reads the texture it made, with its see-through
+parts), keeps it as the original and makes the texture again from it. Nothing
+is attached again; what the earlier placement had cropped away, or left clear,
+is not in that picture, so attach the original once more to get it back. Only
+textures the page itself made can be read back this way.
+
+**If an option doesn't take effect:** when a changed option does not make the
+texture again by itself, or the look does not change after you apply the
+theme again, change the option and then **attach the picture again** (Replace
+on that piece). Attaching always makes the texture fresh with the options as
+they are at that moment, so it works whenever the automatic step did not.
+Then **Apply** the theme again and put the console in rest mode. The options
+(placement, padding, the clock band) are remembered by the browser you used,
+so in another browser they start at their defaults: set them first, then
+attach.
+
+### What it needs
+
+- **Console:** a jailbroken PS5 on firmware 13.60 or below, with this plugin
+  at **version 1.56 or later** (earlier versions don't know the folder).
+  Tested on 13.42 with etaHEN 2.5B and with PS5 Payload Manager (the plugin
+  or the standalone `ps5-theme.elf`); the textures' formats on other firmware
+  have not been checked.
+- **The anniversary Appearance themes must be on the console** (their
+  textures in `/system/vsh_asset`; see [below](#how-it-depends-on-the-anniversary-assets)), and the one whose pieces you
+  replaced must be selected in **Settings > Appearance and Sound**. Pieces of
+  another theme are not drawn.
+- **Apply the theme**, then put the console in **rest mode** and wake it. The
+  interface reads these files as it starts.
+- **A picture:** PNG or WebP for see-through parts (a JPEG has none, so it
+  covers the whole piece). Any size: it is fitted to the piece. A browser with
+  canvas and `BigInt` (current Chrome, Edge, Firefox or Safari) makes the
+  texture, since the console does not.
+- **The theme's firmware** must match the console (or be set to **Any
+  firmware**), as for every theme.
+- **For the corner piece:** a picture that is light at the top hides the
+  clock; leave **Keep the clock and icons clear** on, or use a dark one.
+- **Disk space:** the textures are stored without compression in the theme
+  (BC7 is one byte per pixel: about 3 MB for the bottom panel, under 1 MB for
+  the corner piece). With **Keep original pictures** on, the originals take
+  their size too, once however many files they were attached to.
+
+### How it depends on the anniversary assets
+
+Nothing here is added to the console: every piece replaces a texture that
+Sony's own 30th anniversary Appearance themes already ship in
+`/system/vsh_asset`, and the feature works only as far as those files do.
+
+- **The files must be on the console.** The plugin lists the folder live from
+  the console, so **Appearance themes** shows exactly the pieces that exist
+  there. A console without the anniversary themes' textures shows none, and
+  the plugin has nothing to replace. It carries no copy of Sony's textures.
+- **Each piece is modelled on the console's own file.** The DDS header, the
+  size, the number of mip levels and the zstd frame header of the file being
+  replaced are read from it and copied, so a texture is accepted only if it
+  matches that file byte for byte in all but its picture data. If a firmware
+  changes a piece's size or format, the page follows the new file; a format it
+  cannot write (anything but BC7) is refused with a reason.
+- **The checked copy is the console's.** The first apply that touches the
+  folder keeps a copy of it under `/data/ps5-theme/stock/<firmware>/`, checked
+  against the system, and every apply builds the overlay from that copy with
+  only your files replaced. The copy is per firmware, so an update to the
+  console makes a fresh one.
+- **A piece shows only with its own Appearance theme.** The pieces exist per
+  theme (`ps`, `ps2`, `ps3`, `ps4`) and the home screen draws the ones of the
+  theme selected in **Settings > Appearance and Sound**. Replacing the PS2
+  pieces changes nothing while another theme is selected.
+- **Sony can change them.** The names, sizes and formats above are those of
+  13.42, where they were tested. The plugin checks each file against the
+  console's own at every apply instead of assuming them, so a change on
+  another firmware shows up as a refused file, not a broken screen.
 
 ## A tour of the manager
 
@@ -966,7 +1122,10 @@ bit allocation, Huffman coding) and a lot of CPU. It runs in a Web Worker so
 the page stays responsive, and it yields with `MessageChannel` instead of
 timers, which browsers throttle.
 
-### Appearance themes
+### How the Appearance textures are made
+
+How to change them is in [Appearance themes](#appearance-themes); this is
+how it works.
 
 The 30th anniversary Appearance themes (**Settings > Appearance and Sound**:
 PlayStation, PlayStation 2, 3 and 4) draw their artwork from DDS textures in
@@ -1018,27 +1177,6 @@ margin at that edge, in percent), **Fit** (the whole picture, clear sides) and
 panel. Cropped around its centre it lost the lower clouds in the middle and
 only the tall ones at the corners showed, and the clouds met the screen's
 edge flat; placing it against the bottom edge, with padding, fixed both.
-
-**Changing the options later.** A picture's options (placement, padding, the
-clock band) apply the moment they are changed: the plugin keeps the original
-picture in the theme (`sources/`, not applied) and the page makes the texture
-again from it, so nothing is attached twice. A picture attached before that
-was added has no original kept, so the first change takes the picture back out
-of the texture itself (the page reads the texture it made, with its see-through
-parts), keeps it as the original and makes the texture again from it. Nothing
-is attached again; what the earlier placement had cropped away, or left clear,
-is not in that picture, so attach the original once more to get it back. Only
-textures the page itself made can be read back this way.
-
-**If an option doesn't take effect.** When a changed option does not make the
-texture again by itself, or the look does not change after you apply the
-theme again, change the option and then **attach the picture again** (Replace
-on that piece). Attaching always makes the texture fresh with the options as
-they are at that moment, so it works whenever the automatic step did not.
-Then **Apply** the theme again and put the console in rest mode. The options
-(placement, padding, the clock band) are remembered by the browser you used,
-so in another browser they start at their defaults: set them first, then
-attach.
 
 **The clock.** The corner piece is drawn over the clock and the search and
 settings icons, which sit in its top band (the PlayStation 2 glass bar behind
@@ -1100,118 +1238,6 @@ What each piece needed, as found on the console:
   cloud there made the clock disappear, so the top 26% can be kept clear.
 - **Home screen artwork:** it hangs from the top, so placement and padding
   are measured from the top edge.
-
-##### How this depends on the anniversary assets
-
-Nothing here is added to the console: every piece replaces a texture that
-Sony's own 30th anniversary Appearance themes already ship in
-`/system/vsh_asset`, and the feature works only as far as those files do.
-
-- **The files must be on the console.** The plugin lists the folder live from
-  the console, so **Appearance themes** shows exactly the pieces that exist
-  there. A console without the anniversary themes' textures shows none, and
-  the plugin has nothing to replace. It carries no copy of Sony's textures.
-- **Each piece is modelled on the console's own file.** The DDS header, the
-  size, the number of mip levels and the zstd frame header of the file being
-  replaced are read from it and copied, so a texture is accepted only if it
-  matches that file byte for byte in all but its picture data. If a firmware
-  changes a piece's size or format, the page follows the new file; a format it
-  cannot write (anything but BC7) is refused with a reason.
-- **The checked copy is the console's.** The first apply that touches the
-  folder keeps a copy of it under `/data/ps5-theme/stock/<firmware>/`, checked
-  against the system, and every apply builds the overlay from that copy with
-  only your files replaced. The copy is per firmware, so an update to the
-  console makes a fresh one.
-- **A piece shows only with its own Appearance theme.** The pieces exist per
-  theme (`ps`, `ps2`, `ps3`, `ps4`) and the home screen draws the ones of the
-  theme selected in **Settings > Appearance and Sound**. Replacing the PS2
-  pieces changes nothing while another theme is selected.
-- **Sony can change them.** The names, sizes and formats above are those of
-  13.42, where they were tested. The plugin checks each file against the
-  console's own at every apply instead of assuming them, so a change on
-  another firmware shows up as a refused file, not a broken screen.
-
-##### Requirements
-
-- **Console:** a jailbroken PS5 on firmware 13.60 or below, with this plugin
-  at **version 1.56 or later** (earlier versions don't know the folder).
-  Tested on 13.42 with etaHEN 2.5B and with PS5 Payload Manager (the plugin
-  or the standalone `ps5-theme.elf`); the textures' formats on other firmware
-  have not been checked.
-- **The anniversary Appearance themes must be on the console** (their
-  textures in `/system/vsh_asset`; see above), and the one whose pieces you
-  replaced must be selected in **Settings > Appearance and Sound**. Pieces of
-  another theme are not drawn.
-- **Apply the theme**, then put the console in **rest mode** and wake it. The
-  interface reads these files as it starts.
-- **A picture:** PNG or WebP for see-through parts (a JPEG has none, so it
-  covers the whole piece). Any size: it is fitted to the piece. A browser with
-  canvas and `BigInt` (current Chrome, Edge, Firefox or Safari) makes the
-  texture, since the console does not.
-- **The theme's firmware** must match the console (or be set to **Any
-  firmware**), as for every theme.
-- **For the corner piece:** a picture that is light at the top hides the
-  clock; leave **Keep the clock and icons clear** on, or use a dark one.
-- **Disk space:** the textures are stored without compression in the theme
-  (BC7 is one byte per pixel: about 3 MB for the bottom panel, under 1 MB for
-  the corner piece). With **Keep original pictures** on, the originals take
-  their size too, once however many files they were attached to.
-
-#### Guide: changing the bottom panel, the top-right piece and the home screen artwork
-
-1. **Make the picture.** A PNG or WebP, with transparent parts wherever the
-   console's own artwork is clear (a JPEG covers the whole piece). Any size
-   works, since it is fitted to the piece, but these match the pieces exactly:
-
-   | Piece | Size | Notes |
-   |---|---|---|
-   | Bottom panel | 2560 by 820 | Sits behind the row of Control Center icons: keep it calm and not too light, so the icons stay readable. |
-   | Top-right piece | 980 by 620 | The clock and the search and settings icons are drawn over its top band: a light picture there hides them. |
-   | Home screen artwork | 2560 wide | Hangs from the top of the home screen. Sony's own is solid at the top and fades to clear by about two thirds of the way down: do the same, so the home screen's own background shows below it. |
-
-   The home screen artwork is the Appearance theme's own layer, not the
-   **Background** section's picture; the two are changed separately.
-2. **Open the manager** at `http://<console-ip>:8095` on a computer or
-   phone, make a theme (or press **Edit** on an existing one), and switch on
-   **Appearance themes**. Each piece is a row named after its theme, for
-   example **PlayStation 2: Control Center, bottom panel**, **PlayStation 2:
-   Control Center, top-right corner** and **PlayStation 2: Home screen
-   artwork**. Use the rows of the theme you have selected on the console.
-3. **Choose how the picture is placed**, on the row, before or after
-   attaching:
-   - **Fill** crops the picture to the piece and keeps the part against the
-     screen's edge it meets (the bottom for the panel, the top for the
-     artwork and the corner piece).
-   - **Fill with padding** does the same and leaves a clear margin at that
-     edge: set it in percent (0 to 40).
-   - **Fit** shows the whole picture with clear sides, **Stretch** squeezes
-     it to the piece.
-   - **Keep the clock and icons clear** (corner piece, on by default) leaves
-     the top band empty and puts the picture below it. Turn it off only for a
-     picture that is dark there.
-4. **Attach the picture:** press **Attach** on the row, or drop the file on
-   it. The page makes the texture, the plugin checks it, and the row shows
-   **Replaced** with a message that it was added and verified.
-5. **Adjust it.** Change the placement, the padding or the clock band and the
-   texture is made again at once from the original the theme keeps (see
-   [Changing the options later](#appearance-themes) above for when it
-   isn't, and what to do). Judge the result on the console.
-6. **Save** the theme (the bar at the bottom) when you are happy, or
-   **Discard** to go back to the last save.
-7. **Apply to console**, then select the same Appearance theme in
-   **Settings > Appearance and Sound** if it isn't, and put the console in
-   **rest mode** and wake it. Press the PS button for the Control Center, and
-   look at the home screen for the artwork. The manager says this after every
-   change to a piece (attach, option change or reset), and the console shows
-   a notification when the theme is applied.
-8. **Go back.** **Reset** on a row removes your picture (and its kept
-   original) from the theme; apply again. **Restore stock** takes the whole
-   theme off the console.
-
-If it doesn't look right: a piece that stays as it was usually means a
-different Appearance theme is selected on the console or the console wasn't
-put through rest mode; a message that the theme was **applied partly** names
-the file that was refused and why, in the **Activity** list.
 
 ### Fonts
 
