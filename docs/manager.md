@@ -333,8 +333,9 @@ Imported themes start out saved.
 
 ![A theme being applied](screenshots/applying.png)
 
-While a theme is applied, the library banner and the message in the corner
-show what the console is doing and how far it has got:
+While a theme is applied, the library's banner shows what the console is
+doing and how far it has got (on the other pages, a message in the corner
+does):
 
 1. **Keeping a copy of the system's files (first time only): 88 of 169 MB.**
    This happens only on the first apply on a firmware. It's the slow part,

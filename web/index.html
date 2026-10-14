@@ -367,6 +367,7 @@ input[type=number]:focus-visible { box-shadow: 0 0 0 2px #fff; }
 .appear { animation: in .22s var(--ease); }
 details > summary { cursor: pointer; }
 details[open] > :not(summary) { animation: in .2s var(--ease); }
+.apply-shown .toast[data-apply] { display: none; }
 .toast .row, .banner .row { display: flex; gap: 12px; align-items: baseline; }
 .toast .row .label, .banner .row .label { flex: 1; min-width: 0; }
 .toast .pct, .banner .pct { font-variant-numeric: tabular-nums; color: var(--muted); font-size: .8125rem; }
@@ -801,6 +802,7 @@ function parseRoute() {
 
 async function render() {
   parseRoute();
+  if (state.route !== "library") document.body.classList.remove("apply-shown");
   if (state.route === "library") renderLibrary();
   else if (state.route === "edit") await renderEditor();
   else await renderActivity();
@@ -817,6 +819,8 @@ function cardPreview(t) {
 
 function renderLibrary() {
   const s = state.status;
+  /* An apply under way shows in the banner here; its message (shown on the other pages) would cover the banner. */
+  document.body.classList.toggle("apply-shown", !!s.applying);
   const cards = s.themes.slice().sort((a, b) => a.name.localeCompare(b.name)).map(t => {
     const on = s.applied === t.id, busy = s.applying === t.id;
     const meta = [`Firmware ${t.fw || "?"}`, plural(t.files, "file")];
@@ -909,6 +913,7 @@ async function applyTheme(id) {
   try { await api("POST", "/api/apply", { id }); } catch (e) { return toast(e.message, "err"); }
   const label = id === "none" ? "Restoring stock" : `Applying ${(themeById(id) || { name: id }).name}`;
   const p = progressToast(`${label}…`);
+  p.el.dataset.apply = "1";   /* on the library, its banner shows the same progress: the message steps aside there */
   const want = id === "none" ? "" : id;
   const before = state.status.result;
   let seen = false;
