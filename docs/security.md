@@ -118,6 +118,18 @@ Also fixed in 1.59 after a review of the whole plugin and manager page:
   while it ran. It now reads from the theme it started with.
 - **Refusals weren't in the log.** Checks the plugin refused (and other
   conflicts) now show in **Activity** as "web: refused (code): reason".
+- **Discard could bring back an upload's temporary file.** The copy of a theme
+  that Discard goes back to is made at its first change, which is an upload
+  still in its temporary `.part` file; the copy took that file too, and after
+  a Discard every apply skipped it ("applied partly", seen on the console).
+  Copies (Discard's and Duplicate's) leave temporary files out, an apply
+  ignores them, and removes one untouched for an hour (an upload that was
+  cut off). Host test: a Discard, a duplicate and two applies with such
+  files in the theme.
+- **"Applied partly" counted the wrong things, and was cut short.** It said
+  "107 of 27 folders" (overlays against folders), and with every hint
+  (pictures, font, artwork, music) the message stopped mid-sentence. It now
+  says what was skipped in plain words, with room for every hint.
 
 ## What isn't covered
 

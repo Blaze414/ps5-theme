@@ -367,9 +367,9 @@ input[type=number]:focus-visible { box-shadow: 0 0 0 2px #fff; }
 .appear { animation: in .22s var(--ease); }
 details > summary { cursor: pointer; }
 details[open] > :not(summary) { animation: in .2s var(--ease); }
-.toast .row { display: flex; gap: 12px; align-items: baseline; }
-.toast .row .label { flex: 1; min-width: 0; }
-.toast .pct { font-variant-numeric: tabular-nums; color: var(--muted); font-size: .8125rem; }
+.toast .row, .banner .row { display: flex; gap: 12px; align-items: baseline; }
+.toast .row .label, .banner .row .label { flex: 1; min-width: 0; }
+.toast .pct, .banner .pct { font-variant-numeric: tabular-nums; color: var(--muted); font-size: .8125rem; }
 
 /* Loading markers: where something being read from the console will show, with how far it has got */
 .loading { margin: 8px 0 12px; padding: 14px 16px; border-radius: var(--radius); background: var(--surface); font-size: .9375rem; animation: in .2s var(--ease); }
@@ -776,8 +776,8 @@ function resultBanner() {
   const s = state.status;
   if (s.applying) {
     const pr = s.progress;
-    return `<div class="banner" role="status">Applying ${esc((themeById(s.applying) || { name: s.applying }).name)}` +
-      `${pr ? `: ${esc(pr.text)}… ${pr.percent}%` : "…"}` +
+    return `<div class="banner" role="status"><div class="row"><span class="label">Applying ${esc((themeById(s.applying) || { name: s.applying }).name)}` +
+      `${pr ? `: ${esc(pr.text)}…` : "…"}</span>${pr ? `<span class="pct">${pr.percent}%</span>` : ""}</div>` +
       `<div class="progress" style="margin-top:10px"><i style="width:${pr ? pr.percent : 0}%"></i></div>` +
       `<span class="muted" style="font-size:.875rem">The home screen can show the stock look for a moment while it switches.</span></div>`;
   }

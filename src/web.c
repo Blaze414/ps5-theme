@@ -424,7 +424,7 @@ static void drop_snapshot(const char *id);
 
 static void
 api_status(request_t *req) {
-  char fw[16], active[128], applied[128], applying[128], ip[32], result[512];
+  char fw[16], active[128], applied[128], applying[128], ip[32], result[RESULT_MAX];
   strbuf_t sb = {0};
 
   fw_string(fw, sizeof(fw));

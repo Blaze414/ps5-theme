@@ -1817,6 +1817,58 @@ def t_save_and_discard():
     assert not os.path.exists(f"{BASE}/snapshots/scratch")
 
 
+
+def t_cut_off_uploads_are_not_theme_files():
+    """An upload cut off part way leaves its .part file in the theme. It is never copied into the snapshot Discard
+    goes back to (on the console, a Discard brought one back and every apply after it was "applied partly"), nor
+    into a duplicate; an apply neither uses nor counts one, and removes one untouched for an hour."""
+    def parts(root):
+        return sorted(f for _, _, fs in os.walk(root) for f in fs if f.endswith(".part"))
+
+    was = status()["applied"]
+    assert call("POST", "/api/themes", {"id": "cutoff", "name": "Cut off"})[0] == 200
+    assert put_file("cutoff", f"{HOME}/bg.png", png(480, 270, (200, 120, 20)))[0] == 200
+    theme, snap = f"{BASE}/themes/cutoff", f"{BASE}/snapshots/cutoff"
+    assert call("POST", "/api/theme/save", {"id": "cutoff"})[0] == 200
+    fresh, stale = f"{theme}/files{HOME}/bg.png.7.part", f"{theme}/files{HOME}/icon@2x.png.3.part"
+    write(fresh, b"an upload being received")
+    write(stale, b"an upload cut off long ago")
+    os.utime(stale, (time.time() - 7200, time.time() - 7200))
+
+    # The first change keeps the snapshot while another upload is being received: without it.
+    assert put_file("cutoff", f"{HOME}/bg.png", png(480, 270, (20, 160, 60)))[0] == 200
+    assert os.path.isdir(snap) and parts(snap) == [], parts(snap)
+    assert call("POST", "/api/themes/duplicate", {"id": "cutoff", "new_id": "cutoff2", "name": "Cut off 2"})[0] == 200
+    assert parts(f"{BASE}/themes/cutoff2") == []
+    assert call("DELETE", "/api/themes", {"id": "cutoff2"})[0] == 200
+    assert call("POST", "/api/theme/discard", {"id": "cutoff"})[0] == 200
+    assert parts(theme) == [], parts(theme)
+    assert [f["path"] for f in call("GET", "/api/theme/files", {"id": "cutoff"})[1]["files"]] == [f"{HOME}/bg.png"]
+
+    # An apply leaves them out, and removes the old one.
+    write(fresh, b"an upload being received")
+    write(stale, b"an upload cut off long ago")
+    os.utime(stale, (time.time() - 7200, time.time() - 7200))
+    assert call("POST", "/api/apply", {"id": "cutoff"})[0] == 200
+    s = wait_applied("cutoff")
+    assert "1 files verified" in s["result"], s["result"]
+    log = call("GET", "/api/log")[1].decode()
+    assert "partly" not in s["result"] and "skipped" not in s["result"], \
+        (s["result"], [line for line in log.splitlines() if "skipping" in line or "ignoring" in line][-4:])
+    assert not os.path.exists(stale) and os.path.exists(fresh)
+    assert "an upload that was cut off" in log
+
+    # "Applied partly" says what was skipped, in plain words: no count of folders against overlays.
+    write(f"{theme}/files{HOME}/not-on-this-firmware.png", png(64, 64, (1, 2, 3)))
+    assert call("POST", "/api/apply", {"id": "cutoff"})[0] == 200
+    s = wait_result("applied partly")
+    assert "1 skipped." in s["result"] and not re.search(r"\d+ of \d+ folders", s["result"]), s["result"]
+
+    assert call("POST", "/api/apply", {"id": was or "none"})[0] == 200
+    wait_applied(was)
+    assert call("DELETE", "/api/themes", {"id": "cutoff"})[0] == 200
+    assert not os.path.exists(theme) and not os.path.exists(snap)
+
 def t_home_background_textures():
     stock_path = f"{VSH}/bg_hub_default.dds.zst"
     stock_dds = subprocess.run(["zstd", "-d", "-c", "-q", stock_path], capture_output=True, check=True).stdout
@@ -3035,7 +3087,7 @@ TESTS = [t_startup, t_ui_and_icon_served, t_mutations_need_token, t_create_theme
          t_stock_mirror_and_linked_staging, t_stage_folders_reused_without_links,
          t_firmware_mismatch_is_refused, t_delete_rules, t_concurrent_requests_during_apply,
          t_restore_stock_cleans_up, t_overlays_reach_system_views, t_crash_loop_takes_theme_down, t_busy_overlay_is_never_forced, t_recovers_after_hard_kill, t_update_from_payload_manager, t_update_from_plain_elf, t_update_hands_over, t_update_at_boot, t_web_comes_back_after_rest_mode, t_takeover_when_web_is_down, t_stop_tool_keeps_the_theme, t_failed_write_closes_its_file, t_survives_malformed_and_abusive_requests,
-         t_slow_clients_do_not_block_others, t_log_rotates, t_media_policy, t_music, t_settings_and_duplicate, t_preview_pictures, t_save_and_discard,
+         t_slow_clients_do_not_block_others, t_log_rotates, t_media_policy, t_music, t_settings_and_duplicate, t_preview_pictures, t_save_and_discard, t_cut_off_uploads_are_not_theme_files,
          t_home_background_textures, t_interface_pictures, t_title_pictures, t_fonts, t_bc7_keeps_transparency, t_page_writes_the_consoles_zstd_frames, t_page_bleeds_colour_into_clear_pixels, t_page_places_textures_against_their_edge, t_texture_sources, t_appearance_textures, t_shellui_exit_releases_sandbox, t_shellui_exits_during_apply, t_title_where, t_watch_files, t_home_music_at9, t_long_mount_paths_use_parent_folder, t_system_is_byte_identical_afterwards, t_crash_is_reported_and_recovered,
          t_privilege_failure_exits_cleanly]
 

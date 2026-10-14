@@ -58,7 +58,7 @@ numbers are the interface icons' numbered test, applied at the same time.*
    Control Center, top-right corner** and **PlayStation 2: Home screen
    artwork**. Use the rows of the theme you have selected on the console.
 
-   ![The Appearance themes section of the manager: each piece with its Placement and, for the corner pieces, Keep the clock and icons clear](screenshots/manager-appearance.png)
+   ![The Appearance themes section of the manager: each piece with its Placement and, for the corner pieces, Keep the clock and icons clear; the Colours at the end](screenshots/manager-appearance.png)
 
 3. **Choose how the picture is placed**, on the row, before or after
    attaching:

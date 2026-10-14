@@ -364,6 +364,10 @@ copy_tree_into(const char *src, const char *dst, int links) {
 
   while(!ret && (e = readdir(d))) {
     if(!strcmp(e->d_name, ".") || !strcmp(e->d_name, "..")) continue;
+    /* An upload being received (or one cut off) is never part of a theme: a copy made meanwhile, such as the copy
+       Discard goes back to, would otherwise bring it back as a file of the theme. */
+    size_t len = strlen(e->d_name);
+    if(len > 5 && !strcmp(e->d_name + len - 5, ".part")) continue;
     char s[PATH_MAX], t[PATH_MAX];
     if(snprintf(s, sizeof(s), "%s/%s", src, e->d_name) >= (int)sizeof(s) ||
        snprintf(t, sizeof(t), "%s/%s", dst, e->d_name) >= (int)sizeof(t)) {

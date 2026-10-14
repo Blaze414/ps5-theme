@@ -7,7 +7,7 @@ tests/host/run.sh
 ```
 
 Builds the real plugin sources for Linux with AddressSanitizer and UBSan and
-runs 51 end-to-end tests against a fake console tree in a privileged
+runs 54 end-to-end tests against a fake console tree in a privileged
 container. They cover:
 
 - upload checks and the media policy, including files crafted to hang or

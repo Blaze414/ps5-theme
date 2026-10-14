@@ -89,7 +89,7 @@ static char applied[128];        /* theme currently mounted, "" if stock */
 static char applying[128];       /* theme being applied, "" when idle */
 static int  progress_pct = -1;   /* how far the apply is, -1 when idle */
 static char progress_text[128];  /* what it is doing, in plain words */
-static char result[512];         /* outcome of the last apply, for the UI */
+static char result[RESULT_MAX];  /* outcome of the last apply, for the UI */
 static atomic_int reapply_requested;
 
 
@@ -532,6 +532,13 @@ plan_files(const char *theme_dir, const char *stock_dir, const char *stock_real,
 
     if(S_ISDIR(st.st_mode)) {
       ret = plan_files(theme_dir, stock_dir, stock_real, r, p);
+      continue;
+    }
+    /* An upload being received: not a file of the theme. One untouched for an hour was cut off (a live upload
+       writes at least every 15 seconds, or gives up), and is removed. */
+    size_t len = strlen(e->d_name);
+    if(S_ISREG(st.st_mode) && len > 5 && !strcmp(e->d_name + len - 5, ".part")) {
+      if(time(NULL) - st.st_mtime > 3600 && !fs_unlink(theme)) log_msg("theme: removed %s, an upload that was cut off", theme);
       continue;
     }
     if(!S_ISREG(st.st_mode)) {
@@ -1974,8 +1981,10 @@ apply_theme(const char *name) {
     snprintf(hints + strlen(hints), sizeof(hints) - strlen(hints), " %s", MUSIC_HINT);
   }
   if(failed || skipped) {
-    set_result("%s applied partly: %d files verified, %d skipped, %d of %d folders.%s%s See Activity.%s",
-               title, verified, skipped, mounted, count, music, games, hints);
+    char folders[96] = "";
+    if(failed) snprintf(folders, sizeof(folders), " %d of its %d folders could not be used.", failed, count);
+    set_result("%s applied partly: %d files verified, %d skipped.%s%s%s See Activity.%s",
+               title, verified, skipped, folders, music, games, hints);
   } else {
     set_result("%s applied: %d files verified on the console.%s%s%s", title, verified, music, games, hints);
   }

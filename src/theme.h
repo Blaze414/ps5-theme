@@ -205,6 +205,7 @@ int  write_active(const char *name);
 int  applied_theme(char *out, size_t size);
 int  applying_theme(char *out, size_t size);
 int  apply_progress(char *text, size_t size);   /* percent, or -1 when idle */
+#define RESULT_MAX 1536   /* an apply's outcome with all its hints (pictures, font, artwork, music) */
 void last_result(char *out, size_t size);
 void themes_lock(void);
 void themes_unlock(void);
