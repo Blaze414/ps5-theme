@@ -2142,6 +2142,7 @@ After any failure the console was restarted before the next test.
 | 1.56 | An older theme with a page-made background, applied twice with 1.56 builds | "Applied partly" both times: first from the frame check refusing the old form, then from a remembered refusal handed back by the next build. Remembered results are now tagged with a revision of the checking rules. With that build, reported working |
 | 1.56 | Home screen artwork (`homeui`): placement and padding | **Works** |
 | 1.56 | Fit and placement changed later, for pictures attached before and after originals were kept; the fit setting for every picture; the switch to not keep originals | Reported working, on the last two builds |
+| 1.57 | The rest-mode reminders after attaching, changing or resetting an Appearance piece and after applying; the updated Placement tooltip and note | **Works** |
 
 ## Building from source
 
