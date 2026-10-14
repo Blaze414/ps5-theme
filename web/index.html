@@ -382,6 +382,9 @@ const state = {
   assetsError: "",
   protectedCount: 0,
   files: new Set(),      /* paths replaced in the theme being edited */
+  sources: new Set(),    /* of those, the ones whose original picture is kept in the theme (see keepSource) */
+  keepOriginals: true,   /* the theme keeps originals of what is attached (off: to save space) */
+  originalsBytes: 0,     /* what the kept originals take on the console */
   fit: localGet("fit") || "cover",
   confirming: "",        /* aspect waiting for "turn off" confirmation */
   pages: {},             /* per-aspect page size */
@@ -750,6 +753,126 @@ async function loadThemeFiles(id) {
     const r = await api("GET", "/api/theme/files", { id });
     state.files = new Set(r.files.map(f => f.path));
   } catch (e) { state.files = new Set(); }
+  /* Which files have the picture they were made from kept in the theme. */
+  await loadOriginals(id);
+}
+
+/* Which files have their original kept, whether the theme keeps them, and the space they take. */
+async function loadOriginals(id = state.editId) {
+  state.sources = new Set();
+  state.keepOriginals = true;
+  state.originalsBytes = 0;
+  try {
+    const r = await api("GET", "/api/theme/sources", { id });
+    state.sources = new Set(r.have);
+    state.keepOriginals = r.keep !== false;
+    state.originalsBytes = r.bytes || 0;
+  } catch (e) { /* older plugin: none */ }
+  const box = $("#originals-field");
+  if (box && state.editId === id) box.innerHTML = originalsField();
+}
+
+/* The switch for keeping originals, with what is kept. */
+function originalsField() {
+  const n = state.sources.size;
+  const kept = n ? `${plural(n, "original")} kept, ${fmtSize(state.originalsBytes)}. <button class="btn sm ghost" data-act="remove-originals" type="button">Remove them</button>` : "";
+  return `<label class="note" title="With the original picture kept, the fit or placement of what you attached can be changed later without attaching it again. It takes space on the console: about the size of the picture, once for all sizes.">
+      <input type="checkbox" id="keep-originals"${state.keepOriginals ? " checked" : ""}> Keep original pictures</label>
+    <span class="note">${state.keepOriginals ? "" : "New pictures are not kept: options apply when you attach one. "}${kept}</span>`;
+}
+
+/* The picture a see-through texture was made from is kept in the theme, so changing its placement makes the
+   texture again from it, without the picture being attached again. */
+async function keepSource(path, file, sameAs = null) {
+  if (!state.keepOriginals) return;
+  if (sameAs) {
+    /* the same picture as one just kept for another size: the console links it instead of storing it twice */
+    try { await api("PUT", "/api/theme/source", { id: state.editId, path, same_as: sameAs }); state.sources.add(path); return; }
+    catch (e) { /* an older plugin, or no link possible: it is sent */ }
+  }
+  try {
+    await uploadVerified("/api/theme/source", { id: state.editId, path }, file);
+    state.sources.add(path);
+  } catch (e) { state.sources.delete(path); }
+}
+/* The pictures and textures made from the user's picture: its original is kept, not only the result. */
+const keepsOriginal = a => a.kind === "texture" || isImage(a);
+
+/* The kept original of a file, as a File; null when there is none. */
+async function sourceFile(path) {
+  const res = await fetch(`/api/theme/source?${q({ id: state.editId, path })}`);
+  if (!res.ok) { state.sources.delete(path); return null; }
+  const bytes = new Uint8Array(await res.arrayBuffer());
+  const type = sniffImage(bytes) || "image/png";
+  return new File([bytes], `picture.${type.split("/")[1]}`, { type });
+}
+async function remakeFromSource(path) {
+  const asset = (state.assets || []).find(a => a.path === path);
+  if (!asset || !state.sources.has(path)) return false;
+  const file = await sourceFile(path);
+  if (!file) return false;
+  await attachTo([asset], file, appearanceName(path), null, true);
+  return true;
+}
+
+/* "How images are fitted" changed: every picture and texture made from a kept original is made again with it. A
+   change made while this runs is picked up by one more round. The Appearance pieces have their own placement. */
+let refitting = false, refitAgain = false;
+async function refitPictures() {
+  if (refitting) { refitAgain = true; return; }
+  refitting = true;
+  const id = state.editId;
+  try {
+    do {
+      refitAgain = false;
+      const here = (state.assets || []).filter(a => keepsOriginal(a) && state.files.has(a.path) && !ALPHA_TEXTURE.test(a.path));
+      const targets = here.filter(a => state.sources.has(a.path));
+      const left = here.length - targets.length;
+      const leftNote = left ? ` ${plural(left, "picture")} ${left === 1 ? "has" : "have"} no original kept and ${left === 1 ? "stays" : "stay"} as ${left === 1 ? "it is" : "they are"}.` : "";
+      if (!targets.length) { if (left) toast(`The new fit applies to pictures attached from now on.${leftNote}`, "", 7000); break; }
+      const p = progressToast(`Fitting ${plural(targets.length, "picture")} again…`);
+      let ok = 0;
+      const errors = [];
+      for (let i = 0; i < targets.length && state.editId === id; i++) {
+        const a = targets[i];
+        attachProgress = f => p.set(`Fitting ${baseName(a.path)}… ${Math.round(f * 100)}%`, (i + f) / targets.length);
+        try {
+          const file = await sourceFile(a.path);
+          if (!file) throw new Error("its original is gone");
+          await uploadVerified("/api/theme/file", { id, path: a.path }, await fileForAsset(file, a));
+          textureCache.clear();
+          ok++;
+        } catch (e) { errors.push(`${baseName(a.path)}: ${e.message}`); }
+        p.set(`Fitting pictures again… ${i + 1}/${targets.length}`, (i + 1) / targets.length);
+      }
+      attachProgress = null;
+      stamp = Date.now();
+      /* the card's picture follows the background */
+      const bg = backgroundFile(targets.map(a => a.path));
+      if (bg && !errors.length && state.editId === id) {
+        try { const f = await sourceFile(bg); if (f) await previewFromFile(id, f, false); } catch (e) { /* the old preview stays */ }
+      }
+      p.done(errors.length ? `${ok} of ${targets.length} made again. ${errors.slice(0, 2).join("; ")}${leftNote}`
+        : `${plural(ok, "picture")} made again with the new fit, from their originals. Apply the theme to use ${ok === 1 ? "it" : "them"}.${leftNote}`,
+        errors.length ? "err" : "ok");
+      await refreshStatus();
+      if (state.editId === id) ASPECTS.forEach(renderAspect);
+    } while (refitAgain && state.editId === id);
+  } finally { refitting = false; attachProgress = null; }
+}
+
+/* A piece attached before the original picture was kept: the picture inside its texture becomes the original, so
+   its options work without attaching anything again. What the earlier placement cropped away is not in it. */
+async function recoverSource(path) {
+  const res = await fetch(`/api/theme/file?${q({ id: state.editId, path })}&v=${stamp}`);
+  if (!res.ok) return false;
+  let bytes = new Uint8Array(await res.arrayBuffer());
+  if (bytes[0] === 0x28) bytes = unzstdStored(bytes);
+  const canvas = await ddsCanvas(bytes, true);
+  const blob = await new Promise(done => canvas.toBlob(done, "image/png"));
+  if (!blob) return false;
+  await keepSource(path, new File([blob], "picture.png", { type: "image/png" }));
+  return state.sources.has(path);
 }
 
 /* Resolution variants of one asset share a key: size tokens such as @2x,
@@ -770,6 +893,17 @@ function groupAssets(list) {
 const isImage = a => a.kind === "image" || a.kind === "svg";
 
 /* The console's text fonts by what they draw, not by file name. */
+/* The 30th anniversary Appearance themes' artwork (Settings > Appearance and Sound): the Control Center's panels and
+   the home screen's artwork, one set per theme. They show only while that theme is selected on the console. */
+const APPEARANCE_RE = /^\/system\/vsh_asset\/(control_center|homeui)_(ps\d?)(?:_(top|bottom))?\.dds$/;
+const APPEARANCE_THEMES = { ps: "PlayStation", ps2: "PlayStation 2", ps3: "PlayStation 3", ps4: "PlayStation 4" };
+function appearanceName(path) {
+  const m = APPEARANCE_RE.exec(path);
+  if (!m) return baseName(path);
+  const part = m[1] === "homeui" ? "Home screen artwork" : m[3] === "top" ? "Control Center, top-right corner" : "Control Center, bottom panel";
+  return `${APPEARANCE_THEMES[m[2]] || m[2]}: ${part}`;
+}
+
 const FONT_FAMILIES = [
   [/^SSTArabic/i, "Arabic text"], [/^SSTThai/i, "Thai text"], [/^SSTVietnamese/i, "Vietnamese text"],
   [/^SSTTypewriter/i, "Typewriter-style text"], [/^SSTArib/i, "Japanese captions"],
@@ -795,6 +929,7 @@ function fontName(path) {
    ".../assets/packages/mini-profile/..." -> "Mini profile". */
 const AREA_SKIP = new Set(["src", "assets", "packages", "modules", "node_modules", "lib", "dist", "images", "img", "screens", "components", "res", "resources"]);
 function areaOf(path) {
+  if (path.startsWith("/system/vsh_asset/")) return /^welcome-hub/i.test(baseName(path)) ? "Welcome tab backgrounds" : "Appearance themes";
   if (path.includes("/vsh_asset/")) {
     const f = baseName(path);
     if (/^bg_hub_default/i.test(f)) return "Home: default background";
@@ -1822,9 +1957,12 @@ const ASPECTS = [
   { id: "video", title: "Video", mode: "rows",
     sub: "Video clips other than the background, in the same container (MP4 or WebM).",
     filter: a => a.kind === "video" && !BG_RE.test(a.path), accept: "video/*,.mp4,.webm,.m4v" },
+  { id: "appearance", title: "Appearance themes", mode: "rows",
+    sub: "The artwork of the PlayStation, PlayStation 2, 3 and 4 themes from Settings > Appearance and Sound: the Control Center's panels and the home screen's artwork.",
+    filter: a => APPEARANCE_RE.test(a.path), accept: "image/*" },
   { id: "textures", title: "Textures", mode: "rows",
     sub: "Other system textures (DDS). Any image is encoded to each texture's exact format and size.",
-    filter: a => a.kind === "texture" && !BG_RE.test(a.path) && !isTitlePicture(a.path), accept: "image/*" },
+    filter: a => a.kind === "texture" && !BG_RE.test(a.path) && !isTitlePicture(a.path) && !APPEARANCE_RE.test(a.path), accept: "image/*" },
   { id: "tiles", title: "Home screen tiles", mode: "systiles",
     sub: "The console's own tiles (PlayStation Store, Game Library and others): their icons, and the background shown while each is selected.",
     filter: a => a.kind === "image" && !!tileTitle(a.path), accept: "image/*" },
@@ -2169,6 +2307,7 @@ async function soundForAsset(file, assetPath) {
 
 /* ---- textures: DDS for ShellUI (.dds / .dds.zst) ---- */
 
+/* bc7:begin */
 const BC7_WEIGHTS = [0, 4, 9, 13, 17, 21, 26, 30, 34, 38, 43, 47, 51, 55, 60, 64];
 
 /* A 4x4 block's colour line: the two ends of its pixels' range along their
@@ -2245,6 +2384,87 @@ function bc7Block(px, out, o) {
 }
 
 /* Mode-6 decoder, used only to check the encoder's own output. */
+/* One 4x4 block with transparency as BC7 mode 6: endpoints in RGBA with a
+   p-bit each, 4-bit indices. The endpoints come from the block's principal
+   RGBA axis (the colour of clear pixels is already filled in, see
+   bleedClear), and alpha counts double when a pixel picks its palette entry,
+   so edges keep their softness. */
+function bc7BlockAlpha(px, out, o) {
+  const v = Float64Array.from(px);
+  const m = [0, 0, 0, 0];
+  for (let i = 0; i < 64; i += 4) for (let c = 0; c < 4; c++) m[c] += v[i + c] / 16;
+  const cov = new Float64Array(16);
+  for (let i = 0; i < 64; i += 4) {
+    const d = [v[i] - m[0], v[i + 1] - m[1], v[i + 2] - m[2], v[i + 3] - m[3]];
+    for (let a = 0; a < 4; a++) for (let b = 0; b < 4; b++) cov[a * 4 + b] += d[a] * d[b];
+  }
+  let ax = [0.5, 0.5, 0.5, 0.5];
+  for (let k = 0; k < 8; k++) {
+    const n = [0, 0, 0, 0];
+    for (let a = 0; a < 4; a++) for (let b = 0; b < 4; b++) n[a] += cov[a * 4 + b] * ax[b];
+    const mx = Math.max(Math.abs(n[0]), Math.abs(n[1]), Math.abs(n[2]), Math.abs(n[3]));
+    if (mx < 1e-9) break;
+    ax = n.map(x => x / mx);
+  }
+  const len2 = ax[0] * ax[0] + ax[1] * ax[1] + ax[2] * ax[2] + ax[3] * ax[3];
+  let tmin = 0, tmax = 0;
+  if (len2 > 1e-12) {
+    tmin = Infinity; tmax = -Infinity;
+    for (let i = 0; i < 64; i += 4) {
+      let t = 0;
+      for (let c = 0; c < 4; c++) t += (v[i + c] - m[c]) * ax[c];
+      t /= len2;
+      if (t < tmin) tmin = t;
+      if (t > tmax) tmax = t;
+    }
+  }
+  const end = t => [0, 1, 2, 3].map(c => Math.max(0, Math.min(255, m[c] + t * ax[c])));
+  /* An endpoint is 7 bits plus the block's p-bit for it as the lowest bit: try both. */
+  const quant = e => {
+    let best = null;
+    for (let p = 0; p < 2; p++) {
+      const q = e.map(x => Math.max(0, Math.min(127, Math.round((x - p) / 2))));
+      /* A clear or solid alpha must stay exact: its error weighs far more than a colour's. */
+      const err = e.reduce((acc, x, c) => acc + (c === 3 ? 100 : 1) * ((q[c] << 1 | p) - x) ** 2, 0);
+      if (!best || err < best.err) best = { q, p, err };
+    }
+    return best;
+  };
+  let a = quant(end(tmin)), b = quant(end(tmax));
+  const pal = new Int32Array(64);
+  const fill = () => {
+    for (let i = 0; i < 16; i++) {
+      const w = BC7_WEIGHTS[i];
+      for (let c = 0; c < 4; c++) pal[i * 4 + c] = ((64 - w) * (a.q[c] << 1 | a.p) + w * (b.q[c] << 1 | b.p) + 32) >> 6;
+    }
+  };
+  fill();
+  const idx = new Uint8Array(16);
+  for (let p = 0; p < 16; p++) {
+    let best = 0, bestErr = Infinity;
+    for (let i = 0; i < 16; i++) {
+      let e = 0;
+      for (let c = 0; c < 3; c++) { const d = v[p * 4 + c] - pal[i * 4 + c]; e += d * d; }
+      const da = v[p * 4 + 3] - pal[i * 4 + 3];
+      e += 2 * da * da;
+      if (e < bestErr) { bestErr = e; best = i; }
+    }
+    idx[p] = best;
+  }
+  if (idx[0] >= 8) {  /* the anchor index must fit in 3 bits */
+    [a, b] = [b, a];
+    for (let p = 0; p < 16; p++) idx[p] = 15 - idx[p];
+  }
+  let bit = 0;
+  out.fill(0, o, o + 16);
+  const put = (x, n) => { for (let i = 0; i < n; i++, bit++) if ((x >> i) & 1) out[o + (bit >> 3)] |= 1 << (bit & 7); };
+  put(64, 7);
+  for (let c = 0; c < 4; c++) { put(a.q[c], 7); put(b.q[c], 7); }
+  put(a.p, 1); put(b.p, 1);
+  put(idx[0], 3);
+  for (let p = 1; p < 16; p++) put(idx[p], 4);
+}
+
 function bc7DecodeMode6(src, o, px) {
   let bit = 0;
   const get = n => { let v = 0; for (let i = 0; i < n; i++, bit++) v |= ((src[o + (bit >> 3)] >> (bit & 7)) & 1) << i; return v; };
@@ -2259,6 +2479,7 @@ function bc7DecodeMode6(src, o, px) {
   }
   return true;
 }
+/* bc7:end */
 
 /* BC1 (DXT1) colours from two RGB565 endpoints: four opaque ones when the
    first is larger, else three and transparent black. */
@@ -2304,12 +2525,56 @@ function bc1Decode(src, o, px) {
 function b64bytes(s) { return Uint8Array.from(atob(s), c => c.charCodeAt(0)); }
 
 /* Wrap data in a zstd frame of stored (raw) blocks: valid for any decoder. */
-function zstdStored(data) {
-  const BLOCK = 128 * 1024, blocks = Math.max(1, Math.ceil(data.length / BLOCK));
-  const out = new Uint8Array(9 + blocks * 3 + data.length);
-  out.set([0x28, 0xb5, 0x2f, 0xfd, 0xa0]);  /* magic; single segment, 4-byte content size */
-  new DataView(out.buffer).setUint32(5, data.length, true);
-  let o = 9;
+/* zstd:begin */
+/* XXH64 (the zstd content checksum is its low 32 bits). */
+function xxh64(data) {
+  const M = (1n << 64n) - 1n, P1 = 11400714785074694791n, P2 = 14029467366897019727n, P3 = 1609587929392839161n,
+    P4 = 9650029242287828579n, P5 = 2870177450012600261n;
+  const rotl = (x, r) => ((x << BigInt(r)) | (x >> BigInt(64 - r))) & M;
+  const dv = new DataView(data.buffer, data.byteOffset, data.byteLength);
+  const rd64 = o => dv.getBigUint64(o, true);
+  const round = (acc, v) => (rotl((acc + v * P2) & M, 31) * P1) & M;
+  const merge = (h, v) => (((h ^ round(0n, v)) * P1) & M) + P4 & M;
+  let o = 0, h;
+  const n = data.length;
+  if (n >= 32) {
+    let v1 = (P1 + P2) & M, v2 = P2, v3 = 0n, v4 = (0n - P1) & M;
+    for (; o + 32 <= n; o += 32) { v1 = round(v1, rd64(o)); v2 = round(v2, rd64(o + 8)); v3 = round(v3, rd64(o + 16)); v4 = round(v4, rd64(o + 24)); }
+    h = (rotl(v1, 1) + rotl(v2, 7) + rotl(v3, 12) + rotl(v4, 18)) & M;
+    h = merge(h, v1); h = merge(h, v2); h = merge(h, v3); h = merge(h, v4);
+  } else h = P5;
+  h = (h + BigInt(n)) & M;
+  for (; o + 8 <= n; o += 8) h = ((rotl(h ^ round(0n, rd64(o)), 27) * P1) & M) + P4 & M;
+  if (o + 4 <= n) { h = ((rotl(h ^ ((BigInt(dv.getUint32(o, true)) * P1) & M), 23) * P2) & M) + P3 & M; o += 4; }
+  for (; o < n; o++) h = (rotl(h ^ ((BigInt(data[o]) * P5) & M), 11) * P1) & M;
+  h ^= h >> 33n; h = (h * P2) & M; h ^= h >> 29n; h = (h * P3) & M; h ^= h >> 32n;
+  return h;
+}
+
+/* A zstd frame of stored blocks around `data`, with the frame header the system file has
+   (`like`: that file's header bytes: descriptor, window, content size), and its content checksum
+   when the descriptor asks for one. Without a model: single segment with a 4-byte size. */
+function zstdStored(data, like) {
+  const desc = like && like.length >= 6 ? like[4] : 0xa0;
+  const single = (desc >> 5) & 1, fcs = desc >> 6, dict = desc & 3, sum = (desc >> 2) & 1;
+  const windowByte = single ? 0 : (like ? like[5] : 0);
+  const dictLen = dict === 3 ? 4 : dict, fcsLen = fcs === 0 ? single : fcs === 1 ? 2 : fcs === 2 ? 4 : 8;
+  const head = 5 + (single ? 0 : 1) + dictLen + fcsLen;
+  /* A block may hold at most the window, and no more than 128 KB. */
+  const window = single ? data.length : Math.ceil((1 << (10 + (windowByte >> 3))) * (1 + (windowByte & 7) / 8));
+  const BLOCK = Math.max(1, Math.min(128 * 1024, window)), blocks = Math.max(1, Math.ceil(data.length / BLOCK));
+  const out = new Uint8Array(head + blocks * 3 + data.length + (sum ? 4 : 0));
+  const dv = new DataView(out.buffer);
+  out.set([0x28, 0xb5, 0x2f, 0xfd, desc]);
+  let o = 5;
+  if (!single) out[o++] = windowByte;
+  if (dict && like) out.set(like.subarray(o, o + dictLen), o);
+  o += dictLen;
+  if (fcsLen === 1) out[o] = data.length;
+  else if (fcsLen === 2) dv.setUint16(o, data.length - 256, true);
+  else if (fcsLen === 4) dv.setUint32(o, data.length, true);
+  else if (fcsLen === 8) dv.setBigUint64(o, BigInt(data.length), true);
+  o += fcsLen;
   for (let b = 0; b < blocks; b++) {
     const start = b * BLOCK, size = Math.min(BLOCK, data.length - start), last = b === blocks - 1 ? 1 : 0;
     const h = (size << 3) | last;
@@ -2317,21 +2582,106 @@ function zstdStored(data) {
     out.set(data.subarray(start, start + size), o + 3);
     o += 3 + size;
   }
+  if (sum) dv.setUint32(o, Number(xxh64(data) & 0xffffffffn), true);
   return out;
 }
+/* zstd:end */
 
 const textureCache = new Map();
 
 /* Encode an image into exactly the stock texture's format, size and mips,
    reusing its DDS header verbatim, then check the result. */
+/* The console's textures with see-through parts carry colour in their clear pixels too (so the edges blend
+   without dark fringes): the clear pixels take the colour of the nearest visible ones, up to 8 pixels away,
+   and white beyond, as the console's own do. Alpha stays as it is. */
+/* bleed:begin */
+function bleedClear(pix, w, h) {
+  const SEEN = 8;
+  let todo = [];
+  const known = new Uint8Array(w * h);
+  for (let i = 0; i < w * h; i++) { if (pix[i * 4 + 3] >= SEEN) known[i] = 1; else todo.push(i); }
+  for (let pass = 0; pass < 8 && todo.length; pass++) {
+    const fill = [], next = [];
+    for (const i of todo) {
+      const x = i % w, y = (i - x) / w;
+      let r = 0, g = 0, b = 0, n = 0;
+      for (const j of [x > 0 ? i - 1 : -1, x < w - 1 ? i + 1 : -1, y > 0 ? i - w : -1, y < h - 1 ? i + w : -1]) {
+        if (j >= 0 && known[j]) { r += pix[j * 4]; g += pix[j * 4 + 1]; b += pix[j * 4 + 2]; n++; }
+      }
+      if (n) fill.push([i, Math.round(r / n), Math.round(g / n), Math.round(b / n)]); else next.push(i);
+    }
+    for (const [i, r, g, b] of fill) { pix[i * 4] = r; pix[i * 4 + 1] = g; pix[i * 4 + 2] = b; known[i] = 1; }
+    todo = next;
+  }
+  for (const i of todo) { pix[i * 4] = 255; pix[i * 4 + 1] = 255; pix[i * 4 + 2] = 255; }
+}
+/* bleed:end */
+
+/* pad:begin */
+/* Where a see-through texture meets the screen's edge: the Control Center's bottom panel at the bottom, its
+   top-right piece at the top and right, the home screen's artwork at the top. A picture is placed
+   against that edge (so a crop takes the part away from it), and can be pulled in from it by a padding, in
+   percent of the texture's size, left clear. */
+function textureAnchor(path) {
+  if (/_bottom\.dds$/.test(path)) return { v: "bottom", h: "center", top: 0, right: 0, bottom: 1 };
+  /* (the clock and the search and settings icons are drawn over the top 26% of this piece; on the PlayStation 2
+     theme the glass bar behind the clock spans 7% to 22% of it, and its glow reaches 35%) */
+  if (/_top\.dds$/.test(path)) return { v: "top", h: "right", top: 1, right: 1, bottom: 0, band: 0.26 };
+  /* the home screen's artwork hangs from the top of the screen, across its width */
+  if (/\/homeui_[^/]*\.dds$/.test(path)) return { v: "top", h: "center", top: 1, right: 0, bottom: 0 };
+  return { v: "center", h: "center", top: 0, right: 0, bottom: 0 };
+}
+const PAD_DEFAULT = 6;
+/* The choice made for a piece: "fill" (crop to the texture, against its edge), "pad" (the same, with the padding
+   left clear at the screen's edge), "fit" (the whole picture) or "stretch". How each is drawn, and its padding. */
+function placementParams(mode, pad) {
+  if (mode === "pad") return { fit: "cover", pad: Math.max(0, Math.min(40, +pad || 0)) };
+  if (mode === "fit") return { fit: "contain", pad: 0 };
+  if (mode === "stretch") return { fit: "stretch", pad: 0 };
+  return { fit: "cover", pad: 0 };
+}
+/* Where the picture goes in a w x h texture: its rectangle x, y, dw, dh, and the clear-margin rectangle to clip to. */
+function textureDraw(path, pct, fit, w, h, iw, ih, keepClear) {
+  const a = textureAnchor(path), p = Math.max(0, Math.min(40, +pct || 0)) / 100;
+  let t = a.top ? Math.round(h * p) : 0;
+  const b = a.bottom ? Math.round(h * p) : 0, r = a.right ? Math.round(w * p) : 0;
+  if (keepClear && a.band) t = Math.max(t, Math.round(h * a.band));   /* the band the clock and icons are drawn over stays clear */
+  const box = { x: 0, y: t, w: Math.max(1, w - r), h: Math.max(1, h - t - b) };
+  let dw = box.w, dh = box.h;
+  if (fit !== "stretch") {
+    const sc = (fit === "cover" ? Math.max : Math.min)(box.w / iw, box.h / ih);
+    dw = iw * sc; dh = ih * sc;
+  }
+  const x = box.x + (a.h === "right" ? box.w - dw : (box.w - dw) / 2);
+  const y = box.y + (a.v === "bottom" ? box.h - dh : a.v === "top" ? 0 : (box.h - dh) / 2);
+  return { x, y, dw, dh, box };
+}
+/* pad:end */
+/* Whether a top-right piece keeps the band its clock and icons are drawn over clear: on unless switched off. */
+const keepClearFor = path => localGet(`keep:${state.editId}:${path}`) !== "0";
+
+/* A piece's saved placement: the choice and its padding (per theme, remembered in this browser). */
+function placementFor(path) {
+  const a = textureAnchor(path), hasEdge = !!(a.top || a.right || a.bottom);
+  const mode = localGet(`place:${state.editId}:${path}`), pad = localGet(`pad:${state.editId}:${path}`);
+  return { mode: ["fill", "pad", "fit", "stretch"].includes(mode) && (hasEdge || mode !== "pad") ? mode : "fill",
+    pad: pad === null ? PAD_DEFAULT : Math.max(0, Math.min(40, +pad || 0)), hasEdge };
+}
+
+/* Textures with see-through parts keep their transparency: the Appearance themes' panels and bars. */
+const ALPHA_TEXTURE = /\/system\/vsh_asset\/(control_center_|homeui_)[^/]*$/;
+
 async function textureForAsset(file, assetPath, progress) {
   const info = await api("GET", "/api/asset/texture", { path: assetPath });
-  const key = `${info.header}|${info.dataLength}|${state.fit}|${file.name}|${file.size}|${file.lastModified}`;
+  const alpha = ALPHA_TEXTURE.test(assetPath) && (info.dxgi === 98 || info.dxgi === 99);
+  const place = alpha ? placementParams(placementFor(assetPath).mode, placementFor(assetPath).pad) : { fit: state.fit, pad: 0 };
+  const keep = alpha && keepClearFor(assetPath);
+  const key = `${info.header}|${info.dataLength}|${place.fit}|${alpha}|${place.pad}|${keep}|${file.name}|${file.size}|${file.lastModified}`;
   if (textureCache.has(key)) return textureCache.get(key);
   const bc7 = info.dxgi === 98 || info.dxgi === 99, bc1 = info.dxgi === 71 || info.dxgi === 72 || info.format === "DXT1";
   const rgba = info.dxgi === 28 || info.dxgi === 29, bgra = info.dxgi === 87 || info.dxgi === 91;
   if (!bc7 && !bc1 && !rgba && !bgra) throw new Error(`${info.format} textures are not supported yet`);
-  const blockBytes = bc1 ? 8 : 16, encode = bc1 ? bc1Block : bc7Block, decode = bc1 ? bc1Decode : bc7DecodeMode6;
+  const blockBytes = bc1 ? 8 : 16, encode = bc1 ? bc1Block : alpha ? bc7BlockAlpha : bc7Block, decode = bc1 ? bc1Decode : bc7DecodeMode6;
   if (info.array !== 1) throw new Error("texture arrays are not supported");
   if (!file.type.startsWith("image/") && !/\.(png|jpe?g|webp|gif|bmp)$/i.test(file.name)) throw new Error(`${file.name} is not an image`);
 
@@ -2340,7 +2690,7 @@ async function textureForAsset(file, assetPath, progress) {
   try { img = await loadImage(url); } finally { URL.revokeObjectURL(url); }
   const header = b64bytes(info.header);
   const data = new Uint8Array(info.dataLength);
-  let o = 0, sampleErr = 0, sampled = 0;
+  let o = 0, sampleErr = 0, sampled = 0, alphaErr = 0, alphaN = 0;
   const totalBlocks = Array.from({ length: info.mips }, (_, m) =>
     Math.ceil(Math.max(1, info.width >> m) / 4) * Math.ceil(Math.max(1, info.height >> m) / 4)).reduce((a, b) => a + b, 0);
   let done = 0, lastYield = performance.now();
@@ -2351,14 +2701,24 @@ async function textureForAsset(file, assetPath, progress) {
     canvas.width = w; canvas.height = h;
     const ctx = canvas.getContext("2d", { colorSpace: "srgb", willReadFrequently: true });
     ctx.imageSmoothingQuality = "high";
-    ctx.fillStyle = "#000"; ctx.fillRect(0, 0, w, h);
-    let dw = w, dh = h;
-    if (state.fit !== "stretch") {
-      const sc = (state.fit === "cover" ? Math.max : Math.min)(w / img.naturalWidth, h / img.naturalHeight);
-      dw = img.naturalWidth * sc; dh = img.naturalHeight * sc;
+    if (!alpha) { ctx.fillStyle = "#000"; ctx.fillRect(0, 0, w, h); }   /* with transparency, what the picture leaves bare stays clear */
+    if (alpha) {
+      /* against the screen's edge, with the padding left clear */
+      const d = textureDraw(assetPath, place.pad, place.fit, w, h, img.naturalWidth, img.naturalHeight, keep);
+      ctx.save();
+      ctx.beginPath(); ctx.rect(d.box.x, d.box.y, d.box.w, d.box.h); ctx.clip();
+      ctx.drawImage(img, d.x, d.y, d.dw, d.dh);
+      ctx.restore();
+    } else {
+      let dw = w, dh = h;
+      if (state.fit !== "stretch") {
+        const sc = (state.fit === "cover" ? Math.max : Math.min)(w / img.naturalWidth, h / img.naturalHeight);
+        dw = img.naturalWidth * sc; dh = img.naturalHeight * sc;
+      }
+      ctx.drawImage(img, (w - dw) / 2, (h - dh) / 2, dw, dh);
     }
-    ctx.drawImage(img, (w - dw) / 2, (h - dh) / 2, dw, dh);
     const pix = ctx.getImageData(0, 0, w, h).data;
+    if (alpha) bleedClear(pix, w, h);
     if (!bc7 && !bc1) {
       for (let i = 0; i < w * h; i++) {
         const s = i * 4;
@@ -2374,13 +2734,19 @@ async function textureForAsset(file, assetPath, progress) {
         for (let y = 0; y < 4; y++) {
           for (let x = 0; x < 4; x++) {
             const sx = Math.min(w - 1, bx * 4 + x), sy = Math.min(h - 1, by * 4 + y), s = (sy * w + sx) * 4, d = (y * 4 + x) * 4;
-            block[d] = pix[s]; block[d + 1] = pix[s + 1]; block[d + 2] = pix[s + 2]; block[d + 3] = 255;
+            block[d] = pix[s]; block[d + 1] = pix[s + 1]; block[d + 2] = pix[s + 2]; block[d + 3] = alpha ? pix[s + 3] : 255;
           }
         }
         encode(block, data, o);
         if ((bx * 7 + by * 13) % 97 === 0) {  /* re-decode a sample of blocks */
           if (!decode(data, o, check)) throw new Error("texture encoder self-check failed");
-          for (let i = 0; i < 64; i++) { if ((i & 3) !== 3) { const e = check[i] - block[i]; sampleErr += e * e; sampled++; } else if (check[i] !== 255) throw new Error("texture encoder self-check failed"); }
+          for (let i = 0; i < 64; i++) {
+            if ((i & 3) !== 3) {
+              if (alpha && block[i | 3] < 16) continue;   /* the colour of a clear pixel doesn't show */
+              const e = check[i] - block[i]; sampleErr += e * e; sampled++;
+            } else if (alpha) { const e = check[i] - block[i]; alphaErr += e * e; alphaN++; }
+            else if (check[i] !== 255) throw new Error("texture encoder self-check failed");
+          }
         }
         o += blockBytes;
       }
@@ -2397,9 +2763,10 @@ async function textureForAsset(file, assetPath, progress) {
     const psnr = 10 * Math.log10(255 * 255 / Math.max(1e-9, sampleErr / sampled));
     if (psnr < 24) throw new Error(`texture quality check failed (${psnr.toFixed(1)} dB)`);
   }
+  if (alphaN && Math.sqrt(alphaErr / alphaN) > 24) throw new Error("the see-through parts did not encode well");
   const dds = new Uint8Array(header.length + data.length);
   dds.set(header); dds.set(data, header.length);
-  const out = new Blob([info.zstd ? zstdStored(dds) : dds]);
+  const out = new Blob([info.zstd ? zstdStored(dds, info.frame ? b64bytes(info.frame) : null) : dds]);
   textureCache.set(key, out);
   return out;
 }
@@ -2416,10 +2783,10 @@ let attachProgress = null;
 /* Put one file onto a set of system assets (for example all size variants).
    `copies`: the same picture already written to that many other files, for
    a message that counts files instead of sizes. */
-async function attachTo(assets, file, label, copies = null) {
+async function attachTo(assets, file, label, copies = null, remake = false) {
   const big = assets.length > 2 || assets.some(a => a.kind === "texture" || ext(a.path) === "at9");
   const p = big ? progressToast(`Adding ${label}…`) : null;
-  let ok = 0;
+  let ok = 0, keptFirst = null;
   const errors = [];
   for (let i = 0; i < assets.length; i++) {
     const a = assets[i];
@@ -2428,11 +2795,16 @@ async function attachTo(assets, file, label, copies = null) {
       const blob = await fileForAsset(file, a);
       await uploadVerified("/api/theme/file", { id: state.editId, path: a.path }, blob);
       state.files.add(a.path);
+      if (!remake && state.keepOriginals && keepsOriginal(a) && blob !== file) {   /* so an option changed later needs no new upload */
+        await keepSource(a.path, file, keptFirst);
+        if (!keptFirst && state.sources.has(a.path)) keptFirst = a.path;
+      }
       ok++;
     } catch (e) { errors.push(`${baseName(a.path)}: ${e.message}`); }
     if (p) p.set(`Adding ${label}… ${i + 1}/${assets.length}`, (i + 1) / assets.length);
   }
   stamp = Date.now();
+  if (!remake && state.keepOriginals) await loadOriginals();
   const msg = errors.length
     ? `${label}: ${ok} of ${assets.length} added and verified. ${errors.slice(0, 2).join("; ")}`
     : copies !== null ? `${label} replaced in ${plural(ok + copies, "file")} and verified. Apply the theme to use it.`
@@ -2451,9 +2823,10 @@ async function removeMusic() {
 async function resetAssets(assets) {
   const hadBackground = backgroundFile([...state.files]);
   for (const a of assets.filter(x => state.files.has(x.path))) {
-    try { await api("DELETE", "/api/theme/file", { id: state.editId, path: a.path }); state.files.delete(a.path); }
+    try { await api("DELETE", "/api/theme/file", { id: state.editId, path: a.path }); state.files.delete(a.path); state.sources.delete(a.path); }
     catch (e) { toast(e.message, "err"); }
   }
+  await loadOriginals();
   stamp = Date.now();
   /* No background left: neither is the picture made from it. */
   if (hadBackground && !backgroundFile([...state.files])) await removePreview(state.editId, "background");
@@ -2559,8 +2932,8 @@ function unzstdStored(b) {
 }
 
 /* The top level of a DDS texture as a canvas: BC7 (as this builder encodes
-   it), RGBA8 or BGRA8. */
-async function ddsCanvas(bytes) {
+   it), RGBA8 or BGRA8. `keepAlpha`: BC7 with its see-through parts, for a picture taken back out of a texture. */
+async function ddsCanvas(bytes, keepAlpha = false) {
   const d = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
   if (d.getUint32(0, true) !== 0x20534444) throw new Error("not a DDS texture");
   const h = d.getUint32(12, true), w = d.getUint32(16, true);
@@ -2583,7 +2956,7 @@ async function ddsCanvas(bytes) {
         for (let y = 0; y < 4 && by * 4 + y < h; y++) {
           for (let x = 0; x < 4 && bx * 4 + x < w; x++) {
             const s = (y * 4 + x) * 4, t = ((by * 4 + y) * w + bx * 4 + x) * 4;
-            px[t] = block[s]; px[t + 1] = block[s + 1]; px[t + 2] = block[s + 2]; px[t + 3] = 255;
+            px[t] = block[s]; px[t + 1] = block[s + 1]; px[t + 2] = block[s + 2]; px[t + 3] = keepAlpha ? block[s + 3] : 255;
           }
         }
       }
@@ -2708,9 +3081,10 @@ async function renderEditor() {
           <option value="${esc(state.status.fw)}" ${!fwAny ? "selected" : ""}>This console (${esc(state.status.fw)})</option>
           <option value="any" ${fwAny ? "selected" : ""}>Any firmware</option>
         </select></label>
-      <label class="field">How images are fitted
+      <label class="field" title="Changing it makes the pictures and textures in this theme again from their kept originals.">How images are fitted
         <select id="fit">${[["cover", "Fill (crop edges)"], ["contain", "Fit (keep all)"], ["stretch", "Stretch"]]
           .map(([v, l]) => `<option value="${v}" ${state.fit === v ? "selected" : ""}>${l}</option>`).join("")}</select></label>
+      <div class="field" id="originals-field">${originalsField()}</div>
     </div>
     <section class="panel cover-panel" id="cover-panel">${coverPanel(t)}</section>
     ${state.assetsError ? `<div class="banner err">${esc(state.assetsError)}. Restart the plugin once with the stock theme to list the system assets.</div>` : ""}
@@ -2825,6 +3199,18 @@ function aspectBody(asp) {
       ${all.some(a => state.files.has(a.path)) ? `<div><button class="btn sm ghost danger" data-act="reset-aspect" data-aspect="${asp.id}">Reset all ${esc(asp.title.toLowerCase())}</button></div>` : ""}`;
   }
 
+  const appearanceNote = asp.id === "appearance" ? `<p class="note">These pictures are drawn only while the matching theme is selected on the console
+      (<b>Settings &gt; Appearance and Sound</b>), so select the theme you change. Each picture is encoded to the texture's exact format
+      and size (the panels are about 2560 pixels wide) and <b>keeps its transparency</b>: use a PNG with a see-through background for the parts
+      that should stay clear. The Control Center panel sits behind its row of icons along the bottom; the top-right corner piece sits
+      behind the clock. Choose how your picture is placed with <b>Placement</b> beside each piece, before you attach it:
+      <b>Fill</b> crops the picture to the piece, keeping the part against the screen's edge (the bottom for the panel,
+      the top for the home screen's artwork);
+      <b>Fill with padding</b> does the same but leaves a clear margin at that edge, set in percent;
+      <b>Fit</b> shows the whole picture with clear sides; <b>Stretch</b> squeezes it to the piece.
+      The clock and the search and settings icons are drawn over the top of the top-right piece, so a white or solid picture
+      there hides them: <b>Keep the clock and icons clear</b> (on by default) leaves that band empty and puts the picture below it.
+      Apply the theme, then put the console in rest mode and wake it.</p>` : "";
   const fontNote = asp.id === "fonts" ? `<p class="note">The text the home screen and its menus are drawn in. Replace one with a
       TrueType or OpenType font (<b>.ttf</b> or <b>.otf</b>) that has the full Latin alphabet, digits and punctuation; fonts in
       other formats, and ones that are damaged or lack those characters, are refused. A font goes only into the home screen,
@@ -2838,16 +3224,31 @@ function aspectBody(asp) {
   const list = asp.id === "fonts"
     ? shown.slice().sort((x, y) => fontRank(x.assets[0]) - fontRank(y.assets[0]) || fontName(x.assets[0].path).localeCompare(fontName(y.assets[0].path)))
     : shown;
-  return `${search}${fontNote}<div class="rows">${list.map(g => {
+  return `${search}${fontNote}${appearanceNote}<div class="rows">${list.map(g => {
       const rep = g.assets.filter(a => state.files.has(a.path)).length;
       const a0 = g.assets[0];
-      const isFont = asp.id === "fonts";
+      const isFont = asp.id === "fonts", isAppearance = asp.id === "appearance";
       const play = asp.id === "sounds" && ext(a0.path) === "wav"
         ? `<audio controls preload="none" src="${esc(rep ? `/api/theme/file?${q({ id: state.editId, path: a0.path })}&v=${stamp}` : `/api/asset?${q({ path: a0.path })}`)}"></audio>` : "";
       return `<div class="row-item${rep ? " replaced" : ""}" data-drop-group="${esc(g.key)}" data-aspect="${asp.id}">
-        <div class="info"><div class="file">${esc(isFont ? fontName(a0.path) : g.name)}${isFont && FONT_HOME.test(baseName(a0.path)) ? ` <span class="tag">Home screen</span>` : ""}${rep ? ` <span class="tag on">Replaced</span>` : ""}</div>
-          <div class="dir">${isFont ? `${esc(baseName(a0.path))} · ${fmtSize(a0.size)}` : esc(g.dir)}${g.assets.length > 1 ? ` · ${plural(g.assets.length, "variant")}` : ""}</div></div>
-        <div class="acts">${play}
+        <div class="info"><div class="file">${esc(isFont ? fontName(a0.path) : isAppearance ? appearanceName(a0.path) : g.name)}${isFont && FONT_HOME.test(baseName(a0.path)) ? ` <span class="tag">Home screen</span>` : ""}${rep ? ` <span class="tag on">Replaced</span>` : ""}</div>
+          <div class="dir">${isFont || isAppearance ? `${esc(baseName(a0.path))} · ${fmtSize(a0.size)}` : esc(g.dir)}${g.assets.length > 1 ? ` · ${plural(g.assets.length, "variant")}` : ""}</div></div>
+        <div class="acts">${play}${isAppearance ? (() => {
+          const pl = placementFor(a0.path);
+          return `<label class="note" title="How your picture is placed on this piece. Applies when you attach a picture.">Placement
+            <select data-place="${esc(a0.path)}" aria-label="Placement">
+              <option value="fill"${pl.mode === "fill" ? " selected" : ""}>Fill (crop to the piece)</option>
+              ${pl.hasEdge ? `<option value="pad"${pl.mode === "pad" ? " selected" : ""}>Fill with padding</option>` : ""}
+              <option value="fit"${pl.mode === "fit" ? " selected" : ""}>Fit (whole picture)</option>
+              <option value="stretch"${pl.mode === "stretch" ? " selected" : ""}>Stretch</option>
+            </select></label>${pl.mode === "pad" ? `<label class="note" title="Space left clear where the picture meets the screen's edge, in percent of the piece.">Padding
+            <input type="number" min="0" max="40" step="1" value="${pl.pad}" data-pad="${esc(a0.path)}" style="width:64px" aria-label="Padding in percent"> %</label>` : ""}${
+            rep && !state.sources.has(a0.path) ? (state.keepOriginals
+              ? `<span class="note" title="This picture was attached before the original was kept in the theme. Changing an option makes the texture again from the picture inside it; attach the original once more to get back anything the earlier placement cropped away.">options use the texture's own picture</span>`
+              : `<span class="note" title="This theme does not keep original pictures: options apply when you attach a picture.">options apply when you attach</span>`) : ""}${
+            textureAnchor(a0.path).band ? `<label class="note" title="The clock and the search and settings icons are drawn over the top of this piece: a white or solid picture there hides them.">
+              <input type="checkbox" data-keep="${esc(a0.path)}"${keepClearFor(a0.path) ? " checked" : ""}> Keep the clock and icons clear</label>` : ""}`;
+        })() : ""}
           <button class="btn sm" data-act="attach-group" data-group="${esc(g.key)}" data-aspect="${asp.id}">${rep ? "Replace" : "Attach"}</button>
           ${rep ? `<button class="btn sm ghost danger" data-act="reset-group" data-group="${esc(g.key)}" data-aspect="${asp.id}">Reset</button>` : ""}
         </div></div>`;
@@ -3762,6 +4163,25 @@ document.addEventListener("click", async e => {
       return;
     }
     case "reset-aspect": await resetAssets(aspectAssets(asp)); return renderAspect(asp);
+    case "remove-originals": {
+      if (!armed.get("originals")) {
+        armed.set("originals", true);
+        el.classList.add("armed");
+        el.textContent = "Click again to remove";
+        setTimeout(() => { armed.delete("originals"); if (el.isConnected) { el.classList.remove("armed"); el.textContent = "Remove them"; } }, 4000);
+        return;
+      }
+      armed.delete("originals");
+      const had = state.sources.size, bytes = state.originalsBytes;
+      try {
+        await api("DELETE", "/api/theme/sources", { id: state.editId });
+        await refreshStatus();
+        toast(`Removed ${plural(had, "original")} (${fmtSize(bytes)}). Their options now apply when you attach a picture again.`, "ok", 7000);
+      } catch (err) { toast(err.message, "err"); }
+      await loadOriginals();
+      ASPECTS.forEach(renderAspect);
+      return;
+    }
     case "remove-music":
       await removeMusic();
       toast("Home music is back to stock in this theme.", "ok");
@@ -3847,7 +4267,33 @@ document.addEventListener("submit", async e => {
 });
 
 let filterTimer = 0;
+/* A placement option changed for a piece: its texture is made again from the kept picture, if there is one. */
+async function placementChanged(path, redraw) {
+  const asp = aspectById("appearance");
+  if (state.files.has(path) && !state.sources.has(path) && !state.keepOriginals) {
+    toast("This theme does not keep original pictures, so this applies the next time you attach a picture.", "", 7000);
+  } else if (state.files.has(path)) {
+    let recovered = false;
+    if (!state.sources.has(path)) {
+      try { recovered = await recoverSource(path); } catch (e) { /* a texture this page did not make: it needs its picture attached */ }
+    }
+    if (state.sources.has(path)) {
+      try {
+        await remakeFromSource(path);
+        if (recovered) toast("Made again from the picture in the texture. Attach the original once more if you want back what the earlier placement cropped away.", "", 9000);
+      } catch (e) { toast(e.message, "err"); }
+      await refreshStatus();
+    }
+  }
+  if (redraw || state.files.has(path)) renderAspect(asp);
+}
+
 document.addEventListener("input", e => {
+  if (e.target.dataset && e.target.dataset.pad) {
+    const v = Math.max(0, Math.min(40, Math.round(+e.target.value || 0)));
+    localSet(`pad:${state.editId}:${e.target.dataset.pad}`, String(v));
+    return;     /* made again when the box is left (its change event) */
+  }
   const aspId = e.target.dataset && e.target.dataset.filterAspect;
   if (aspId) {
     state.filters[aspId] = e.target.value;
@@ -3874,9 +4320,29 @@ document.addEventListener("input", e => {
 });
 
 document.addEventListener("change", async e => {
+  if (e.target.dataset && e.target.dataset.keep) {
+    localSet(`keep:${state.editId}:${e.target.dataset.keep}`, e.target.checked ? "1" : "0");
+    return placementChanged(e.target.dataset.keep, false);
+  }
+  if (e.target.dataset && e.target.dataset.place) {
+    localSet(`place:${state.editId}:${e.target.dataset.place}`, e.target.value);
+    return placementChanged(e.target.dataset.place, true);   /* "Fill with padding" shows its padding box */
+  }
+  if (e.target.dataset && e.target.dataset.pad) return placementChanged(e.target.dataset.pad, false);
   const t = e.target;
   if (t.id === "theme-select") { location.hash = `#/edit/${encodeURIComponent(t.value)}`; return; }
-  if (t.id === "fit") { state.fit = t.value; localSet("fit", state.fit); return; }
+  if (t.id === "keep-originals") {
+    try {
+      await api("POST", "/api/theme/settings", { id: state.editId, keep_originals: t.checked ? 1 : 0 });
+      state.keepOriginals = t.checked;
+      await refreshStatus();
+      toast(t.checked ? "Original pictures are kept from now on." : "Original pictures are not kept from now on. Those already kept stay until you remove them.", "ok");
+    } catch (err) { t.checked = state.keepOriginals; toast(err.message, "err"); }
+    await loadOriginals();
+    ASPECTS.forEach(renderAspect);
+    return;
+  }
+  if (t.id === "fit") { state.fit = t.value; localSet("fit", state.fit); return refitPictures(); }
   try {
     if (t.id === "theme-name" && t.value.trim()) {
       await api("POST", "/api/theme/settings", { id: state.editId, name: t.value.trim() });

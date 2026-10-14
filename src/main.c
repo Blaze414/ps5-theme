@@ -62,8 +62,9 @@ static atomic_int shellui_seen;     /* found at least once: games' pictures may 
    (home screen backgrounds, sounds), and installed titles' metadata (their
    icons), including the sce_sys folders of their installations, which most
    PS5 games' records point to, and the pictures downloaded for them from
-   PlayStation Network, and the console's text fonts. What may change inside
-   them is decided by policy.c; code and unknown types never can. */
+   PlayStation Network, the console's text fonts, and the Appearance themes'
+   textures in /system/vsh_asset. What may change inside them is decided by
+   policy.c; code and unknown types never can. */
 static const char *const allowed_prefixes[] = {
   "/system_ex/rnps/apps/",
   "/mnt/rnps/apps/",
@@ -73,6 +74,7 @@ static const char *const allowed_prefixes[] = {
   CATALOG_APPMETA_DIR "/",
   CONCEPTMETA_DIR "/",
   FONT_DIR "/",             /* only in the home screen's own views (home_view_only) */
+  SYS_ASSET_DIR "/",        /* the PlayStation 1-4 Appearance themes' textures: like /system_ex/vsh_asset */
 };
 #define NPREFIXES (sizeof(allowed_prefixes) / sizeof(*allowed_prefixes))
 
@@ -2038,7 +2040,9 @@ dump_assets_once(void) {
     char root[PATH_MAX];
     snprintf(root, sizeof(root), "%s", allowed_prefixes[i]);
     root[strlen(root) - 1] = 0;
-    if(!home_view_only(allowed_prefixes[i])) dump_listing(root, f, 0);   /* titles and fonts are listed live */
+    if(!home_view_only(allowed_prefixes[i]) && strcmp(allowed_prefixes[i], SYS_ASSET_DIR "/")) {
+      dump_listing(root, f, 0);   /* titles, fonts and /system/vsh_asset are listed live */
+    }
   }
   fclose(f);
   fs_rename(tmp, path);

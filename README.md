@@ -14,7 +14,7 @@ the plugin stops, and the plugin puts your theme back each time etaHEN starts.
 
 ![The theme library](docs/screenshots/library.png)
 
-Version 1.55. Developed and tested on a PS5 with firmware 13.42, both with
+Version 1.56. Developed and tested on a PS5 with firmware 13.42, both with
 etaHEN 2.5B (unified build) and on its own from PS5 Payload Manager.
 
 > **About the screenshots.** They were taken from the author's own console.
@@ -290,7 +290,20 @@ between themes.
 
 - **Name** and **Firmware.**
 - **How images are fitted:** fill (crop the edges), fit (keep the whole
-  picture) or stretch. This applies to every image you add from then on.
+  picture) or stretch. When you attach a picture to a texture or an image,
+  the theme keeps your original too (never applied to the console; one
+  picture attached at several sizes is stored once). Changing this setting
+  then makes every picture and texture that has a kept original again with
+  the new fit, with a progress bar, and without attaching anything again.
+  Pictures attached before originals were kept stay as they are, and a
+  message says how many. The Appearance pieces have their own placement.
+- **Keep original pictures:** on by default. Switch it off in a theme to save
+  space: new pictures are then not kept, and fit and placement options apply
+  when you attach a picture (as before). The line beside the switch shows how
+  many originals are kept and what they take (a picture attached at several
+  sizes counts once), with **Remove them** (click twice) to free the space;
+  the theme's own files are not touched. The choice is stored with the theme
+  (a file `originals-off` in its folder) and goes with a copy of it.
 - **Export** and **Apply to console** act on the theme as it is now. They are
   available as soon as the theme has anything in it.
 
@@ -390,6 +403,10 @@ of the apply, the section's note and a notification on the console say so.
 - **Animations:** JSON animation and data files. They must be valid and keep
   their canvas size.
 - **Video:** clips in the same container (MP4 or WebM).
+- **Appearance themes:** the artwork of the PlayStation, PlayStation 2, 3
+  and 4 themes in **Settings > Appearance and Sound**: the Control Center's
+  bottom panel and top-right corner piece, and the home screen's artwork.
+  See [Appearance themes](#appearance-themes).
 - **Textures:** other system DDS textures. Any image is encoded to the
   texture's exact format and size.
 
@@ -674,8 +691,9 @@ with only your files changed.
 
 `src/policy.c` decides what a theme may replace: only media, and only inside
 ShellUI's React Native apps (`/system_ex/rnps/apps`, `/mnt/rnps/apps`), its
-VSH assets (`/system_ex/vsh_asset`), and installed titles' metadata
-(`/user/appmeta`, pictures only). Each file is checked against the
+VSH assets (`/system_ex/vsh_asset`, and `/system/vsh_asset` for the Appearance
+themes' textures), the text fonts (`/preinst/common/font`), and installed
+titles' metadata (`/user/appmeta`, pictures only). Each file is checked against the
 system file it replaces when it is uploaded, and again when the theme is
 applied:
 
@@ -688,7 +706,7 @@ applied:
 | Fonts | A whole TrueType or OpenType (CFF) font: tables in bounds and none twice, the tables every font needs, outlines, glyph counts and metrics that agree, and a character map covering printable ASCII. Collections and WOFF are refused |
 | JSON | Valid (depth-limited parser); same top-level type; animations keep their `w`/`h` canvas |
 | MP4 / WebM | Same container |
-| DDS / `.dds.zst` textures | Fully decoded (built-in zstd decoder, checksum verified); the DDS header must be byte-identical to the system texture and the data exactly the right length |
+| DDS / `.dds.zst` textures | Fully decoded (built-in zstd decoder, checksum verified); the DDS header must be byte-identical to the system texture and the data exactly the right length. A compressed texture must be one zstd frame that is the whole file, starting with exactly the system file's frame header (flags, window and size field), and every BC7 block must use a valid mode. A texture right in every other way but its frame header (as the pages before 1.56 wrote them) is written again with the system file's header and checksum, its picture data untouched. The console's own textures pass all of this |
 | Interface resource files (`.rco`) | The console's own file with only pictures changed: each PNG matching the console's picture in every chunk but its image data, and that data complete and sound (fully decompressed and checked); each SVG keeping the console's opening and passing the SVG check; everything else byte-identical |
 | Games' and apps' pictures (`/user/appmeta`) | Pictures only, by the rules above; a title's `param.json`, `param.sfo` and anything else in its folder are protected |
 | Everything else | Protected: JavaScript bundles, executables, libraries and unknown types can't be replaced |
@@ -737,9 +755,12 @@ are fuzzed with libFuzzer under AddressSanitizer and UBSan
   it mounts, or else match them by checksum. An overlay that fails is
   removed.
 - Each file's check against the system file it replaces is remembered for
-  that exact pair of files (and plugin version), so an unchanged theme isn't
-  decompressed and checked again at every start. A new or edited file is a
-  different file, so it is always checked.
+  that exact pair of files, the plugin version and the revision of the rules
+  the checks apply, so an unchanged theme isn't decompressed and checked again
+  at every start. A new or edited file is a different file, so it is always
+  checked, and a result made by other rules is never trusted: a build that
+  changed what is accepted once handed back the refusal an earlier build of the
+  same version had remembered, which is how the revision came to be.
 - Exports are read back before they are offered for download, and imports
   check every entry of the `.zip`.
 
@@ -941,6 +962,187 @@ just before where playback continues.
 bit allocation, Huffman coding) and a lot of CPU. It runs in a Web Worker so
 the page stays responsive, and it yields with `MessageChannel` instead of
 timers, which browsers throttle.
+
+### Appearance themes
+
+The 30th anniversary Appearance themes (**Settings > Appearance and Sound**:
+PlayStation, PlayStation 2, 3 and 4) draw their artwork from DDS textures in
+`/system/vsh_asset`, not the `vsh_asset` folder under `/system_ex`:
+`control_center_<theme>_bottom.dds` is the panel behind the Control Center's
+row of icons, `control_center_<theme>_top.dds` the piece in the top-right
+corner by the clock, and `homeui_<theme>.dds` the home screen's artwork
+(`ps` is the original PlayStation). They are 2560 pixels wide (the top piece
+980 by 620) and BC7. The home screen's code names them. They are plain files,
+so a theme can replace them.
+
+How they were found: the clock's capsule and the Control Center's backdrop
+didn't turn into numbers in the numbered test, so they are not pictures in
+the interface files. The file-level tracker (`ps5-assetwatch`) saw no file
+load at all, because the home screen reads such files and closes them.
+Naming the theme in use (PlayStation 2) led to the folder.
+
+Two things had to be right for a replacement to be accepted, and both follow
+the console's own files byte for byte (a texture made before 1.56, with the
+old frame form, is rewritten with the system file's header when uploaded or
+applied: the first 1.56 build skipped such files and reported "applied partly",
+which is how this was found):
+
+- **The format.** The DDS header is the system file's, copied unchanged. The
+  files are zstd-compressed although their names end in `.dds`, so the plugin
+  recognises compression by content. Their frame headers come in three forms
+  on 13.42 (single segment `0xa0`, the same with a content checksum `0xa4`,
+  and a windowed `0x80`); the page copies the form of the file it replaces,
+  and writes the XXH64 content checksum when that form has one.
+- **Transparency.** These textures are mostly clear: about half of a panel's
+  pixels have no colour at all. Sony stores straight alpha and fills the
+  clear pixels with colour (bright, mostly), so edges blend without dark
+  fringes. The page encodes such textures as BC7 mode 6 with an alpha channel
+  and does the same: clear pixels take the nearest visible colour, then white.
+  A background texture stays opaque.
+
+The textures show only while the matching Appearance theme is selected, and,
+like every interface change, after rest mode. The manager lists them under
+**Appearance themes** with plain names.
+
+**Placing a picture.** These pieces sit against the screen's edge: the panel
+at the bottom, the corner piece at the top right, the home screen's artwork
+(solid at the top, fading to clear below) across the top. Each piece has a
+**Placement** choice, made before the picture is attached: **Fill** (crop to
+the piece, keeping the part against the screen's edge, so a wide picture
+keeps its bottom clouds), **Fill with padding** (the same, leaving a clear
+margin at that edge, in percent), **Fit** (the whole picture, clear sides) and
+**Stretch**. First test on the console: a 16:9 cloud strip on the bottom
+panel. Cropped around its centre it lost the lower clouds in the middle and
+only the tall ones at the corners showed, and the clouds met the screen's
+edge flat; placing it against the bottom edge, with padding, fixed both.
+
+**Changing the options later.** A picture's options (placement, padding, the
+clock band) apply the moment they are changed: the plugin keeps the original
+picture in the theme (`sources/`, not applied) and the page makes the texture
+again from it, so nothing is attached twice. A picture attached before that
+was added has no original kept, so the first change takes the picture back out
+of the texture itself (the page reads the texture it made, with its see-through
+parts), keeps it as the original and makes the texture again from it. Nothing
+is attached again; what the earlier placement had cropped away, or left clear,
+is not in that picture, so attach the original once more to get it back. Only
+textures the page itself made can be read back this way.
+
+**The clock.** The corner piece is drawn over the clock and the search and
+settings icons, which sit in its top band (the PlayStation 2 glass bar behind
+the clock spans 7% to 22% of the piece, its glow 35%). A picture there that is
+the clock's own white hides it: that was the second finding, a white cloud
+there made the clock disappear. **Keep the clock and icons clear** (on by
+default for the corner piece) leaves the top 26% empty and puts the picture
+below it.
+
+#### The three pieces, and how each is made
+
+| Piece | File (`/system/vsh_asset/`) | Size | What it is | Placed against | Options |
+|---|---|---|---|---|---|
+| **Bottom** | `control_center_<theme>_bottom.dds` | 2560 by 820 | The panel behind the Control Center's row of icons (the PS button menu, on the home screen and in games) | the bottom edge | Placement, padding |
+| **Top right** | `control_center_<theme>_top.dds` | 980 by 620 | The corner piece by the clock, with the search and settings icons | the top and right edges | Placement, padding, **Keep the clock and icons clear** |
+| **Home screen artwork** | `homeui_<theme>.dds` | 2560 wide | The artwork that hangs from the top of the home screen (solid at the top, fading to clear below) | the top edge | Placement, padding |
+
+`<theme>` is `ps`, `ps2`, `ps3` or `ps4`. Each Appearance theme has its own
+three files, so a picture made for the PlayStation 2 pieces shows only while
+the PlayStation 2 theme is selected.
+
+How a piece gets onto the console, start to finish:
+
+1. **The plugin lists the folder live.** `/system/vsh_asset` is an allowed
+   target (the plugin only ever themes media), and is covered like the other
+   asset folders: a read-only overlay of the staged folder over the real path
+   and in the system's views of it. The console's own files are never
+   written. The pieces appear in the manager under **Appearance themes**.
+2. **The page makes the texture.** When you attach a picture, the page asks
+   the plugin for the console's texture it replaces (its DDS header, size, and
+   the zstd frame header of the file). It draws your picture on a canvas of
+   the texture's size, as the piece's **Placement** says: against the piece's
+   edge, with the padding left clear, and for the corner piece with the clock
+   band left empty. It then fills the clear pixels with the colour of the
+   nearest visible ones (white beyond 8 pixels), as Sony's files do, encodes
+   BC7 mode 6 with an alpha channel, re-decodes a sample of the blocks to
+   check the picture and the see-through parts, and wraps the result in zstd
+   with the frame header of the console's file, and its checksum if that file
+   has one.
+3. **The plugin checks it again** on upload and at apply time: the DDS header
+   identical to the system file's, the exact length, the same frame header
+   bytes, the whole file one frame, and every BC7 block in a valid mode. A
+   file that is right except for its frame header is rewritten with the system
+   file's. Anything else is refused with a plain reason, so a bad texture
+   never reaches the console.
+4. **The original picture is kept** in the theme (`sources/`, never applied),
+   so Placement, padding and the clock band can be changed later and the page
+   makes the texture again at once. The **Keep original pictures** switch in
+   the editor turns this off to save space.
+5. **Apply** puts the overlays in place. The console reads the files when it
+   builds the interface, which is why the change shows after rest mode.
+
+What each piece needed, as found on the console:
+
+- **Bottom:** a 16:9 picture centred on the panel lost its lower middle
+  clouds and met the screen's edge flat. Placing it against the bottom edge,
+  with padding, fixed both.
+- **Top right:** the piece is drawn over the clock, which is white. A white
+  cloud there made the clock disappear, so the top 26% can be kept clear.
+- **Home screen artwork:** it hangs from the top, so placement and padding
+  are measured from the top edge.
+
+##### How this depends on the anniversary assets
+
+Nothing here is added to the console: every piece replaces a texture that
+Sony's own 30th anniversary Appearance themes already ship in
+`/system/vsh_asset`, and the feature works only as far as those files do.
+
+- **The files must be on the console.** The plugin lists the folder live from
+  the console, so **Appearance themes** shows exactly the pieces that exist
+  there. A console without the anniversary themes' textures shows none, and
+  the plugin has nothing to replace. It carries no copy of Sony's textures.
+- **Each piece is modelled on the console's own file.** The DDS header, the
+  size, the number of mip levels and the zstd frame header of the file being
+  replaced are read from it and copied, so a texture is accepted only if it
+  matches that file byte for byte in all but its picture data. If a firmware
+  changes a piece's size or format, the page follows the new file; a format it
+  cannot write (anything but BC7) is refused with a reason.
+- **The checked copy is the console's.** The first apply that touches the
+  folder keeps a copy of it under `/data/ps5-theme/stock/<firmware>/`, checked
+  against the system, and every apply builds the overlay from that copy with
+  only your files replaced. The copy is per firmware, so an update to the
+  console makes a fresh one.
+- **A piece shows only with its own Appearance theme.** The pieces exist per
+  theme (`ps`, `ps2`, `ps3`, `ps4`) and the home screen draws the ones of the
+  theme selected in **Settings > Appearance and Sound**. Replacing the PS2
+  pieces changes nothing while another theme is selected.
+- **Sony can change them.** The names, sizes and formats above are those of
+  13.42, where they were tested. The plugin checks each file against the
+  console's own at every apply instead of assuming them, so a change on
+  another firmware shows up as a refused file, not a broken screen.
+
+##### Requirements
+
+- **Console:** a jailbroken PS5 on firmware 13.60 or below, with this plugin
+  at **version 1.56 or later** (earlier versions don't know the folder).
+  Tested on 13.42 with etaHEN 2.5B and with PS5 Payload Manager (the plugin
+  or the standalone `ps5-theme.elf`); the textures' formats on other firmware
+  have not been checked.
+- **The anniversary Appearance themes must be on the console** (their
+  textures in `/system/vsh_asset`; see above), and the one whose pieces you
+  replaced must be selected in **Settings > Appearance and Sound**. Pieces of
+  another theme are not drawn.
+- **Apply the theme**, then put the console in **rest mode** and wake it. The
+  interface reads these files as it starts.
+- **A picture:** PNG or WebP for see-through parts (a JPEG has none, so it
+  covers the whole piece). Any size: it is fitted to the piece. A browser with
+  canvas and `BigInt` (current Chrome, Edge, Firefox or Safari) makes the
+  texture, since the console does not.
+- **The theme's firmware** must match the console (or be set to **Any
+  firmware**), as for every theme.
+- **For the corner piece:** a picture that is light at the top hides the
+  clock; leave **Keep the clock and icons clear** on, or use a dark one.
+- **Disk space:** the textures are stored without compression in the theme
+  (BC7 is one byte per pixel: about 3 MB for the bottom panel, under 1 MB for
+  the corner piece). With **Keep original pictures** on, the originals take
+  their size too, once however many files they were attached to.
 
 ### Fonts
 
@@ -1689,7 +1891,7 @@ tests/host/run.sh
 ```
 
 Builds the real plugin sources for Linux with AddressSanitizer and UBSan and
-runs 47 end-to-end tests against a fake console tree in a privileged
+runs 51 end-to-end tests against a fake console tree in a privileged
 container. They cover:
 
 - upload checks and the media policy, including files crafted to hang or
@@ -1716,6 +1918,12 @@ container. They cover:
   folders, `/original_user` or other apps' views; an overlay an older copy
   left on a real folder is taken down; the result and a notification say to
   use rest mode;
+- the Appearance themes' textures: listed from `/system/vsh_asset`, accepted
+  only as the console's exact format (zstd under a `.dds` name; frame header,
+  checksum, whole-file frame, BC7 modes), applied on the folder and in the
+  system's views of it, and the rest of the folder untouched; the page's BC7
+  encoder with transparency, its zstd frames equal to a reference writer's
+  and readable by the real `zstd`, and its colour bleed into clear pixels;
 - fonts: listed from the fonts folder, 22 kinds of unusable font refused with
   a plain reason (web fonts, collections, cut-short files, a missing or
   doubled table, a broken header, too few glyphs, no Latin letter, no Unicode
@@ -1860,6 +2068,11 @@ After any failure the console was restarted before the next test.
 | 1.54 | Corner shapes: multiplier at 3, switches at 0, then rest mode | Switches came out square-cornered; the multiplier changed nothing visible; the home screen's tiles didn't change |
 | 1.55 | Fonts: `SST-Roman` replaced, then rest mode; a scan of the fonts each process has mapped | No change on the home screen. The overlay was in ShellUI's view and ShellUI mapped its fonts from it, but only the Light and Bold weights; Roman and Medium were mapped by the web renderer alone |
 | 1.55 | Fonts: one font for all the Latin interface fonts, then rest mode | **The home screen's text changed** |
+| 1.56 | Appearance themes: a 16:9 cloud strip on the PlayStation 2 Control Center's bottom panel | **The Control Center showed the picture.** Centred, it lost the lower middle clouds and met the screen's edge flat: now placed against the bottom edge, with padding: **the placement options work** |
+| 1.56 | The same cloud on the top-right piece | The clock disappeared: white text on a white picture, drawn over it. Now the band its clock and icons sit in can be kept clear: **works** |
+| 1.56 | An older theme with a page-made background, applied twice with 1.56 builds | "Applied partly" both times: first from the frame check refusing the old form, then from a remembered refusal handed back by the next build. Remembered results are now tagged with a revision of the checking rules. With that build, reported working |
+| 1.56 | Home screen artwork (`homeui`): placement and padding | **Works** |
+| 1.56 | Fit and placement changed later, for pictures attached before and after originals were kept; the fit setting for every picture; the switch to not keep originals | Reported working, on the last two builds |
 
 ## Building from source
 
@@ -1898,6 +2111,7 @@ on Ubuntu 24.04. The `.plugin` file is the ELF with etaHEN's plugin header:
 | `tools/stop/` | `ps5-theme-stop.elf`: stops the plugin and leaves the theme on |
 | `tools/klog/` | `ps5-klog.elf`: the kernel log on TCP port 3232, for finding out what the system does |
 | `tools/fonts/` | `ps5-fontscan.elf`: lists the font files each process has open or mapped, read-only, for the font test |
+| `tools/assetwatch/` | `ps5-assetwatch.elf`: for two minutes, logs the files the home screen and the web renderer map and unmap, read-only, to find where something on screen is loaded from |
 | `tools/` | Table generator, icon generator, plugin packer |
 | `tests/host/` | End-to-end tests and the fake console (`rco_fixture.py` builds resource files) |
 | `tests/atrac9/`, `tests/zstd/` | Codec cross-checks |
@@ -1980,6 +2194,7 @@ are the numbers from those runs, made after the fixes below:
 | Parser | Inputs tried | Result |
 |---|---|---|
 | Font check | 7,279,891 in 2 min | no findings |
+| DDS textures, with the frame checks (14 October) | 182,011 in 2 min | no findings |
 | zstd decoder | 495,977 in 60 s | no findings |
 | DDS textures | 473,116 in 5 min | no findings |
 | ATRAC9 | 202,175 in 5 min | no findings |

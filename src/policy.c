@@ -566,6 +566,13 @@ static int validate_now(const char *cand, const char *stock, char *why, size_t l
    rename keeps the file's identity. */
 
 #define CHECKED_FILE BASE_DIR "/checked"
+
+/* What a remembered result was made by: the plugin's version and the revision of the rules its checks apply. A
+   result made by other rules is not trusted. Bump CHECK_RULES whenever what the checks accept or refuse
+   changes: the same version number can ship twice while a feature is built, and a refusal remembered by the
+   first build would otherwise be handed back by the second without its new code ever running. */
+#define CHECK_RULES "2"
+#define CHECKED_TAG PLUGIN_VERSION "r" CHECK_RULES
 #define CHECKED_MAX  8192
 
 typedef struct file_id {
@@ -602,7 +609,7 @@ same_id(const file_id_t *a, const file_id_t *b) {
 
 static const char *
 id_line(char *out, size_t size, const checked_t *c) {
-  snprintf(out, size, "%s\t%llu %llu %llu %llu %llu\t%llu %llu %llu %llu %llu\t%d\t%s\n", PLUGIN_VERSION,
+  snprintf(out, size, "%s\t%llu %llu %llu %llu %llu\t%llu %llu %llu %llu %llu\t%d\t%s\n", CHECKED_TAG,
            c->cand.dev, c->cand.ino, c->cand.size, c->cand.mtime_s, c->cand.mtime_ns,
            c->stock.dev, c->stock.ino, c->stock.size, c->stock.mtime_s, c->stock.mtime_ns, c->ok, c->why);
   return out;
@@ -639,7 +646,7 @@ checked_load(void) {
     if(sscanf(line, "%15[^\t]\t%llu %llu %llu %llu %llu\t%llu %llu %llu %llu %llu\t%d\t%n", version,
               &c.cand.dev, &c.cand.ino, &c.cand.size, &c.cand.mtime_s, &c.cand.mtime_ns,
               &c.stock.dev, &c.stock.ino, &c.stock.size, &c.stock.mtime_s, &c.stock.mtime_ns,
-              &c.ok, &used) != 12 || strcmp(version, PLUGIN_VERSION)) {
+              &c.ok, &used) != 12 || strcmp(version, CHECKED_TAG)) {
       continue;
     }
     snprintf(c.why, sizeof(c.why), "%s", line + used);

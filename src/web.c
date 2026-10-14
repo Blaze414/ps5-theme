@@ -690,26 +690,30 @@ api_assets(request_t *req) {
     }
     if(titles) closedir(titles);
   }
-  /* The console's text fonts: the files directly in FONT_DIR. */
-  DIR *fonts = truncated ? NULL : opendir(FONT_DIR);
-  struct dirent *fe;
-  while(fonts && (fe = readdir(fonts))) {
-    char path[PATH_MAX];
-    struct stat st;
-    if(fe->d_name[0] == '.' || snprintf(path, sizeof(path), "%s/%s", FONT_DIR, fe->d_name) >= (int)sizeof(path)) continue;
-    if(lstat(path, &st) || !S_ISREG(st.st_mode) || (q[0] && !stristr(path, q))) continue;
-    int kind = asset_kind(path);
-    if(kind == KIND_BLOCKED) { protected++; continue; }
-    if(kinds[0] && !kind_in_list(kinds, asset_kind_name(kind))) continue;
-    if(count >= limit) { truncated = 1; break; }
-    if(!first) SB_LIT(&sb, ",");
-    first = 0;
-    SB_LIT(&sb, "{\"path\":");
-    sb_json_str(&sb, path);
-    sb_printf(&sb, ",\"size\":%lld,\"kind\":\"%s\"}", (long long)st.st_size, asset_kind_name(kind));
-    count++;
+  /* Two flat folders are listed live: the console's text fonts, and the
+     Appearance themes' textures and Welcome backgrounds in /system/vsh_asset. */
+  static const char *const flat_dirs[] = {FONT_DIR, SYS_ASSET_DIR};
+  for(size_t r = 0; r < sizeof(flat_dirs) / sizeof(*flat_dirs) && !truncated; r++) {
+    DIR *flat = opendir(flat_dirs[r]);
+    struct dirent *fe;
+    while(flat && (fe = readdir(flat))) {
+      char path[PATH_MAX];
+      struct stat st;
+      if(fe->d_name[0] == '.' || snprintf(path, sizeof(path), "%s/%s", flat_dirs[r], fe->d_name) >= (int)sizeof(path)) continue;
+      if(lstat(path, &st) || !S_ISREG(st.st_mode) || (q[0] && !stristr(path, q))) continue;
+      int kind = asset_kind(path);
+      if(kind == KIND_BLOCKED) { protected++; continue; }
+      if(kinds[0] && !kind_in_list(kinds, asset_kind_name(kind))) continue;
+      if(count >= limit) { truncated = 1; break; }
+      if(!first) SB_LIT(&sb, ",");
+      first = 0;
+      SB_LIT(&sb, "{\"path\":");
+      sb_json_str(&sb, path);
+      sb_printf(&sb, ",\"size\":%lld,\"kind\":\"%s\"}", (long long)st.st_size, asset_kind_name(kind));
+      count++;
+    }
+    if(flat) closedir(flat);
   }
-  if(fonts) closedir(fonts);
   sb_printf(&sb, "],\"truncated\":%s,\"protected\":%d,\"concepts\":{", truncated ? "true" : "false", protected);
   concept_t *concepts = malloc(sizeof(*concepts) * MAX_CONCEPTS);
   int nc = concepts ? title_concepts(concepts) : 0;
@@ -1028,15 +1032,16 @@ drop_snapshot(const char *id) {
 
 
 /* `keep`: the upload is a change Discard can undo (not a picture the
-   library made by itself). */
+   library made by itself). `length` is what the file must measure: what was
+   received, or its length after the check wrote it again (a texture's frame). */
 static int
 place_upload(request_t *req, const char *id, const char *part, const char *dst, uint32_t crc,
-             uint64_t *size, int keep) {
+             uint64_t *size, int keep, uint64_t length) {
   uint32_t stored = 0;
   themes_lock();
   int placed = theme_exists(id) && (!keep || !keep_snapshot(id)) && !fs_rename(part, dst) &&
                !fs_crc32_file(dst, &stored, size) && stored == crc &&
-               *size == (uint64_t)req->content_length;
+               *size == length;
   themes_unlock();
   if(!placed) {
     fs_unlink(part);
@@ -1082,7 +1087,19 @@ api_put_file(request_t *req) {
     fs_unlink(part);
     return respond_error(req->fd, 422, msg);
   }
-  if(place_upload(req, id, part, dst, crc, &size, 1)) return;
+  /* A texture whose zstd frame was written again with the system file's header
+     is a different file from the one received: its checksum and length are the new ones. */
+  uint64_t length = (uint64_t)req->content_length;
+  if(kind == KIND_TEXTURE) {
+    uint32_t now = 0;
+    if(fs_crc32_file(part, &now, &length)) {
+      fs_unlink(part);
+      return respond_error(req->fd, 500, "could not store the file");
+    }
+    crc = now;
+    snprintf(crc_hex, sizeof(crc_hex), "%08x", crc);
+  }
+  if(place_upload(req, id, part, dst, crc, &size, 1, length)) return;
 
   strbuf_t sb = {0};
   sb_printf(&sb, "{\"ok\":true,\"kind\":\"%s\",\"size\":%llu,\"crc32\":\"%s\"",
@@ -1125,7 +1142,7 @@ api_put_music(request_t *req) {
     fs_unlink(part);
     return respond_error(req->fd, 422, msg);
   }
-  if(place_upload(req, id, part, dst, crc, &size, 1)) return;
+  if(place_upload(req, id, part, dst, crc, &size, 1, (uint64_t)req->content_length)) return;
 
   unsigned secs = (unsigned)((wav.data_size + MUSIC_RATE * 2) / (MUSIC_RATE * 4));
   strbuf_t sb = {0};
@@ -1235,7 +1252,7 @@ api_put_preview(request_t *req) {
     fs_unlink(part);
     return respond_error(req->fd, 422, msg);
   }
-  if(place_upload(req, id, part, dst, crc, &size, !strcmp(kind, "picture"))) return;
+  if(place_upload(req, id, part, dst, crc, &size, !strcmp(kind, "picture"), (uint64_t)req->content_length)) return;
 
   strbuf_t sb = {0};
   sb_printf(&sb, "{\"ok\":true,\"size\":%llu,\"crc32\":\"%s\"}", (unsigned long long)size, crc_hex);
@@ -1476,7 +1493,7 @@ int_param(const char *query, const char *key, int lo, int hi, int *out, int *pre
 static void
 api_theme_settings(request_t *req) {
   char id[128], name[128], fw[64], loop[16], order[16];
-  int has_gain, has_start, has_end, has_blend, has_lstart, has_lend, has_from;
+  int has_gain, has_start, has_end, has_blend, has_lstart, has_lend, has_from, has_keep, keep = 1;
   music_settings_t m;
 
   get_param(req->query, "id", id, sizeof(id));
@@ -1498,6 +1515,7 @@ api_theme_settings(request_t *req) {
   else if(int_param(req->query, "play_from", -1, MUSIC_MAX_MS, &m.play_from_ms, &has_from)) bad = "play_from must be -1 to 3600000 ms";
   else if(int_param(req->query, "loop_start", -1, MUSIC_MAX_MS, &m.loop_start_ms, &has_lstart)) bad = "loop_start must be -1 to 3600000 ms";
   else if(int_param(req->query, "loop_end", -1, MUSIC_MAX_MS, &m.loop_end_ms, &has_lend)) bad = "loop_end must be -1 to 3600000 ms";
+  else if(int_param(req->query, "keep_originals", 0, 1, &keep, &has_keep)) bad = "keep_originals must be 0 or 1";
   else if(has_loop && !music_loop_valid(loop)) bad = "loop must be crossfade, fade or cut";
   else if(has_order && !music_order_valid(order)) bad = "order must be music, loop-first, alternate or music-first";
   else if(m.end_ms && m.end_ms <= m.start_ms) bad = "the end must come after the start";
@@ -1516,6 +1534,12 @@ api_theme_settings(request_t *req) {
   if(m.loop_start_ms < 0) snprintf(m.order, sizeof(m.order), "music");
   int music = has_gain || has_start || has_end || has_blend || has_loop || has_lstart || has_lend || has_order || has_from;
   int rc = keep_snapshot(id) || write_theme_ini(id, has_name ? name : NULL, has_fw ? fw : NULL, music ? &m : NULL);
+  if(!rc && has_keep) {
+    /* keeping the pictures a theme's textures were made from: on unless the marker file is there */
+    char marker[PATH_MAX];
+    snprintf(marker, sizeof(marker), "%s/%s/originals-off", THEMES_DIR, id);
+    rc = keep ? (access(marker, F_OK) ? 0 : fs_unlink(marker)) : fs_write_file(marker, "1\n", 2);
+  }
   themes_unlock();
   if(rc) return respond_error(req->fd, 500, "could not save the settings");
   respond_ok(req->fd);
@@ -1595,6 +1619,15 @@ api_duplicate_theme(request_t *req) {
 }
 
 
+static int source_path(const char *id, const char *asset, char *out, size_t size);
+
+/* Pictures and textures are made from the user's picture (fitted, cropped, padded), so their original can be kept. */
+static int
+source_kind_ok(const char *asset) {
+  int k = asset_kind(asset);
+  return k == KIND_TEXTURE || k == KIND_IMAGE || k == KIND_SVG;
+}
+
 static void
 api_delete_file(request_t *req) {
   char id[128], asset[512], dst[PATH_MAX];
@@ -1607,8 +1640,207 @@ api_delete_file(request_t *req) {
   }
   themes_lock();
   int rc = access(dst, F_OK) || keep_snapshot(id) || fs_unlink(dst);
+  char kept[PATH_MAX];
+  if(!rc && source_kind_ok(asset) && !source_path(id, asset, kept, sizeof(kept)) && !access(kept, F_OK)) fs_unlink(kept);
   themes_unlock();
   if(rc) return respond_error(req->fd, 404, "file not in theme");
+  respond_ok(req->fd);
+}
+
+
+/* The picture a texture or picture was made from, kept in its theme (themes/<id>/sources/
+   <hash of the path>.src), so the page can make the texture again when a
+   placement option changes without the picture being attached again. It is
+   never applied: only files/ is. */
+#define SOURCE_MAX_BYTES (32ull << 20)
+#define SOURCE_MAX_SIDE  16384
+
+static int
+source_path(const char *id, const char *asset, char *out, size_t size) {
+  uint64_t h = 1469598103934665603ull;
+  for(const char *p = asset; *p; p++) h = (h ^ (unsigned char)*p) * 1099511628211ull;
+  return snprintf(out, size, "%s/%s/sources/%016llx.src", THEMES_DIR, id, (unsigned long long)h) >= (int)size ? -1 : 0;
+}
+
+/* A theme can switch keeping originals off (to save space): the marker file is then in its folder, and the
+   plugin refuses new originals. Kept ones stay until they are removed. */
+static int
+originals_off(const char *id) {
+  char path[PATH_MAX];
+  return snprintf(path, sizeof(path), "%s/%s/originals-off", THEMES_DIR, id) < (int)sizeof(path) && !access(path, F_OK);
+}
+
+/* What the kept originals of a theme take on the disk: each distinct file once (one picture attached at several
+   sizes is a set of links to one file). */
+static uint64_t
+sources_bytes(const char *id) {
+  char dir[PATH_MAX];
+  uint64_t total = 0;
+  ino_t seen[512];
+  int nseen = 0;
+  snprintf(dir, sizeof(dir), "%s/%s/sources", THEMES_DIR, id);
+  DIR *d = opendir(dir);
+  if(!d) return 0;
+  struct dirent *e;
+  while((e = readdir(d))) {
+    char path[PATH_MAX];
+    struct stat st;
+    if(e->d_name[0] == '.' || snprintf(path, sizeof(path), "%s/%s", dir, e->d_name) >= (int)sizeof(path) || lstat(path, &st) || !S_ISREG(st.st_mode)) continue;
+    int dup = 0;
+    for(int i = 0; i < nseen && !dup; i++) dup = seen[i] == st.st_ino;
+    if(dup) continue;
+    if(nseen < (int)(sizeof(seen) / sizeof(*seen))) seen[nseen++] = st.st_ino;
+    total += (uint64_t)st.st_size;
+  }
+  closedir(d);
+  return total;
+}
+
+
+static void
+api_put_source(request_t *req) {
+  char id[128], asset[512], dst[PATH_MAX], part[PATH_MAX + 8], dir[PATH_MAX], crc_hex[9];
+  uint32_t crc;
+  uint64_t size = 0;
+  image_info_t info;
+
+  get_param(req->query, "id", id, sizeof(id));
+  get_param(req->query, "path", asset, sizeof(asset));
+  if(!theme_exists(id)) return respond_error(req->fd, 404, "no such theme");
+  if(!asset_path_valid(asset) || !source_kind_ok(asset)) return respond_error(req->fd, 403, "not a system picture or texture");
+  if(originals_off(id)) return respond_error(req->fd, 409, "keeping the original pictures is switched off for this theme");
+  char same[512];
+  get_param(req->query, "same_as", same, sizeof(same));
+  if(same[0]) {
+    /* the same picture as one already kept for another file of this theme (one picture attached at several
+       sizes): no second copy, a hard link to it */
+    char from[PATH_MAX];
+    if(!asset_path_valid(same) || !source_kind_ok(same) || source_path(id, same, from, sizeof(from)) || access(from, F_OK) ||
+       source_path(id, asset, dst, sizeof(dst))) {
+      return respond_error(req->fd, 404, "no picture kept for that file");
+    }
+    snprintf(dir, sizeof(dir), "%s", dst);
+    *strrchr(dir, '/') = 0;
+    themes_lock();
+    int rc = !theme_exists(id) || fs_mkdirs(dir) || keep_snapshot(id);
+    if(!rc && strcmp(from, dst)) {
+      fs_unlink(dst);
+      rc = link(from, dst);
+    }
+    themes_unlock();
+    if(rc) return respond_error(req->fd, 500, "could not keep the picture");
+    respond_ok(req->fd);
+    return;
+  }
+  if(req->content_length <= 0) return respond_error(req->fd, 400, "empty upload");
+  if((uint64_t)req->content_length > SOURCE_MAX_BYTES) return respond_error(req->fd, 413, "the picture is larger than 32 MB");
+  if(source_path(id, asset, dst, sizeof(dst))) return respond_error(req->fd, 400, "path too long");
+  snprintf(dir, sizeof(dir), "%s", dst);
+  *strrchr(dir, '/') = 0;
+  snprintf(part, sizeof(part), "%s.part", dst);
+  if(fs_mkdirs(dir)) return respond_error(req->fd, 500, "could not create folder");
+  if(receive_upload(req, part, &crc, crc_hex)) return;
+  if(image_probe(part, &info) || !info.width || !info.height || info.width > SOURCE_MAX_SIDE || info.height > SOURCE_MAX_SIDE) {
+    fs_unlink(part);
+    return respond_error(req->fd, 422, "not a picture (PNG, JPEG or WebP)");
+  }
+  if(place_upload(req, id, part, dst, crc, &size, 1, (uint64_t)req->content_length)) return;
+  strbuf_t sb = {0};
+  sb_printf(&sb, "{\"ok\":true,\"size\":%llu,\"crc32\":\"%s\"}", (unsigned long long)size, crc_hex);
+  respond_json(req->fd, 200, &sb);
+}
+
+
+static void
+api_get_source(request_t *req) {
+  char id[128], asset[512], dst[PATH_MAX];
+
+  get_param(req->query, "id", id, sizeof(id));
+  get_param(req->query, "path", asset, sizeof(asset));
+  if(!theme_exists(id)) return respond_error(req->fd, 404, "no such theme");
+  if(!asset_path_valid(asset) || !source_kind_ok(asset) || source_path(id, asset, dst, sizeof(dst)) ||
+     !fs_read_within(dst, THEMES_DIR)) {
+    return respond_error(req->fd, 404, "no picture kept for this texture");
+  }
+  respond_file(req, dst);
+}
+
+
+/* Which of the given textures (paths, comma-separated, up to 32) have a
+   picture kept in the theme. */
+/* The theme's files (paths as the page lists them) whose original picture is kept. */
+static void
+sources_in(strbuf_t *sb, const char *id, const char *root, const char *rel, int *first, int depth) {
+  char dir[PATH_MAX];
+  if(depth > 32) return;
+  snprintf(dir, sizeof(dir), "%s%s", root, rel);
+  DIR *d = opendir(dir);
+  if(!d) return;
+  struct dirent *e;
+  while((e = readdir(d))) {
+    if(!strcmp(e->d_name, ".") || !strcmp(e->d_name, "..")) continue;
+    char child_rel[PATH_MAX], child[PATH_MAX], kept[PATH_MAX];
+    struct stat st;
+    if(snprintf(child_rel, sizeof(child_rel), "%s/%s", rel, e->d_name) >= (int)sizeof(child_rel)) continue;
+    snprintf(child, sizeof(child), "%s%s", root, child_rel);
+    if(lstat(child, &st)) continue;
+    if(S_ISDIR(st.st_mode)) sources_in(sb, id, root, child_rel, first, depth + 1);
+    else if(S_ISREG(st.st_mode) && asset_path_valid(child_rel) && source_kind_ok(child_rel) &&
+            !source_path(id, child_rel, kept, sizeof(kept)) && !access(kept, F_OK)) {
+      if(!*first) SB_LIT(sb, ",");
+      *first = 0;
+      sb_json_str(sb, child_rel);
+    }
+  }
+  closedir(d);
+}
+
+
+static void
+api_sources(request_t *req) {
+  char id[128], list[4096], dst[PATH_MAX], root[PATH_MAX];
+  strbuf_t sb = {0};
+  int first = 1;
+
+  get_param(req->query, "id", id, sizeof(id));
+  get_param(req->query, "paths", list, sizeof(list));
+  if(!theme_exists(id)) return respond_error(req->fd, 404, "no such theme");
+  SB_LIT(&sb, "{\"have\":[");
+  if(!list[0]) {
+    /* every file of the theme whose original is kept */
+    snprintf(root, sizeof(root), "%s/%s/files", THEMES_DIR, id);
+    sources_in(&sb, id, root, "", &first, 0);
+  } else {
+    char *save = NULL;
+    int n = 0;
+    for(char *p = strtok_r(list, ",", &save); p && n < 32; p = strtok_r(NULL, ",", &save), n++) {
+      if(!asset_path_valid(p) || !source_kind_ok(p) || source_path(id, p, dst, sizeof(dst)) || access(dst, F_OK)) continue;
+      if(!first) SB_LIT(&sb, ",");
+      first = 0;
+      sb_json_str(&sb, p);
+    }
+  }
+  sb_printf(&sb, "],\"keep\":%s,\"bytes\":%llu}", originals_off(id) ? "false" : "true", (unsigned long long)sources_bytes(id));
+  respond_json(req->fd, 200, &sb);
+}
+
+
+/* Remove every kept original of a theme (also from the copy Discard would restore, so the space is free at once). */
+static void
+api_delete_sources(request_t *req) {
+  char id[128], dir[PATH_MAX], snap[PATH_MAX];
+
+  get_param(req->query, "id", id, sizeof(id));
+  if(!theme_exists(id)) return respond_error(req->fd, 404, "no such theme");
+  themes_lock();
+  snprintf(dir, sizeof(dir), "%s/%s/sources", THEMES_DIR, id);
+  fs_rm_rf_under(THEMES_DIR, dir);
+  snapshot_path(id, snap, sizeof(snap));
+  if(fs_is_dir(snap) && strlen(snap) + 9 < sizeof(snap)) {
+    strcat(snap, "/sources");
+    fs_rm_rf_under(SNAP_DIR, snap);
+  }
+  themes_unlock();
   respond_ok(req->fd);
 }
 
@@ -1716,17 +1948,21 @@ api_texture(request_t *req) {
   if(!asset_path_valid(asset) || asset_kind(asset) != KIND_TEXTURE) return respond_error(req->fd, 403, "not a system texture");
   char stock[PATH_MAX];
   stock_path(asset, stock, sizeof(stock));
-  if(texture_info(stock, &t, header)) return respond_error(req->fd, 422, "cannot read this texture");
+  int compressed = 0;
+  if(texture_info(stock, &t, header, &compressed)) return respond_error(req->fd, 422, "cannot read this texture");
+  uint8_t frame[16];
+  size_t frame_len = compressed ? texture_frame_head(stock, frame) : 0;
 
-  size_t n = strlen(asset);
   strbuf_t sb = {0};
   sb_printf(&sb, "{\"width\":%u,\"height\":%u,\"mips\":%u,\"array\":%u,\"dxgi\":%u,\"format\":",
             t.width, t.height, t.mips, t.array, t.dxgi);
   sb_json_str(&sb, texture_format_name(&t));
   sb_printf(&sb, ",\"dataLength\":%llu,\"zstd\":%s,\"header\":\"",
-            (unsigned long long)t.data_len, n > 4 && !strcmp(asset + n - 4, ".zst") ? "true" : "false");
-  /* (the name matches the content for system files; uploads are checked by content) */
+            (unsigned long long)t.data_len, compressed ? "true" : "false");
+  /* (by the file's content: some compressed textures have a plain .dds name) */
   sb_base64(&sb, header, t.header_len);
+  SB_LIT(&sb, "\",\"frame\":\"");
+  sb_base64(&sb, frame, frame_len);   /* the system file's zstd frame header: a replacement starts the same */
   SB_LIT(&sb, "\"}");
   respond_json(req->fd, 200, &sb);
 }
@@ -1815,6 +2051,8 @@ route(request_t *req) {
   if(get && !strcmp(p, "/api/theme/files")) return api_theme_files(req);
   if(get && !strcmp(p, "/api/theme/file"))  return api_get_file(req);
   if(get && !strcmp(p, "/api/theme/check")) return api_check_file(req);
+  if(get && !strcmp(p, "/api/theme/source")) return api_get_source(req);
+  if(get && !strcmp(p, "/api/theme/sources")) return api_sources(req);
   if(get && !strcmp(p, "/api/log"))         return api_log(req);
   if(get && !strcmp(p, "/api/crashes"))     return api_crashes(req);
   if(get && !strcmp(p, "/api/crash"))       return api_crash(req);
@@ -1832,7 +2070,9 @@ route(request_t *req) {
   if(post && !strcmp(p, "/api/themes"))     return api_create_theme(req);
   if(del && !strcmp(p, "/api/themes"))      return api_delete_theme(req);
   if(put && !strcmp(p, "/api/theme/file"))  return api_put_file(req);
+  if(put && !strcmp(p, "/api/theme/source")) return api_put_source(req);
   if(del && !strcmp(p, "/api/theme/file"))  return api_delete_file(req);
+  if(del && !strcmp(p, "/api/theme/sources")) return api_delete_sources(req);
   if(put && !strcmp(p, "/api/theme/music")) return api_put_music(req);
   if(del && !strcmp(p, "/api/theme/music")) return api_delete_music(req);
   if(put && !strcmp(p, "/api/theme/preview")) return api_put_preview(req);

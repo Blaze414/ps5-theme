@@ -5,7 +5,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#define PLUGIN_VERSION "1.55"
+#define PLUGIN_VERSION "1.56"
 #define TITLE_ID       "THEM00001"
 #define WEB_PORT       8095
 
@@ -122,6 +122,7 @@ int         font_check_mem(const uint8_t *buf, size_t n, char *why, size_t len);
    game's editions share). The app database points some games' tiles at
    these instead (Death Stranding's at conceptmeta/234585 on 13.42). */
 #define FONT_DIR        "/preinst/common/font"    /* the console's text fonts (SST and others) */
+#define SYS_ASSET_DIR   "/system/vsh_asset"       /* the Appearance themes' textures, Welcome backgrounds */
 #define CATALOG_DIR     "/user/catalog_downloader"
 #define CATALOG_APPMETA_DIR CATALOG_DIR "/appmeta"
 #define CONCEPTMETA_DIR CATALOG_DIR "/conceptmeta"
@@ -164,8 +165,14 @@ typedef struct texture_info {
 
 uint8_t    *texture_load(const char *path, size_t *len, int *compressed);
 int         texture_parse(const uint8_t *d, size_t len, texture_info_t *t);
-int         texture_info(const char *path, texture_info_t *t, uint8_t header[148]);
+/* The texture's format and DDS header; *zstd (if given) says whether the file
+   holds zstd-compressed data, found by its content (the console keeps some
+   compressed textures under a plain .dds name). */
+int         texture_info(const char *path, texture_info_t *t, uint8_t header[148], int *zstd);
 int         texture_validate(const char *candidate, const char *stock, char *why, size_t len);
+/* The frame header of a system texture's zstd file (up to 16 bytes), for the
+   page to copy exactly; 0 if the file isn't zstd-compressed. */
+size_t      texture_frame_head(const char *path, uint8_t out[16]);
 const char *texture_format_name(const texture_info_t *t);
 
 

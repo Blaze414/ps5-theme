@@ -6,6 +6,7 @@ Builds a fake console tree (/system_ex, /data, /user/app), runs the real plugin
 `--serve` only sets up the tree and keeps the plugin running for manual UI use.
 """
 import errno
+import functools
 import hashlib
 import http.client
 import json
@@ -39,6 +40,7 @@ BULK = f"{APPS}/NPXS40010/assets/bulk"
 MEDIA = f"{APPS}/NPXS40012/assets"
 VSH = "/system_ex/vsh_asset"
 FONTS = "/preinst/common/font"           # the console's text fonts
+SYSA = "/system/vsh_asset"                # the Appearance themes' textures and Welcome backgrounds
 LOG = f"{BASE}/logs/log.txt"
 ENV = dict(os.environ, ASAN_OPTIONS="detect_leaks=0:halt_on_error=1:abort_on_error=0",
            UBSAN_OPTIONS="halt_on_error=1:print_stacktrace=1")
@@ -91,14 +93,77 @@ def dds_dxt1(w, h, fill=0x55):
     return bytes(hdr) + bytes([fill]) * size
 
 
-def zstd_stored(data):
-    out = bytearray(b"\x28\xb5\x2f\xfd\xa0") + struct.pack("<I", len(data))
-    blocks = max(1, -(-len(data) // 131072))
+def xxh64(data):
+    """XXH64, seed 0 (the low 32 bits are the zstd content checksum)."""
+    M, P1, P2, P3, P4, P5 = (1 << 64) - 1, 11400714785074694791, 14029467366897019727, 1609587929392839161, 9650029242287828579, 2870177450012600261
+    rotl = lambda x, r: ((x << r) | (x >> (64 - r))) & M
+    rnd = lambda acc, v: (rotl((acc + v * P2) & M, 31) * P1) & M
+    merge = lambda h, v: (((h ^ rnd(0, v)) * P1) + P4) & M
+    n, o = len(data), 0
+    if n >= 32:
+        v = [(P1 + P2) & M, P2, 0, (-P1) & M]
+        while o + 32 <= n:
+            for k in range(4):
+                v[k] = rnd(v[k], int.from_bytes(data[o + 8 * k:o + 8 * k + 8], "little"))
+            o += 32
+        h = (rotl(v[0], 1) + rotl(v[1], 7) + rotl(v[2], 12) + rotl(v[3], 18)) & M
+        for k in range(4):
+            h = merge(h, v[k])
+    else:
+        h = P5
+    h = (h + n) & M
+    while o + 8 <= n:
+        h = ((rotl(h ^ rnd(0, int.from_bytes(data[o:o + 8], "little")), 27) * P1) + P4) & M
+        o += 8
+    if o + 4 <= n:
+        h = ((rotl(h ^ ((int.from_bytes(data[o:o + 4], "little") * P1) & M), 23) * P2) + P3) & M
+        o += 4
+    while o < n:
+        h = (rotl(h ^ ((data[o] * P5) & M), 11) * P1) & M
+        o += 1
+    h ^= h >> 33
+    h = (h * P2) & M
+    h ^= h >> 29
+    h = (h * P3) & M
+    return h ^ (h >> 32)
+
+
+def zstd_stored(data, like=None):
+    """A zstd frame of stored blocks, with the frame header of `like` (a system
+    file's bytes: descriptor, window, content size) and its content checksum if
+    the descriptor asks for one; without a model, single segment, 4-byte size."""
+    desc = like[4] if like else 0xa0
+    single, fcs, dict_id, csum = (desc >> 5) & 1, desc >> 6, desc & 3, (desc >> 2) & 1
+    wb = like[5] if like and not single else 0
+    fcs_len = single if fcs == 0 else (2, 4, 8)[fcs - 1]
+    window = len(data) if single else ((1 << (10 + (wb >> 3))) + ((1 << (10 + (wb >> 3))) >> 3) * (wb & 7))
+    block = max(1, min(131072, window))
+    out = bytearray(b"\x28\xb5\x2f\xfd") + bytes([desc])
+    if not single:
+        out.append(wb)
+    out += bytes(4 if dict_id == 3 else dict_id)
+    if fcs_len == 1:
+        out.append(len(data))
+    elif fcs_len == 2:
+        out += struct.pack("<H", len(data) - 256)
+    elif fcs_len == 4:
+        out += struct.pack("<I", len(data))
+    elif fcs_len == 8:
+        out += struct.pack("<Q", len(data))
+    blocks = max(1, -(-len(data) // block))
     for b in range(blocks):
-        chunk = data[b * 131072:(b + 1) * 131072]
+        chunk = data[b * block:(b + 1) * block]
         h = (len(chunk) << 3) | (1 if b == blocks - 1 else 0)
         out += bytes([h & 255, (h >> 8) & 255, (h >> 16) & 255]) + chunk
+    if csum:
+        out += struct.pack("<I", xxh64(data) & 0xffffffff)
     return bytes(out)
+
+
+# The frame headers of the console's own textures: single segment with a 4-byte size (0xa0), and
+# the same with a content checksum (0xa4, as in bg_image_load_error.dds.zst).
+SONY_FRAME = bytes([0x28, 0xb5, 0x2f, 0xfd, 0xa0, 0, 0, 0, 0])
+SONY_FRAME_CHECKSUM = bytes([0x28, 0xb5, 0x2f, 0xfd, 0xa4, 0, 0, 0, 0])
 
 
 def zstd_cli(data, level=19):
@@ -221,7 +286,7 @@ def write(path, data):
 
 
 def build_console():
-    for d in ("/system_ex", "/mnt/rnps", "/data", "/user", "/preinst", "/tmp/notifications.txt", "/tmp/tile-registered"):
+    for d in ("/system_ex", "/system", "/mnt/rnps", "/data", "/user", "/preinst", "/tmp/notifications.txt", "/tmp/tile-registered"):
         if os.path.isdir(d):
             shutil.rmtree(d)
         elif os.path.exists(d):
@@ -245,6 +310,11 @@ def build_console():
     write(f"{FONTS}/SST-Bold.otf", font_fixture.font("cff", glyphs=120))
     write(f"{FONTS}/DFHEI5-SONY.ttf", font_fixture.font("tt", glyphs=150))
     write(f"{FONTS}/notes.txt", b"not a font")
+    # The Appearance themes' textures: BC7 DDS, zstd-compressed under a plain .dds name, as on the console.
+    write(f"{SYSA}/control_center_ps2_bottom.dds", zstd_stored(dds_bc7(64, 32), SONY_FRAME_CHECKSUM))
+    write(f"{SYSA}/control_center_ps2_top.dds", zstd_stored(dds_bc7(48, 32), SONY_FRAME))
+    write(f"{SYSA}/homeui_ps2.dds", zstd_stored(dds_bc7(64, 24), SONY_FRAME))
+    write(f"{SYSA}/welcome-hub-background-0-4k.jpg", jpeg_header(96, 54))
     write(f"{MEDIA}/anim/spinner.json", b'{"v":"5.7","w":100,"h":100,"layers":[]}')
     write(f"{MEDIA}/icons/star.svg", b'<svg xmlns="http://www.w3.org/2000/svg" width="8" height="8"/>')
     write(f"{MEDIA}/video/loop.mp4", b"\x00\x00\x00\x18ftypisom" + b"\0" * 40)
@@ -444,7 +514,7 @@ S = {}  # shared state between ordered tests
 
 def t_startup():
     s = status()
-    assert s["fw"] == "13.42" and s["version"] == "1.55" and s["themes"] == [], s
+    assert s["fw"] == "13.42" and s["version"] == "1.56" and s["themes"] == [], s
     listing = open(f"{BASE}/dump/assets-v2-13.42.txt").read()
     assert f"{VSH}/bg_hub_default.dds.zst" in listing
     assert f"{HOME}/bg.png" in listing and "/mnt/rnps/apps/NPXS40099/a.png" in listing
@@ -454,7 +524,7 @@ def t_startup():
     assert open("/tmp/tile-registered").read().strip() == "THEM00001"
     assert "starting" in log_text()
     notes = open("/tmp/notifications.txt").read()
-    assert "ps5-theme 1.55 starting" in notes and "ps5-theme ready" in notes, notes
+    assert "ps5-theme 1.56 starting" in notes and "ps5-theme ready" in notes, notes
 
 
 def t_ui_and_icon_served():
@@ -1706,7 +1776,7 @@ def t_save_and_discard():
 def t_home_background_textures():
     stock_path = f"{VSH}/bg_hub_default.dds.zst"
     stock_dds = subprocess.run(["zstd", "-d", "-c", "-q", stock_path], capture_output=True, check=True).stdout
-    code, r = call("GET", "/api/assets", {"q": "vsh_asset"})
+    code, r = call("GET", "/api/assets", {"q": "system_ex/vsh_asset"})
     assert {a["path"]: a["kind"] for a in r["assets"]} == {stock_path: "texture", f"{VSH}/bgm_home.at9": "audio",
                                                           f"{VSH}/sfx_quiet.at9": "audio", f"{VSH}/eboot_like.rco": "rco",
                                                           UI_RCO: "rco", f"{VSH}/bg_NPXS40037.dds.zst": "texture"}, r
@@ -1718,9 +1788,10 @@ def t_home_background_textures():
     assert call("GET", "/api/asset/texture", {"path": f"{HOME}/bg.png"})[0] == 403
 
     assert call("POST", "/api/themes", {"id": "wall", "name": "Wallpaper"})[0] == 200
-    mine = stock_dds[:148] + bytes((i * 31) & 255 for i in range(len(stock_dds) - 148))
-    for bad, needle in [(zstd_stored(dds_bc7(128, 128)), "exactly like the system file"),
-                        (zstd_stored(mine[:-16]), "not a valid DDS"),
+    mine = stock_dds[:148] + bytes((i * 31 + 1) & 255 for i in range(len(stock_dds) - 148))
+    stock_file = open(stock_path, "rb").read()
+    for bad, needle in [(zstd_stored(dds_bc7(128, 128), stock_file), "exactly like the system file"),
+                        (zstd_stored(mine[:-16], stock_file), "not a valid DDS"),
                         (b"\x28\xb5\x2f\xfd" + b"\xff" * 40, "zstd"),
                         # 25 bytes claiming to unpack to 200 MB: refused without unpacking
                         (b"\x28\xb5\x2f\xfd\xa0" + struct.pack("<I", 200 << 20) + b"\x51\x00\x00" + bytes(10),
@@ -1729,12 +1800,19 @@ def t_home_background_textures():
         code, r = put_file("wall", stock_path, bad)
         assert code == 422 and needle in r["error"], (needle, code, r)
     assert put_file("wall", stock_path, zstd_cli(mine))[0] == 200          # fully compressed by the real tool
-    stored = zstd_stored(mine)
+    stored = zstd_stored(mine, stock_file)
     assert put_file("wall", stock_path, stored)[0] == 200                  # stored blocks, as the builder writes
+    # as the pages before 1.56 wrote it (one frame form for every texture): rewritten with the system file's
+    assert put_file("wall", stock_path, zstd_stored(mine))[0] == 200
+    assert open(f"{BASE}/themes/wall/files{stock_path}", "rb").read() == stored
 
+    # A theme made before 1.56 already holds the old frame form on disk: applying it rewrites the file with
+    # the system file's, and the whole theme applies (it was "applied partly" with the file skipped).
+    write(f"{BASE}/themes/wall/files{stock_path}", zstd_stored(mine))
     assert call("POST", "/api/apply", {"id": "wall"})[0] == 200
     s = wait_applied("wall")
-    assert "1 files verified" in s["result"], s["result"]
+    assert "1 files verified" in s["result"] and "partly" not in s["result"], s["result"]
+    assert open(f"{BASE}/themes/wall/files{stock_path}", "rb").read() == stored
     assert open(stock_path, "rb").read() == stored
     assert crc_file(f"{VSH}/eboot_like.rco") == zlib.crc32(b"\0" * 64)    # rest of the folder stays stock
     assert len(mounts_on(VSH)) == 1
@@ -2119,6 +2197,337 @@ def t_fonts():
             subprocess.run(["umount", "-l", view])
         clear_sandboxes()
     assert call("DELETE", "/api/themes", {"id": "fonts"})[0] == 200
+
+
+BC7_ALPHA_JS = r"""
+const fs = require("fs");
+const html = fs.readFileSync(process.argv[2], "utf8");
+const block = html.slice(html.indexOf("/* bc7:begin */"), html.indexOf("/* bc7:end */"));
+const B = new Function(block + ";return { bc7Block, bc7BlockAlpha, bc7DecodeMode6 };")();
+let seed = 12345; const rnd = () => (seed = (seed * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff;
+const out = new Uint8Array(16), dec = new Uint8Array(64);
+function run(name, make, n, expect) {
+  let rgbErr = 0, rgbN = 0, aErr = 0, aN = 0, worstA = 0;
+  for (let t = 0; t < n; t++) {
+    const px = new Uint8ClampedArray(64); make(px);
+    B.bc7BlockAlpha(px, out, 0);
+    if (!B.bc7DecodeMode6(out, 0, dec)) throw new Error(name + ": not a mode 6 block");
+    for (let i = 0; i < 64; i += 4) {
+      const da = Math.abs(dec[i + 3] - px[i + 3]); aErr += da * da; aN++; worstA = Math.max(worstA, da);
+      if (px[i + 3] >= 16) for (let c = 0; c < 3; c++) { const d = dec[i + c] - px[i + c]; rgbErr += d * d; rgbN++; }
+    }
+  }
+  const rgb = rgbN ? Math.sqrt(rgbErr / rgbN) : 0, a = Math.sqrt(aErr / aN);
+  if (expect.rgb !== undefined && rgb > expect.rgb) throw new Error(`${name}: colour error ${rgb} > ${expect.rgb}`);
+  if (expect.a !== undefined && a > expect.a) throw new Error(`${name}: alpha error ${a} > ${expect.a}`);
+  if (expect.exactA && worstA) throw new Error(`${name}: alpha not exact (${worstA})`);
+}
+const flat = (r, g, b, a) => px => { for (let i = 0; i < 64; i += 4) { px[i] = r; px[i + 1] = g; px[i + 2] = b; px[i + 3] = a; } };
+run("opaque flat", flat(40, 120, 200, 255), 50, { exactA: true, rgb: 2 });
+run("fully clear", flat(0, 0, 0, 0), 50, { exactA: true });
+run("half clear flat", flat(200, 50, 50, 128), 50, { a: 2, rgb: 3 });
+run("opaque gradient", px => { const r = rnd() * 60, g = rnd() * 255; for (let i = 0; i < 64; i += 4) { const t = (i / 4) / 15; px[i] = r + t * 180; px[i + 1] = g * (1 - t); px[i + 2] = 80 + t * 100; px[i + 3] = 255; } }, 200, { exactA: true, rgb: 6 });
+run("alpha ramp", px => { const b = [rnd() * 255, rnd() * 255, rnd() * 255]; for (let i = 0; i < 64; i += 4) { px[i] = b[0]; px[i + 1] = b[1]; px[i + 2] = b[2]; px[i + 3] = Math.round((i / 4) / 15 * 255); } }, 200, { a: 6, rgb: 4 });
+run("hard edge", px => { const b = [rnd() * 255, rnd() * 255, rnd() * 255]; for (let i = 0; i < 64; i += 4) { px[i] = b[0]; px[i + 1] = b[1]; px[i + 2] = b[2]; px[i + 3] = ((i / 4) % 4) < 2 ? 255 : 0; } }, 200, { a: 8, rgb: 4 });
+const px = new Uint8ClampedArray(64).fill(255); B.bc7Block(px, out, 0);
+if (!B.bc7DecodeMode6(out, 0, dec) || dec[3] !== 255) throw new Error("the opaque encoder changed");
+console.log("bc7 alpha ok");
+"""
+
+
+def t_bc7_keeps_transparency():
+    """The page's BC7 block encoder for textures with see-through parts: solid
+    and clear alpha exact, soft edges close, colours close, still mode 6."""
+    write("/tmp/bc7a.js", BC7_ALPHA_JS.encode())
+    out = subprocess.run(["node", "/tmp/bc7a.js", WEB_PAGE], capture_output=True, text=True)
+    assert out.returncode == 0 and "bc7 alpha ok" in out.stdout, out.stdout + out.stderr
+
+
+ZSTD_FRAMES_JS = r"""
+const fs = require("fs");
+const html = fs.readFileSync(process.argv[2], "utf8");
+const block = html.slice(html.indexOf("/* zstd:begin */"), html.indexOf("/* zstd:end */"));
+const Z = new Function(block + ";return { zstdStored, xxh64 };")();
+const cases = JSON.parse(process.argv[3]);
+for (const [desc, n] of cases) {
+  const like = new Uint8Array([0x28, 0xb5, 0x2f, 0xfd, desc, ...((desc & 0x20) ? [] : [0x5d]), 0, 0, 0, 0]);
+  const data = new Uint8Array(n);
+  for (let i = 0; i < n; i++) data[i] = (i * 31 + 7) & 255;
+  fs.writeFileSync(`/tmp/zs-${desc}-${n}.bin`, Z.zstdStored(data, like));
+}
+const known = Z.xxh64(new Uint8Array([97]));
+if (known !== 0xd24ec4f1a98c6e5bn || Z.xxh64(new Uint8Array(0)) !== 0xef46db3751d8e999n) throw new Error("xxh64 differs from the reference");
+console.log("zstd frames ok");
+"""
+
+BLEED_JS = r"""
+const fs = require("fs");
+const html = fs.readFileSync(process.argv[2], "utf8");
+const block = html.slice(html.indexOf("/* bleed:begin */"), html.indexOf("/* bleed:end */"));
+const bleedClear = new Function(block + ";return bleedClear;")();
+const w = 24, h = 1, pix = new Uint8ClampedArray(w * 4);
+pix.set([200, 40, 10, 255], 0);                    // one visible pixel at the left edge
+bleedClear(pix, w, h);
+for (let x = 1; x <= 8; x++) if (pix[x * 4] !== 200 || pix[x * 4 + 1] !== 40 || pix[x * 4 + 3] !== 0) throw new Error(`pixel ${x} did not take the visible colour`);
+for (let x = 9; x < w; x++) if (pix[x * 4] !== 255 || pix[x * 4 + 1] !== 255 || pix[x * 4 + 2] !== 255) throw new Error(`pixel ${x} is not white`);
+if (pix[3] !== 255 || pix[0] !== 200) throw new Error("a visible pixel changed");
+console.log("bleed ok");
+"""
+
+
+def t_page_writes_the_consoles_zstd_frames():
+    """The page wraps a texture in a zstd frame headed like the system file's
+    (descriptor, window, size field, content checksum): its bytes equal the
+    reference writer's, and the real zstd tool reads them and the checksum."""
+    cases = [[d, n] for d in (0xa0, 0xa4, 0x80, 0x84, 0x60, 0x64, 0x00, 0x04, 0x24, 0x20) for n in (0, 1, 200, 3000, 70000, 300000)
+             if not (d >> 6 == 0 and d & 0x20 and n > 255) and not (d >> 6 == 1 and (n < 256 or n > 65791))]
+    write("/tmp/zstdjs.js", ZSTD_FRAMES_JS.encode())
+    out = subprocess.run(["node", "/tmp/zstdjs.js", WEB_PAGE, json.dumps(cases)], capture_output=True, text=True)
+    assert out.returncode == 0 and "zstd frames ok" in out.stdout, out.stdout + out.stderr
+    for desc, n in cases:
+        data = bytes((i * 31 + 7) & 255 for i in range(n))
+        like = bytes([0x28, 0xb5, 0x2f, 0xfd, desc] + ([] if desc & 0x20 else [0x5d]) + [0, 0, 0, 0])
+        got = open(f"/tmp/zs-{desc}-{n}.bin", "rb").read()
+        assert got == zstd_stored(data, like), (hex(desc), n)
+        assert subprocess.run(["zstd", "-t", "-q", f"/tmp/zs-{desc}-{n}.bin"], capture_output=True).returncode == 0, (hex(desc), n)
+        assert subprocess.run(["zstd", "-d", "-c", "-q", f"/tmp/zs-{desc}-{n}.bin"], capture_output=True).stdout == data, (hex(desc), n)
+
+
+PLACE_JS = r"""
+const fs = require("fs");
+const html = fs.readFileSync(process.argv[2], "utf8");
+const block = html.slice(html.indexOf("/* pad:begin */"), html.indexOf("/* pad:end */"));
+const P = new Function(block + ";return { textureDraw, textureAnchor, placementParams };")();
+const near = (a, b) => Math.abs(a - b) < 0.5;
+const eq = (name, got, want) => { for (const k of Object.keys(want)) if (!near(got[k], want[k])) throw new Error(`${name}: ${k} is ${got[k]}, wanted ${want[k]}`); };
+const B = "/system/vsh_asset/control_center_ps2_bottom.dds", T = "/system/vsh_asset/control_center_ps2_top.dds", H = "/system/vsh_asset/homeui_ps2.dds";
+// A 1920x1080 picture on the 2560x820 bottom panel: filled from the bottom edge, so a crop keeps the clouds there
+eq("fill", P.textureDraw(B, 0, "cover", 2560, 820, 1920, 1080), { x: 0, y: 820 - 1440, dw: 2560, dh: 1440 });
+// padding leaves the lowest 10% clear: the clip box ends there and the picture sits against it
+const padded = P.textureDraw(B, 10, "cover", 2560, 820, 1920, 1080);
+eq("padded", padded, { y: 738 - 1440, dw: 2560, dh: 1440 });
+eq("box", padded.box, { x: 0, y: 0, w: 2560, h: 738 });
+eq("fit", P.textureDraw(B, 0, "contain", 2560, 820, 1920, 1080), { x: (2560 - 1920 * 820 / 1080) / 2, y: 0, dh: 820 });
+eq("stretch", P.textureDraw(B, 10, "stretch", 2560, 820, 1920, 1080), { x: 0, y: 0, dw: 2560, dh: 738 });
+// the top-right piece is held to its top and right edges
+const top = P.textureDraw(T, 10, "cover", 980, 620, 1920, 1080);
+eq("top box", top.box, { x: 0, y: 62, w: 882, h: 558 });
+eq("top", top, { y: 62, dh: 558 });
+if (!near(top.x + top.dw, 882)) throw new Error("the top piece's picture is not against its right edge");
+// the home screen's artwork hangs from the top of the screen: filled from there, with the padding left clear above it
+eq("home", P.textureDraw(H, 0, "cover", 2560, 800, 1920, 1080), { x: 0, y: 0, dw: 2560, dh: 1440 });
+const homePad = P.textureDraw(H, 10, "cover", 2560, 800, 1920, 1080);
+eq("home padded", homePad, { y: 80, dw: 2560, dh: 1440 });
+eq("home box", homePad.box, { x: 0, y: 80, w: 2560, h: 720 });
+if (!P.textureAnchor(H).top || P.textureAnchor(H).bottom || P.textureAnchor(H).band) throw new Error("homeui hangs from the top, with no clock band");
+// padding is limited to 40%
+eq("limit", P.textureDraw(B, 90, "stretch", 2560, 820, 1920, 1080).box, { h: 820 - 328 });
+// the top-right piece keeps the band its clock and icons are drawn over clear: 26% of its height
+const kept = P.textureDraw(T, 0, "cover", 980, 620, 1920, 1080, true);
+eq("keep box", kept.box, { y: 161, h: 620 - 161 });
+eq("keep top", kept, { y: 161 });
+if (P.textureDraw(T, 0, "cover", 980, 620, 1920, 1080, false).box.y !== 0) throw new Error("the band stays clear only when asked");
+if (P.textureDraw(T, 30, "cover", 980, 620, 1920, 1080, true).box.y !== 186) throw new Error("the larger of padding and band");
+if (P.textureDraw(B, 0, "cover", 2560, 820, 1920, 1080, true).box.y !== 0) throw new Error("the bottom panel has no clock band");
+// the choice offered for each piece
+const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+if (!same(P.placementParams("fill", 9), { fit: "cover", pad: 0 })) throw new Error("fill has no padding");
+if (!same(P.placementParams("pad", 10), { fit: "cover", pad: 10 })) throw new Error("padded fill");
+if (!same(P.placementParams("pad", 99), { fit: "cover", pad: 40 })) throw new Error("padding is limited");
+if (!same(P.placementParams("pad", "x"), { fit: "cover", pad: 0 })) throw new Error("a bad padding is none");
+if (!same(P.placementParams("fit", 10), { fit: "contain", pad: 0 })) throw new Error("fit");
+if (!same(P.placementParams("stretch", 10), { fit: "stretch", pad: 0 })) throw new Error("stretch");
+if (!same(P.placementParams("nonsense", 10), { fit: "cover", pad: 0 })) throw new Error("an unknown choice is fill");
+console.log("place ok");
+"""
+
+
+def t_page_places_textures_against_their_edge():
+    """A see-through texture's picture is placed against the screen edge the
+    texture meets (bottom panel: bottom; top-right piece: top and right), with
+    the padding left clear."""
+    write("/tmp/place.js", PLACE_JS.encode())
+    out = subprocess.run(["node", "/tmp/place.js", WEB_PAGE], capture_output=True, text=True)
+    assert out.returncode == 0 and "place ok" in out.stdout, out.stdout + out.stderr
+
+
+def t_page_bleeds_colour_into_clear_pixels():
+    """Textures with see-through parts carry colour in their clear pixels, as
+    the console's do: the nearest visible colour, then white."""
+    write("/tmp/bleed.js", BLEED_JS.encode())
+    out = subprocess.run(["node", "/tmp/bleed.js", WEB_PAGE], capture_output=True, text=True)
+    assert out.returncode == 0 and "bleed ok" in out.stdout, out.stdout + out.stderr
+
+
+def t_texture_sources():
+    """The picture a texture or picture was made from is kept in its theme, so
+    an option changed later (placement, fit) can make it again without a new
+    upload: stored only as a real picture, and only for a system texture or
+    picture; handed back as it was, listed, linked rather than stored twice
+    when one picture went to several files, copied with the theme, and removed
+    with the file."""
+    top, bottom = f"{SYSA}/control_center_ps2_top.dds", f"{SYSA}/control_center_ps2_bottom.dds"
+    pic = png(40, 20, (200, 30, 30))
+    put = lambda theme, asset, data, **kw: call("PUT", "/api/theme/source", {"id": theme, "path": asset, "crc": f"{zlib.crc32(data):08x}"}, data, **kw)
+    assert call("POST", "/api/themes", {"id": "srcs", "name": "Sources"})[0] == 200
+    assert call("GET", "/api/theme/sources", {"id": "srcs", "paths": f"{top},{bottom}"})[1]["have"] == []
+    assert put("srcs", top, pic)[0] == 200
+    assert put("srcs", top, pic, token=False)[0] == 403                           # a change needs the page's header
+    for bad, asset, code in [(b"not a picture at all", top, 422), (b"", top, 400),
+                             (pic, "/data/ps5-theme/x.png", 403),                 # only a system texture's or picture's
+                             (pic, f"{VSH}/bgm_home.at9", 403),                   # not a sound's
+                             (pic, "/system_ex/rnps/apps/NPXS40008/assets/../../x.dds", 403)]:
+        got = put("srcs", asset, bad)[0]
+        assert got == code, (asset, got)
+    code, body = call("GET", "/api/theme/source", {"id": "srcs", "path": top})
+    assert code == 200 and body == pic, code                                      # handed back as it was
+    assert call("GET", "/api/theme/source", {"id": "srcs", "path": bottom})[0] == 404
+    assert call("GET", "/api/theme/sources", {"id": "srcs", "paths": f"{top},{bottom}"})[1]["have"] == [top]
+    mine = png(60, 30, (10, 200, 10))
+    assert put("srcs", top, mine)[0] == 200                                       # attached again: replaced
+    assert call("GET", "/api/theme/source", {"id": "srcs", "path": top})[1] == mine
+    assert put("srcs", bottom, pic)[0] == 200
+    # a system picture's too (the Fit option applies to it)
+    welcome = f"{SYSA}/welcome-hub-background-0-4k.jpg"
+    assert put("srcs", welcome, pic)[0] == 200
+    assert call("GET", "/api/theme/source", {"id": "srcs", "path": welcome})[1] == pic
+    # one picture attached at several sizes is stored once: the others are links to it
+    fnv = lambda path: format(functools.reduce(lambda h, c: ((h ^ c) * 1099511628211) & (2**64 - 1), path.encode(), 1469598103934665603), "016x")
+    kept = lambda theme, path: f"{BASE}/themes/{theme}/sources/{fnv(path)}.src"
+    link = lambda theme, path, same, **kw: call("PUT", "/api/theme/source", {"id": theme, "path": path, "same_as": same}, b"", **kw)
+    assert link("srcs", welcome, top, token=False)[0] == 403
+    assert link("srcs", welcome, f"{SYSA}/homeui_ps2.dds")[0] == 404              # nothing kept for that one
+    assert link("srcs", welcome, f"{VSH}/bgm_home.at9")[0] == 404
+    assert link("srcs", f"{VSH}/bgm_home.at9", top)[0] == 403                     # not a sound's
+    assert link("srcs", welcome, top)[0] == 200
+    assert call("GET", "/api/theme/source", {"id": "srcs", "path": welcome})[1] == mine
+    assert os.stat(kept("srcs", welcome)).st_ino == os.stat(kept("srcs", top)).st_ino
+    assert put("srcs", welcome, pic)[0] == 200                                    # attached again: its own, the other one stays
+    assert call("GET", "/api/theme/source", {"id": "srcs", "path": welcome})[1] == pic
+    assert call("GET", "/api/theme/source", {"id": "srcs", "path": top})[1] == mine
+    # it is never applied: only a theme's files are
+    assert not any("sources" in f["path"] for f in call("GET", "/api/theme/files", {"id": "srcs"})[1]["files"])
+    # it goes with the theme when it is copied, and with its texture when that is reset
+    assert call("POST", "/api/themes/duplicate", {"id": "srcs", "new_id": "srcs2", "name": "Copy"})[0] == 200
+    assert call("GET", "/api/theme/source", {"id": "srcs2", "path": top})[1] == mine
+    assert call("DELETE", "/api/themes", {"id": "srcs2"})[0] == 200
+    stock_dds = subprocess.run(["zstd", "-d", "-c", "-q", top], capture_output=True, check=True).stdout
+    texture = zstd_stored(stock_dds[:148] + bytes((i * 29 + 5) & 255 for i in range(len(stock_dds) - 148)), open(top, "rb").read())
+    assert put_file("srcs", top, texture)[0] == 200
+    # listing without paths: the theme's files whose original is kept (a kept picture of a file not in the theme isn't)
+    assert call("GET", "/api/theme/sources", {"id": "srcs"})[1]["have"] == [top]
+    assert call("DELETE", "/api/theme/file", {"id": "srcs", "path": top})[0] == 200
+    assert call("GET", "/api/theme/sources", {"id": "srcs"})[1]["have"] == []
+    assert call("GET", "/api/theme/source", {"id": "srcs", "path": top})[0] == 404
+    assert call("GET", "/api/theme/source", {"id": "srcs", "path": bottom})[0] == 200   # the other piece's stays
+    assert call("DELETE", "/api/themes", {"id": "srcs"})[0] == 200
+
+    # keeping originals can be switched off for a theme (to save space), and the kept ones removed
+    assert call("POST", "/api/themes", {"id": "srcs3", "name": "Space"})[0] == 200
+    settings = lambda **kw: call("POST", "/api/theme/settings", {"id": "srcs3", **kw})
+    assert call("GET", "/api/theme/sources", {"id": "srcs3"})[1] == {"have": [], "keep": True, "bytes": 0}
+    assert put("srcs3", top, pic)[0] == 200 and put("srcs3", welcome, pic)[0] == 200
+    assert put_file("srcs3", top, texture)[0] == 200
+    assert link("srcs3", bottom, top)[0] == 200                                  # linked: counted once
+    got = call("GET", "/api/theme/sources", {"id": "srcs3"})[1]
+    assert got == {"have": [top], "keep": True, "bytes": 2 * len(pic)}, got      # (only files in the theme are listed)
+    assert settings(keep_originals="2")[0] == 400 and settings(keep_originals="x")[0] == 400
+    assert call("POST", "/api/theme/settings", {"id": "srcs3", "keep_originals": "0"}, token=False)[0] == 403
+    assert settings(keep_originals="0")[0] == 200
+    got = call("GET", "/api/theme/sources", {"id": "srcs3"})[1]
+    assert got["keep"] is False and got["have"] == [top], got                     # what is kept stays until removed
+    for code_expected, r in [(409, put("srcs3", welcome, pic)), (409, link("srcs3", welcome, top))]:
+        assert r[0] == code_expected and "switched off" in r[1]["error"], r
+    assert call("GET", "/api/theme/source", {"id": "srcs3", "path": top})[1] == pic
+    assert call("POST", "/api/themes/duplicate", {"id": "srcs3", "new_id": "srcs4", "name": "Space copy"})[0] == 200
+    assert call("GET", "/api/theme/sources", {"id": "srcs4"})[1]["keep"] is False  # the choice goes with the theme
+    assert call("DELETE", "/api/themes", {"id": "srcs4"})[0] == 200
+    assert call("DELETE", "/api/theme/sources", {"id": "srcs3"}, token=False)[0] == 403
+    assert call("DELETE", "/api/theme/sources", {"id": "nope"})[0] == 404
+    assert call("DELETE", "/api/theme/sources", {"id": "srcs3"})[0] == 200
+    got = call("GET", "/api/theme/sources", {"id": "srcs3"})[1]
+    assert got == {"have": [], "keep": False, "bytes": 0}, got
+    assert call("GET", "/api/theme/source", {"id": "srcs3", "path": top})[0] == 404
+    assert call("GET", "/api/theme/files", {"id": "srcs3"})[1]["files"]           # the theme's files are untouched
+    assert settings(keep_originals="1")[0] == 200
+    assert put("srcs3", welcome, pic)[0] == 200                                   # on again
+    assert call("GET", "/api/theme/sources", {"id": "srcs3"})[1]["keep"] is True
+    assert call("DELETE", "/api/themes", {"id": "srcs3"})[0] == 200
+
+
+def t_appearance_textures():
+    """The Appearance themes' textures in /system/vsh_asset: listed, accepted
+    only as the console's exact format (zstd-compressed BC7 under a plain .dds
+    name), and applied on that folder and in the system's views of it; the rest
+    of the folder stays the console's."""
+    bottom, top, home = (f"{SYSA}/{n}.dds" for n in ("control_center_ps2_bottom", "control_center_ps2_top", "homeui_ps2"))
+    code, r = call("GET", "/api/assets", {"q": "/system/vsh_asset"})
+    assert {a["path"]: a["kind"] for a in r["assets"]} == {
+        bottom: "texture", top: "texture", home: "texture", f"{SYSA}/welcome-hub-background-0-4k.jpg": "image"}, r
+    code, info = call("GET", "/api/asset/texture", {"path": top})
+    assert code == 200 and info["dxgi"] == 98 and info["zstd"] is True and (info["width"], info["height"]) == (48, 32), info
+
+    stock_dds = subprocess.run(["zstd", "-d", "-c", "-q", top], capture_output=True, check=True).stdout
+    mine = stock_dds[:148] + bytes((i * 29 + 5) & 255 for i in range(len(stock_dds) - 148))
+    stock_top, stock_bottom = open(top, "rb").read(), open(bottom, "rb").read()
+    assert stock_top[4] == 0xa0 and stock_bottom[4] == 0xa4          # frame headers as the console's: plain, and with a checksum
+    assert call("POST", "/api/themes", {"id": "appear", "name": "Appearance"})[0] == 200
+    zeroed = bytearray(mine)
+    zeroed[148 + 32] = 0                                              # the third block's first byte: a reserved BC7 mode
+    for bad, needle in [(zstd_stored(dds_bc7(32, 16), stock_top), "exactly like the system file"),
+                        (mine, "zstd-compressed like the system file"),
+                        (zstd_stored(mine[:-16], stock_top), "not a valid DDS"),
+                        (zstd_stored(mine, stock_top) + b"\0", "not a valid zstd-compressed texture"),          # a stray byte after the frame
+                        (zstd_stored(mine, stock_top) + zstd_stored(b"", SONY_FRAME), ("whole file", "not a valid zstd")),   # or a second frame
+                        (zstd_stored(bytes(zeroed), stock_top), "reserved BC7 mode")]:
+        code, r = put_file("appear", top, bad)
+        assert code == 422 and any(n in r["error"] for n in ((needle,) if isinstance(needle, str) else needle)), (needle, code, r)
+    bottom_dds = subprocess.run(["zstd", "-d", "-c", "-q", bottom], capture_output=True, check=True).stdout[:148] \
+        + bytes((i * 17 + 3) & 255 for i in range(2048))
+    stored = zstd_stored(mine, stock_top)
+    stored_bottom = zstd_stored(bottom_dds, stock_bottom)
+    # A texture right in every way but its frame header (a checksum the system file lacks, none where it has
+    # one, as pages before 1.56 wrote them) is written again with the system file's own header: byte for byte.
+    theme_file = lambda path: open(f"{BASE}/themes/appear/files{path}", "rb").read()
+    assert put_file("appear", top, zstd_stored(mine, stock_bottom))[0] == 200
+    assert theme_file(top) == stored
+    assert put_file("appear", bottom, zstd_stored(bottom_dds, stock_top))[0] == 200
+    assert theme_file(bottom) == stored_bottom
+    assert put_file("appear", top, stored)[0] == 200
+    assert put_file("appear", bottom, stored_bottom)[0] == 200
+    # A remembered check result is made by a version and a revision of the rules: results of other rules are
+    # not trusted (the same version can ship twice while a feature is built).
+    remembered = open(f"{BASE}/checked").read().splitlines()
+    assert remembered and all(re.match(r"1\.56r\d+\t", l) for l in remembered), remembered[:2]
+    assert put_file("appear", f"{HOME}/bg.png", S["bg"])[0] == 200
+
+    shell = "/mnt/sandbox/NPXS40087_000"
+    view = f"{shell}/system/vsh_asset"
+    if not EMULATED:
+        os.makedirs(view, exist_ok=True)
+        subprocess.run(["mount", "--bind", SYSA, view], check=True)
+        S["plugin"].term()
+        S["plugin"] = Plugin()
+    keep = {p: crc_file(p) for p in (home, f"{SYSA}/welcome-hub-background-0-4k.jpg")}
+    try:
+        apply_and_wait("appear")
+        assert open(top, "rb").read() == stored and open(bottom, "rb").read() == stored_bottom
+        for p, c in keep.items():                      # the rest of the folder is the console's
+            assert crc_file(p) == c, p
+        assert len(mounts_on(SYSA)) == 1
+        if not EMULATED:
+            assert open(f"{view}/control_center_ps2_top.dds", "rb").read() == stored
+            assert open(f"{view}/control_center_ps2_bottom.dds", "rb").read() == stored_bottom
+            assert crc_file(f"{view}/homeui_ps2.dds") == keep[home]
+        assert call("POST", "/api/apply", {"id": "night"})[0] == 200
+        wait_applied("night")
+        assert open(top, "rb").read() == stock_top and open(bottom, "rb").read() == stock_bottom
+    finally:
+        apply_and_wait("night")
+        if not EMULATED:
+            subprocess.run(["umount", "-l", view])
+        clear_sandboxes()
+    assert call("DELETE", "/api/themes", {"id": "appear"})[0] == 200
 
 
 def kept_crc(name):
@@ -2521,7 +2930,7 @@ TESTS = [t_startup, t_ui_and_icon_served, t_mutations_need_token, t_create_theme
          t_firmware_mismatch_is_refused, t_delete_rules, t_concurrent_requests_during_apply,
          t_restore_stock_cleans_up, t_overlays_reach_system_views, t_crash_loop_takes_theme_down, t_busy_overlay_is_never_forced, t_recovers_after_hard_kill, t_update_from_payload_manager, t_update_from_plain_elf, t_update_hands_over, t_update_at_boot, t_web_comes_back_after_rest_mode, t_takeover_when_web_is_down, t_stop_tool_keeps_the_theme, t_failed_write_closes_its_file, t_survives_malformed_and_abusive_requests,
          t_slow_clients_do_not_block_others, t_log_rotates, t_media_policy, t_music, t_settings_and_duplicate, t_preview_pictures, t_save_and_discard,
-         t_home_background_textures, t_interface_pictures, t_title_pictures, t_fonts, t_shellui_exit_releases_sandbox, t_shellui_exits_during_apply, t_title_where, t_watch_files, t_home_music_at9, t_long_mount_paths_use_parent_folder, t_system_is_byte_identical_afterwards, t_crash_is_reported_and_recovered,
+         t_home_background_textures, t_interface_pictures, t_title_pictures, t_fonts, t_bc7_keeps_transparency, t_page_writes_the_consoles_zstd_frames, t_page_bleeds_colour_into_clear_pixels, t_page_places_textures_against_their_edge, t_texture_sources, t_appearance_textures, t_shellui_exit_releases_sandbox, t_shellui_exits_during_apply, t_title_where, t_watch_files, t_home_music_at9, t_long_mount_paths_use_parent_folder, t_system_is_byte_identical_afterwards, t_crash_is_reported_and_recovered,
          t_privilege_failure_exits_cleanly]
 
 
