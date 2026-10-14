@@ -169,7 +169,9 @@ what happened.
    computer.
 2. Press **New theme**, give it a name and press **Create**.
 3. Press **Edit** on its card, switch on **Background** and drop in a picture.
-   Add home music, icons or sounds the same way.
+   Add home music, icons or sounds the same way. The guides to
+   [backgrounds](docs/backgrounds.md) and [home music](docs/home-music.md)
+   go step by step.
 4. Press **Save** in the bar at the bottom, then **Apply to console**.
 5. Give it a few seconds. The home screen may show the stock look for a
    moment while it switches.
@@ -187,6 +189,8 @@ else stays stock.
 
 | Page | What's in it |
 |---|---|
+| [Backgrounds](docs/backgrounds.md) | Changing the home screen's backgrounds: a step-by-step guide, where each background is used, what it needs, and how they are made |
+| [Home music](docs/home-music.md) | Giving the home screen your own music: a step-by-step guide to the music editor, when you hear it, what it needs, and how it is made |
 | [Changing game and app icons](docs/games-and-apps.md) | Installed games' and apps' icons, backgrounds and logos; the console's own tiles; interface icons |
 | [Appearance themes](docs/appearance-themes.md) | The Control Center's panels and the home screen artwork of the PlayStation 1 to 4 themes: a step-by-step guide, what it needs, how it depends on the anniversary assets, and how they are made and stored |
 | [Fonts](docs/fonts.md) | Replacing the console's text fonts, and which ones the home screen uses |
@@ -210,7 +214,7 @@ the table says where each one is now.
   the theme is put back at start either way.
 - New home music is heard only once the console starts its home music again:
   move to a game or app that has its own music, then come back (see
-  [Home music](docs/manager.md#home-music)). Its position is kept by the console (see
+  [Home music](docs/home-music.md#when-you-hear-it)). Its position is kept by the console (see
   [Music that starts part-way through](docs/challenges.md#music-that-starts-part-way-through)).
 - After rest mode, the plugin covers the new views ShellUI's restarted apps
   make (see [Stock again after rest mode](docs/challenges.md#stock-again-after-rest-mode)). An

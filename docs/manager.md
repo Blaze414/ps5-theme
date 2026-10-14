@@ -106,6 +106,8 @@ kept with the theme and exported with it, but never applied to the console.
 
 ![The background section](screenshots/background.png)
 
+[Backgrounds](backgrounds.md) is the step-by-step guide.
+
 One image or video for the home screen's backgrounds. The rows are the
 places a background is used: the default home background, the Game Library,
 each system tile's background, and other screens. Switch on the areas you
@@ -133,6 +135,8 @@ cold-boot sounds play before the jailbreak, so a theme can't reach them.
 ### Home music
 
 ![The home music section](screenshots/home-music.png)
+
+[Home music](home-music.md) is the step-by-step guide.
 
 The music the home screen plays. Add any audio file the browser can play
 (MP3, AAC, FLAC, WAV and so on). The section then shows:
