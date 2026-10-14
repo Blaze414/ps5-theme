@@ -409,7 +409,7 @@ function fmtSize(n) {
   return `${(n / 1048576).toFixed(1)} MB`;
 }
 function fmtTime(s) { s = Math.round(s); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`; }
-function plural(n, word) { return `${n} ${word}${n === 1 ? "" : "s"}`; }
+function plural(n, word, many = word + "s") { return `${n} ${n === 1 ? word : many}`; }
 function ext(path) { const m = /\.([a-z0-9]+)$/i.exec(path); return m ? m[1].toLowerCase() : ""; }
 function baseName(path) { return path.slice(path.lastIndexOf("/") + 1); }
 function dirName(path) { return path.slice(0, path.lastIndexOf("/")); }
@@ -1612,7 +1612,7 @@ async function tileIcon(title, file) {
       if (!f || !f.writable) throw new Error("this icon's format can't be written");
       return encodePng(await imageRgba(file, f.w, f.h), f, zlibDeflate);
     });
-    p.done(`${name} icon replaced and verified${g.icons.length > 1 ? ` (${plural(g.icons.length, "copy")})` : ""}. Apply the theme to use it.`, "ok");
+    p.done(`${name} icon replaced and verified${g.icons.length > 1 ? ` (${plural(g.icons.length, "copy", "copies")})` : ""}. Apply the theme to use it.`, "ok");
   } catch (e) { p.done(`${name}: ${e.message}`, "err"); }
   stamp = Date.now();
   await refreshStatus();
@@ -1646,7 +1646,7 @@ function tilesBody(asp) {
     const name = state.tileNames && state.tileNames.has(g.title) ? state.tileNames.get(g.title) || "(no name)" : "Reading…";
     return `<div class="row-item${rep || bgRep ? " replaced" : ""}">
       <div class="info"><div class="file">${g.n} · ${esc(name)}${rep ? ` <span class="tag on">Icon changed</span>` : ""}${bgRep ? ` <span class="tag on">Background changed</span>` : ""}</div>
-        <div class="dir">${esc(g.title)}${g.icons.length > 1 ? ` · ${plural(g.icons.length, "copy")} of its icon` : ""}${g.bg ? " · has its own background" : ""}</div></div>
+        <div class="dir">${esc(g.title)}${g.icons.length > 1 ? ` · ${plural(g.icons.length, "copy", "copies")} of its icon` : ""}${g.bg ? " · has its own background" : ""}</div></div>
       <div class="strip">${thumbFor(g.icons.find(a => state.files.has(a.path)) || g.icons[0])}</div>
       <div class="acts">
         <button class="btn sm" data-act="tile-icon" data-title="${esc(g.title)}">Change icon</button>
