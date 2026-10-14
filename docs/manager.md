@@ -81,6 +81,11 @@ between themes.
 Below that, each part of the home screen has its own section with a switch.
 Switching a section off asks before removing its files.
 
+A **?** beside a setting, a section or a file says what it changes: point at
+it, or tap it on a phone. Anything that takes a while (making a texture,
+sending a file, numbering pictures) shows what it is doing in a message at the
+top right, with a percentage, until it is done and verified.
+
 ### Preview picture
 
 The picture on the theme's library card. When you add a background, a
@@ -218,7 +223,7 @@ Notifications, Game Base, Music, Downloads, Sound, Mic, Accessories and Power
 `iconid_sound_speaking`, `iconid_mic`, `iconid_game_controller_1`,
 `iconid_power`). Nothing is drawn beside the **Games** and **Media** tabs.
 
-**Corner shapes:** below the files, **Corner shapes** lists how
+**Corner shapes:** at the end of the section, **Corner shapes** lists how
 round the interface's corners are, as the shape list in
 `Sce.PlayStation.PUI_UI3.rco` gives them: buttons, switches, slider handles,
 tooltips, menus, tags and so on, in pixels at 1080p, and at the end an

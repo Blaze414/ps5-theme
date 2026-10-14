@@ -179,11 +179,11 @@ console:
 | **Accent** | buttons, switches, sliders and progress bars: the colour that changes with the Appearance theme, its darker and lighter shades following it in proportion |
 
 Each keeps the console's transparency. **Use these colours** saves them;
-**Console's colours** puts the console's back. Select that Appearance theme on
-the console, apply the theme, then use rest mode.
+**Console's colours** puts the console's back. Apply the theme, then use rest
+mode.
 
 For finding what else the other colours change, **Tests** (folded under the
-section's note) has two: the **colour test** paints each kind of colour in a
+colours) has two: the **colour test** paints each kind of colour in a
 bright colour of its own, and the **panel test** gives each panel and base mat
 colour one of its own, each with a key.
 

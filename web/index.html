@@ -334,6 +334,43 @@ pre.log {
 .progress { height: 4px; background: var(--surface-strong); border-radius: 2px; margin-top: 10px; overflow: hidden; }
 .progress i { display: block; height: 100%; background: var(--blue); width: 0; transition: width .2s; }
 
+/* Checkboxes and number boxes in the console's style, as the other fields */
+input[type=checkbox] { accent-color: var(--blue); width: 18px; height: 18px; margin: 0 8px 0 0; vertical-align: -3px; cursor: pointer; }
+label.check { display: block; margin-top: 6px; }
+input[type=number] {
+  min-height: 36px; padding: 0 12px; border: 0; border-radius: 10px; background: var(--surface-strong); color: var(--text);
+  font-variant-numeric: tabular-nums; transition: box-shadow .15s;
+}
+input[type=number]:focus-visible { box-shadow: 0 0 0 2px #fff; }
+.sub-head { margin: 22px 0 8px; font-size: 1.0625rem; font-weight: 500; }
+.acts select[data-place] { width: 240px; }
+#rco-shapes label { font-size: .9375rem; }
+
+/* Help marks: a "?" beside a control or a piece; what it changes shows on hover, keyboard focus or a tap */
+.help {
+  display: inline-flex; align-items: center; justify-content: center; flex: none; width: 18px; height: 18px;
+  margin: 0 0 0 6px; padding: 0; border: 0; border-radius: 50%; background: var(--surface-strong); color: var(--muted);
+  font-family: inherit; font-size: .75rem; font-weight: 600; line-height: 1; cursor: help; vertical-align: middle;
+  transition: background .15s, color .15s, transform .15s var(--ease);
+}
+.help:hover, .help:focus-visible, .help.open { background: #fff; color: #000; }
+.tip {
+  position: fixed; z-index: 90; max-width: min(340px, calc(100vw - 24px)); padding: 10px 12px; border-radius: 10px;
+  background: rgba(28, 34, 48, .98); color: var(--text); font-size: .875rem; font-weight: 400; line-height: 1.45;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, .5); pointer-events: none; animation: in .15s var(--ease); white-space: pre-line;
+}
+
+/* Motion: small and quick, and none when the system asks for less */
+.btn:active:not([disabled]) { transform: scale(.96); }
+.toast.leaving { animation: out .2s var(--ease) forwards; }
+@keyframes out { to { opacity: 0; transform: translateY(-6px); } }
+.appear { animation: in .22s var(--ease); }
+details > summary { cursor: pointer; }
+details[open] > :not(summary) { animation: in .2s var(--ease); }
+.toast .row { display: flex; gap: 12px; align-items: baseline; }
+.toast .row .label { flex: 1; min-width: 0; }
+.toast .pct { font-variant-numeric: tabular-nums; color: var(--muted); font-size: .8125rem; }
+
 @media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }
 .visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
 </style>
@@ -455,9 +492,35 @@ async function api(method, path, params = {}, body) {
 async function uploadVerified(path, params, blob) {
   const bytes = new Uint8Array(await blob.arrayBuffer());
   const crc = hex8(crc32(bytes));
-  const r = await api("PUT", path, { ...params, crc }, bytes);
+  const shown = progressStack.filter(x => x.el.isConnected).pop();
+  const r = shown && typeof XMLHttpRequest === "function"
+    ? await putWatched(path, { ...params, crc }, bytes, f => shown.upload(f))
+    : await api("PUT", path, { ...params, crc }, bytes);
   if (r.crc32 !== crc || r.size !== bytes.length) throw new Error("the console stored something different from what was sent");
   return r;
+}
+
+/* A PUT as api() makes it (the same header, the same retries while the console is busy, the same errors), with
+   the upload's progress reported as it goes. */
+async function putWatched(path, params, bytes, onProgress) {
+  const url = path + (Object.keys(params).length ? "?" + q(params) : "");
+  for (let attempt = 0; ; attempt++) {
+    const x = await new Promise((resolve, reject) => {
+      const r = new XMLHttpRequest();
+      r.open("PUT", url);
+      r.setRequestHeader("X-PS5-Theme", "1");
+      if (r.upload) r.upload.onprogress = e => { if (e.lengthComputable && e.total) onProgress(e.loaded / e.total); };
+      r.onload = () => resolve(r);
+      r.onerror = () => reject(new Error("the console could not be reached"));
+      r.onabort = () => reject(new Error("the upload was stopped"));
+      r.send(bytes);
+    });
+    if (x.status === 503 && attempt < 4) { await sleep(400 * (attempt + 1)); continue; }
+    let data = x.responseText;
+    if ((x.getResponseHeader("Content-Type") || "").includes("json")) { try { data = JSON.parse(data); } catch (e) { /* as text */ } }
+    if (x.status < 200 || x.status >= 300) throw new Error((data && data.error) || `HTTP ${x.status}`);
+    return data;
+  }
 }
 
 /* ================================================================ toasts */
@@ -467,9 +530,59 @@ function toast(msg, kind = "", ms = 4500) {
   el.className = `toast ${kind}`;
   el.textContent = msg;
   $("#toasts").append(el);
-  if (ms) setTimeout(() => el.remove(), ms);
+  if (ms) setTimeout(() => leave(el), ms);
   return el;
 }
+/* A message fades out, then is removed (removed at once if the animation can't run). */
+function leave(el) {
+  if (!el.isConnected || el.classList.contains("leaving")) return;
+  el.classList.add("leaving");
+  setTimeout(() => el.remove(), 220);
+}
+/* Help marks: help(text) is a "?" whose explanation shows on hover, keyboard focus or a tap. It never does anything
+   else: a tap on one inside a label neither ticks nor opens what the label belongs to, and starts no action. */
+const help = text => `<button type="button" class="help" data-help="${esc(text)}" aria-label="${esc(text)}">?</button>`;
+let tipEl = null, tipFor = null;
+function hideTip() {
+  if (tipEl) tipEl.remove();
+  if (tipFor) tipFor.classList.remove("open");
+  tipEl = tipFor = null;
+}
+function showTip(btn) {
+  hideTip();
+  tipFor = btn;
+  btn.classList.add("open");
+  tipEl = document.createElement("div");
+  tipEl.className = "tip";
+  tipEl.setAttribute("role", "tooltip");
+  tipEl.textContent = btn.dataset.help;
+  document.body.append(tipEl);
+  const r = btn.getBoundingClientRect(), t = tipEl.getBoundingClientRect(), m = 12;
+  const left = Math.max(m, Math.min(r.left + r.width / 2 - t.width / 2, innerWidth - t.width - m));
+  let top = r.bottom + 8;
+  if (top + t.height > innerHeight - m) top = Math.max(m, r.top - t.height - 8);
+  tipEl.style.left = `${left}px`;
+  tipEl.style.top = `${top}px`;
+}
+document.addEventListener("click", e => {
+  const b = e.target.closest && e.target.closest(".help");
+  if (!b) { if (tipFor) hideTip(); return; }
+  e.preventDefault();
+  e.stopPropagation();
+  if (tipFor === b) hideTip(); else showTip(b);
+}, true);
+document.addEventListener("mouseover", e => {
+  const b = e.target.closest && e.target.closest(".help");
+  if (b) { if (b !== tipFor) showTip(b); }
+  else if (tipFor && !tipFor.matches(":focus")) hideTip();
+});
+document.addEventListener("focusin", e => { if (e.target.classList && e.target.classList.contains("help")) showTip(e.target); });
+document.addEventListener("focusout", e => { if (e.target === tipFor) hideTip(); });
+addEventListener("scroll", hideTip, { passive: true });
+addEventListener("resize", hideTip);
+/* The colour tests stay open or closed as left when the colours are saved and drawn again. */
+document.addEventListener("toggle", e => { if (e.target.matches && e.target.matches("[data-color-tests]")) state.colorTestsOpen = e.target.open; }, true);
+
 /* An action that fails where nothing catches it would leave the page silent, the button doing nothing: say what
    went wrong instead. */
 window.addEventListener("unhandledrejection", e => {
@@ -478,12 +591,33 @@ window.addEventListener("unhandledrejection", e => {
   toast(why ? `Something went wrong: ${why}` : "Something went wrong. Reload the page and try again.", "err", 9000);
 });
 
+/* The progress messages showing, newest last: an upload made meanwhile reports how far it has got into the newest. */
+const progressStack = [];
 function progressToast(label) {
   const el = toast("", "", 0);
-  el.innerHTML = `<div class="label"></div><div class="progress"><i></i></div>`;
-  const set = (text, frac) => { $(".label", el).textContent = text; $("i", el).style.width = `${Math.round(frac * 100)}%`; };
-  set(label, 0);
-  return { set, done(msg, kind) { el.remove(); if (msg) toast(msg, kind, 7000); } };
+  el.innerHTML = `<div class="row"><div class="label"></div><div class="pct"></div></div><div class="progress"><i></i></div>`;
+  let text = label, frac = 0;
+  const show = (t, f) => {
+    const pct = Math.max(0, Math.min(100, Math.round(f * 100)));
+    $(".label", el).textContent = t.replace(/\s*\d{1,3}%$/, "");   /* the percentage has its own place */
+    $(".pct", el).textContent = f > 0 ? `${pct}%` : "";
+    $("i", el).style.width = `${pct}%`;
+  };
+  const p = {
+    el,
+    set(t, f) { text = t; frac = f; show(t, f); },
+    /* how far an upload made in this step has got: the step's own text, and the bar for the upload */
+    upload(f) { show(/^Sending\b/.test(text) ? text : `${text.replace(/\s*\d{1,3}%$/, "")}\nSending to the console…`, f); },
+    done(msg, kind) {
+      const i = progressStack.indexOf(p);
+      if (i >= 0) progressStack.splice(i, 1);
+      leave(el);
+      if (msg) toast(msg, kind, 7000);
+    },
+  };
+  progressStack.push(p);
+  p.set(label, 0);
+  return p;
 }
 
 /* ================================================================ status & routing */
@@ -784,8 +918,8 @@ async function loadOriginals(id = state.editId) {
 function originalsField() {
   const n = state.sources.size;
   const kept = n ? `${plural(n, "original")} kept, ${fmtSize(state.originalsBytes)}. <button class="btn sm ghost" data-act="remove-originals" type="button">Remove them</button>` : "";
-  return `<label class="note" title="With the original picture kept, the fit or placement of what you attached can be changed later without attaching it again. It takes space on the console: about the size of the picture, for each file it went to (it is sent once).">
-      <input type="checkbox" id="keep-originals"${state.keepOriginals ? " checked" : ""}> Keep original pictures</label>
+  return `<label class="note">
+      <input type="checkbox" id="keep-originals"${state.keepOriginals ? " checked" : ""}> Keep original pictures${help("With the original picture kept, the fit or placement of what you attached can be changed later without attaching it again. It takes space on the console: about the size of the picture, for each file it went to (it is sent once). Never applied to the console.")}</label>
     <span class="note">${state.keepOriginals ? "" : "New pictures are not kept: options apply when you attach one. "}${kept}</span>`;
 }
 
@@ -847,7 +981,9 @@ async function refitPictures() {
         try {
           const file = await sourceFile(a.path, id);
           if (!file) throw new Error("its original is gone");
-          await uploadVerified("/api/theme/file", { id, path: a.path }, await fileForAsset(file, a));
+          const made = await fileForAsset(file, a);
+          p.set(`Sending ${baseName(a.path)} to the console…`, i / targets.length);
+          await uploadVerified("/api/theme/file", { id, path: a.path }, made);
           textureCache.clear();
           ok++;
         } catch (e) { errors.push(`${baseName(a.path)}: ${e.message}`); }
@@ -1122,12 +1258,12 @@ function colorPanelValues(palettes) {
 /* "shared": the console uses the default look's palette (color_default) for these with every Appearance theme
    selected (seen on the console with Use System Appearance for Widgets off), so they are edited there only. */
 const COLOR_EDIT = [
-  { key: "widgets", shared: true, label: "Welcome widgets and pills", hint: "turn off Use System Appearance for Widgets in the Welcome hub's settings to see it", names: ["menu.fill.enabled"] },
-  { key: "backdrop", shared: true, label: "Control Center backdrop", hint: "also tints the Media Gallery card", names: ["base-mat.overlay.enabled"] },
-  { key: "card", shared: true, label: "Control Center card", names: ["radio-button.overlay.fill.enabled"] },
-  { key: "hints", shared: true, label: "Button hints", hint: "behind Utilities and Edit Widgets", names: ["key-guide.overlay.fill.enabled"] },
-  { key: "text", label: "Text in Settings and menus", group: "text" },
-  { key: "accent", label: "Accent", hint: "buttons, switches, sliders and progress bars", group: "accent" },
+  { key: "widgets", shared: true, help: "The Welcome hub's widget cards (Trophies, Console Storage, News and the others) and the pills above them. Shows with Use System Appearance for Widgets off.", label: "Welcome widgets and pills", hint: "turn off Use System Appearance for Widgets in the Welcome hub's settings to see it", names: ["menu.fill.enabled"] },
+  { key: "backdrop", shared: true, help: "The backdrop that covers the screen behind the Control Center when you press the PS button. It also tints the Media Gallery card.", label: "Control Center backdrop", hint: "also tints the Media Gallery card", names: ["base-mat.overlay.enabled"] },
+  { key: "card", shared: true, help: "The card at the left of the Control Center (Recently created).", label: "Control Center card", names: ["radio-button.overlay.fill.enabled"] },
+  { key: "hints", shared: true, help: "The background of the button hints at the bottom right of the Welcome hub (Utilities, Edit Widgets).", label: "Button hints", hint: "behind Utilities and Edit Widgets", names: ["key-guide.overlay.fill.enabled"] },
+  { key: "text", help: "The light text and labels in Settings and the system's menus: titles, menu items, values. Dark labels on light buttons stay as they are, so they stay readable.", label: "Text in Settings and menus", group: "text" },
+  { key: "accent", help: "The colour of buttons, switches, sliders and progress bars. Its darker and lighter shades follow it in proportion.", label: "Accent", hint: "buttons, switches, sliders and progress bars", group: "accent" },
 ];
 const rgbOf = v => (v >>> 0) & 0xffffff;
 const lum = c => 0.299 * (c >> 16) + 0.587 * ((c >> 8) & 255) + 0.114 * (c & 255);
@@ -1797,7 +1933,7 @@ function tilesBody(asp) {
     const rep = g.icons.some(a => state.files.has(a.path)), bgRep = g.bg && state.files.has(g.bg.path);
     const name = state.tileNames && state.tileNames.has(g.title) ? state.tileNames.get(g.title) || "(no name)" : "Reading…";
     return `<div class="row-item${rep || bgRep ? " replaced" : ""}">
-      <div class="info"><div class="file">${g.n} · ${esc(name)}${rep ? ` <span class="tag on">Icon changed</span>` : ""}${bgRep ? ` <span class="tag on">Background changed</span>` : ""}</div>
+      <div class="info"><div class="file">${g.n} · ${esc(name)}${help("One of the console's own tiles. Change icon: its icon on the home row and in the Game Library. Change background: the picture behind the home screen while it is selected. The home row shows a new icon after rest mode.")}${rep ? ` <span class="tag on">Icon changed</span>` : ""}${bgRep ? ` <span class="tag on">Background changed</span>` : ""}</div>
         <div class="dir">${esc(g.title)}${g.icons.length > 1 ? ` · ${plural(g.icons.length, "copy", "copies")} of its icon` : ""}${g.bg ? " · has its own background" : ""}</div></div>
       <div class="strip">${thumbFor(g.icons.find(a => state.files.has(a.path)) || g.icons[0])}</div>
       <div class="acts">
@@ -1937,21 +2073,15 @@ function titlesBody(asp) {
     const shared = [...new Set(g.pictures.flatMap(a => titlesOf(a.path)))].filter(t => t !== g.title)
       .map(t => (state.titleNames && state.titleNames.get(t)) || t);
     return `<div class="row-item${rep ? " replaced" : ""}">
-      <div class="info"><div class="file">${esc(name(g))}${rep ? ` <span class="tag on">Changed</span>` : ""}</div>
+      <div class="info"><div class="file">${esc(name(g))}${help("An installed game or app. Its icon shows on the home row and in the Game Library, its background behind the home screen while it is selected, and its logo where it has one. The Game Library shows a change at once, the home row after rest mode. Hold the pointer over a button for where its picture appears.")}${rep ? ` <span class="tag on">Changed</span>` : ""}</div>
         <div class="dir">${esc(g.title)} · ${plural(g.sets.length, "picture")}${shared.length ? ` · shares pictures with ${esc(shared.join(", "))}` : ""}</div></div>
       <div class="strip">${thumbFor(g.pictures.find(a => isImage(a) && state.files.has(a.path)) || g.pictures.find(isImage) || g.pictures[0])}</div>
       <div class="acts">${g.sets.map(x => `<button class="btn sm" data-act="title-pic" data-title="${esc(g.title)}" data-stem="${esc(x.stem)}" title="${esc(`${pictureName(x.stem)[1]} Files: ${x.files.map(a => a.path.replace(/^\/user\//, "")).join(", ")}`)}">Change ${esc(pictureName(x.stem)[0])}</button>`).join("")}
         ${rep ? `<button class="btn sm ghost danger" data-act="title-reset" data-title="${esc(g.title)}">Reset</button>` : ""}
       </div></div>`;
   }).join("");
-  return `<p class="note">Installed games and apps, homebrew included. <b>Icon</b>: the game's tile on the home screen
-      and in the Game Library. <b>Background</b>: shown behind the home screen while the game is selected.
-      <b>Logo</b>: the game's name as artwork. Some games also have <b>other artwork</b>. Each picture is written into
-      every file that holds it, in exactly the console's format.</p>
-    <p class="note">After you apply the theme, the Game Library and the backgrounds show the new pictures straight away.
-      The home screen's icons change once you put the console in rest mode and wake it.</p>
-    <p class="note">While a theme changes a title's pictures, the console can't update them: choose <b>Restore stock</b>
-      before installing an update for that title, then apply the theme again.</p>
+  return `<p class="note">The Game Library shows new pictures at once; the home row after rest mode.${help("Icon: the game's tile on the home row and in the Game Library. Background: shown behind the home screen while the game is selected. Logo: the game's name as artwork. Some games also have other artwork. Each picture is written into every file that holds it, in exactly the console's format.")}</p>
+    <p class="note">Before installing an update for a game whose pictures you changed, choose <b>Restore stock</b>, then apply the theme again.${help("While a theme changes a title's pictures, the console can't update them.")}</p>
     ${groups.length > 12 ? `<div class="toolbar"><input type="search" data-filter-aspect="${asp.id}" placeholder="Search games and apps" value="${esc(state.filters[asp.id] || "")}" aria-label="Search games and apps"></div>` : ""}
     <div class="rows">${rows || `<p class="note">Nothing matches.</p>`}</div>
     ${shown.length > page ? `<div><button class="btn sm" data-act="more" data-aspect="${asp.id}">Show more (${shown.length - page})</button></div>` : ""}`;
@@ -1967,7 +2097,7 @@ function rcoBody(asp) {
     const pics = r ? rcoPictures(r) : null, svgs = pics ? pics.filter(x => x.kind === "svg").length : 0;
     const what = pics ? `${plural(pics.length, "picture")}${svgs ? `, ${svgs} of them vector icons` : ""}` : "Reading…";
     return `<div class="row-item${rep ? " replaced" : ""}">
-      <div class="info"><div class="file">${esc(baseName(a.path))}${rep ? ` <span class="tag on">Changed</span>` : ""}</div>
+      <div class="info"><div class="file">${esc(baseName(a.path))}${help("One of the interface's resource files: its pictures, sounds, strings, colours and shapes. Number vector icons and Number all are tests that turn its pictures into numbers, so you can look up which is which; Remove puts the console's own file back in the theme.")}${rep ? ` <span class="tag on">Changed</span>` : ""}</div>
         <div class="dir">${what} · ${fmtSize(a.size)}</div></div>
       <div class="acts">${pics && pics.length ? `
         ${svgs ? `<button class="btn sm" data-act="rco-number" data-path="${esc(a.path)}" data-vector="1">Number vector icons</button>` : ""}
@@ -1975,25 +2105,18 @@ function rcoBody(asp) {
         ${rep ? `<button class="btn sm ghost danger" data-act="rco-reset" data-path="${esc(a.path)}">Remove</button>` : ""}
       </div></div>`;
   }).join("");
-  return `<p class="note">The console draws its interface icons, buttons and symbols from these files. A theme can swap
-      pictures in them; everything else in them stays exactly the console's own.</p>
-    <p class="note"><b>Which picture is where?</b> Number the pictures of one file at a time, each on a pink square,
-      starting with <b>Sce.PlayStation.PUI_UI3.rco</b> and its vector icons. Apply the theme, then put the console in rest
-      mode and wake it: the interface reads these files when it starts. If it keeps restarting, the plugin takes the
-      theme down by itself. Then look up any number you see below.</p>
+  return `<p class="note">To find a picture, number a file's pictures, apply, use rest mode, then look up the number you see.${help("Each picture becomes a number on a pink square. Start with Sce.PlayStation.PUI_UI3.rco and its vector icons. The interface reads these files when it starts, so apply the theme, then put the console in rest mode and wake it. If it keeps restarting, the plugin takes the theme down by itself. Only pictures change in these files; everything else stays the console's own.")}</p>
     <div class="rows">${rows}</div>
-    <p class="note"><b>Use your own pictures:</b> find a picture by a number from the test or by name (search, settings,
-      home, power, trophies…) and choose an image for it. It is written in exactly the format of the console's picture;
-      for a vector icon, your picture is drawn inside the console's own SVG. Numbering a file again replaces your pictures in it.</p>
-    <div id="rco-shapes"></div>
+    <p class="note">Look up a picture by its number or its name (search, settings, home, power…), then choose an image.${help("Your image is written in exactly the format of the console's picture; for a vector icon it is drawn inside the console's own SVG. Numbering a file again replaces your pictures in it.")}</p>
     <div class="toolbar"><input type="search" id="rco-lookup" placeholder="A number from the screen, or a name" aria-label="Look up a picture"
       value="${esc(state.rcoLookup || "")}"></div>
-    <div id="rco-lookup-result"><p class="note">Looking up…</p></div>`;
+    <div id="rco-lookup-result"><p class="note">Looking up…</p></div>
+    <div id="rco-shapes"></div>`;
 }
 
 /* ---- Corner shapes: the interface's shape list (rcoShapes) ---- */
 const SHAPE_NAMES = {
-  "borderRadiusRatio": "Overall multiplier (no change seen on the console)", "bar.fill": "Bars",
+  "borderRadiusRatio": "Overall multiplier", "bar.fill": "Bars",
   "slider.thumb": "Slider handles", "slider.thumb.focused": "Slider handles, selected", "button.fill": "Buttons",
   "button.indicator.fill": "Button indicators", "checkbox.stroke": "Checkboxes", "dialog.fill": "Dialogs",
   "key-guide.fill": "Button guides", "menu.fill": "Menus", "menu.item.fill": "Menu items", "switch.track": "Switches",
@@ -2020,10 +2143,7 @@ async function rcoShapesShow() {
             value="${cur}" style="width:100%">
           <span class="muted" style="font-size:.875rem">console: ${stock}</span>`;
       }).join("");
-      html += `<p class="note"><b>Corner shapes</b> (${esc(baseName(path))}): how round the interface's corners are, in
-          pixels at 1080p; 0 makes a part square-cornered. The overall multiplier at the end showed no change on the console.
-          The home screen's tiles keep their shape: the home screen sets their corners itself. Apply the theme, then put
-          the console in rest mode and wake it.</p>
+      html += `<p class="note"><b>Corner shapes</b>: how round each part's corners are, in pixels (0 is square).${help(`In ${baseName(path)}, at 1080p. The overall multiplier at the end showed no change on the console. The home screen's tiles keep their shape: the home screen sets their corners itself. Apply the theme, then put the console in rest mode and wake it.`)}</p>
         <div style="display:grid;grid-template-columns:minmax(0,1fr) 96px auto;gap:6px 12px;align-items:center;max-width:520px">${rows}</div>
         <div class="toolbar"><button class="btn sm primary" data-act="shapes-save" data-path="${esc(path)}">Use these shapes</button>
           ${mine ? `<button class="btn sm ghost danger" data-act="shapes-reset" data-path="${esc(path)}">Console's shapes</button>` : ""}</div>`;
@@ -2038,7 +2158,7 @@ async function rcoShapesShow() {
 async function appearanceColorsShow() {
   const box = $("#appearance-colors");
   if (!box) return;
-  let html = "";
+  let html = "", testOn = false;
   try {
     for (const path of aspectAssets(aspectById("interface")).map(a => a.path).sort()) {
       const r = await rcoStock(path).catch(() => null), pals = r ? rcoColors(r).sort((x, y) => paletteRank(x.id) - paletteRank(y.id)) : [];
@@ -2052,28 +2172,16 @@ async function appearanceColorsShow() {
           <i style="width:14px;height:14px;border-radius:3px;background:#${rgb.toString(16).padStart(6, "0")}"></i>${esc(word)}: ${esc(name)}</span>`).join("");
       const key = COLOR_TEST.map(g => `<span style="display:inline-flex;align-items:center;gap:6px;margin:2px 14px 2px 0">
           <i style="width:14px;height:14px;border-radius:3px;background:#${g.rgb.toString(16).padStart(6, "0")}"></i>${esc(g.label)}</span>`).join("");
-      html += `<div class="banner"><b>For the Welcome widgets' colours, turn off Use System Appearance for Widgets</b> in the Welcome
-          hub's settings on the console. With it on, the Welcome hub picks the widgets' colours for each Appearance theme itself and
-          ignores these.</div>
-        <p class="note"><b>Colours.</b> <b>Edit colours</b> sets the Welcome widgets and pills, the Control Center's backdrop
-          and card, the button hints, the text in Settings and menus, and the accent. The console uses these with every Appearance theme
-          (they are the default look's palette; each Appearance theme has one of its own too, but changes to those didn't show on the
-          console, so they aren't offered). Each colour keeps the console's transparency, and <b>Console's colours</b> puts them back. The Welcome widgets follow these colours only with
-          <b>Use System Appearance for Widgets</b> off in the Welcome hub's settings; on, the Welcome hub picks them for each theme itself. The colours are kept in the interface's
-          resource file (${esc(baseName(path))}), so <b>Interface icons</b> shows that file as changed too. apply this theme, then put the console in rest mode and wake it.</p>
-        <details class="note"><summary><b>Tests</b>, for finding what other colours change</summary>
-        <p>The <b>colour test</b> paints each kind of colour in a bright colour of its own, so a photo shows what it changes:</p>
-        <div style="display:flex;flex-wrap:wrap">${key}</div>
-        <p>With <b>Use System Appearance for Widgets</b> off, the colour test turns the Welcome widgets and the pills above them the
-          panels' colour. The <b>panel test</b> gives each panel and base mat colour a colour of
-          its own, everything else as the console's, to tell which one colours what:</p>
-        <div style="display:flex;flex-wrap:wrap">${panelKey}</div></details>
+      html += `<h3 class="sub-head">Colours</h3>
+        <div class="banner">For the widgets' colours, turn off <b>Use System Appearance for Widgets</b> in the Welcome hub's settings.${help("With it on, the Welcome hub picks the widgets' colours for each Appearance theme itself and ignores these.")}</div>
+        <p class="note">The same colours with every Appearance theme. Apply, then use rest mode.${help(`They are the default look's palette; each Appearance theme has one of its own too, but changes to those didn't show on the console, so they aren't offered. Each colour keeps the console's transparency, and Console's colours puts them back. They are kept in the interface's resource file (${baseName(path)}), so Interface icons shows that file as changed too.`)}</p>
         ${hiddenChanged.length ? `<div class="banner">This theme also changes the colours of ${plural(hiddenChanged.length, "Appearance theme")}
           (${hiddenChanged.map(p => esc(PALETTE_NAMES[p.id] || p.id)).join(", ")}), from an earlier test or edit. The console showed none of
           those changes, and they are no longer offered. <button class="btn sm ghost danger" data-act="colors-reset-others" data-path="${esc(path)}">Put the console's colours back there</button></div>` : ""}
         <div class="rows">${pals.map((p, i) => p.id !== "color_default" ? "" : (() => {
           const mine = changes.get(`${p.f.el}\t${p.f.attr}`), text = mine ? new TextDecoder().decode(mine) : null;
           const on = text === null ? "" : text === colorsText(p.text, panel[i]) ? "Panel test" : text === colorsText(p.text, group[i]) ? "Colour test" : "Your colours";
+          testOn = testOn || /test$/.test(on);
           const editing = state.colorEdit === p.id;
           let editor = "";
           if (editing) {
@@ -2084,7 +2192,7 @@ async function appearanceColorsShow() {
               ${COLOR_EDIT.filter(e => sets[e.key] && (p.id === "color_default" || !e.shared)).map(e => {
                 const set = sets[e.key], name = set.names.find(n => rgbOf(stockOf.get(n)) === set.base) || set.names[0];
                 const now = rgbOf(cur.get(name));
-                return `<label for="ce-${e.key}"><b>${esc(e.label)}</b>${e.hint ? `<br><span class="muted" style="font-size:.85rem">${esc(e.hint)}</span>` : ""}</label>
+                return `<div><label for="ce-${e.key}"><b>${esc(e.label)}</b></label>${help(e.help)}${e.hint ? `<br><span class="muted" style="font-size:.85rem">${esc(e.hint)}</span>` : ""}</div>
                   <input type="color" id="ce-${e.key}" data-color-edit="${e.key}" value="${hex(now)}" style="width:56px;height:34px;padding:0;border:0;background:none">
                   <span class="muted" style="font-size:.85rem">console: ${hex(set.base)}</span>`;
               }).join("")}</div>
@@ -2092,15 +2200,22 @@ async function appearanceColorsShow() {
                 <button class="btn sm ghost" data-act="colors-close">Close</button></div></div>`;
           }
           return `<div class="row-item${on ? " replaced" : ""}"><div class="info">
-              <div class="file">${p.id === "color_default" ? "Colours" : `${esc(PALETTE_NAMES[p.id] || p.id)}: Colours`}${on ? ` <span class="tag on">${on}</span>` : ""}</div>
+              <div class="file">${p.id === "color_default" ? "Every Appearance theme" : `${esc(PALETTE_NAMES[p.id] || p.id)}: Colours`}${help("The colours of the Welcome widgets and pills, the Control Center's backdrop and card, the button hints, the text in Settings and menus, and the accent, for every Appearance theme. For the widgets, turn off Use System Appearance for Widgets in the Welcome hub's settings.")}${on ? ` <span class="tag on">${on}</span>` : ""}</div>
               <div class="dir">${p.id === "color_default"
-                ? "The Welcome widgets and pills, the Control Center and the button hints use these with every Appearance theme"
+                ? "Welcome widgets and pills, Control Center, button hints, text and accent"
                 : "This theme's own text and accent; what they change with this theme selected hasn't been seen on the console yet"}</div></div>
-            <div class="acts">${editing ? "" : `<button class="btn sm primary" data-act="colors-edit" data-palette="${esc(p.id)}">Edit colours</button>`}
-              ${on === "Colour test" ? "" : `<button class="btn sm" data-act="colors-test" data-path="${esc(path)}" data-palette="${esc(p.id)}">Colour test</button>`}
-              ${on === "Panel test" ? "" : `<button class="btn sm" data-act="colors-panel" data-path="${esc(path)}" data-palette="${esc(p.id)}">Panel test</button>`}
+            <div class="acts">${editing ? "" : `<button class="btn sm" data-act="colors-edit" data-palette="${esc(p.id)}">Edit colours</button>`}
               ${on ? `<button class="btn sm ghost danger" data-act="colors-reset" data-path="${esc(path)}" data-palette="${esc(p.id)}">Console's colours</button>` : ""}</div></div>${editor}`;
-        })()).join("")}</div>`;
+        })()).join("")}</div>
+        <details class="note" data-color-tests${state.colorTestsOpen ?? testOn ? " open" : ""}><summary><b>Tests</b>, for finding what other colours change</summary>
+        <p>The <b>colour test</b> paints each kind of colour in a bright colour of its own, so a photo shows what it changes:</p>
+        <div style="display:flex;flex-wrap:wrap">${key}</div>
+        <p>With <b>Use System Appearance for Widgets</b> off, the colour test turns the Welcome widgets and the pills above them the
+          panels' colour. The <b>panel test</b> gives each panel and base mat colour a colour of
+          its own, everything else as the console's, to tell which one colours what:</p>
+        <div style="display:flex;flex-wrap:wrap">${panelKey}</div>
+        <div class="toolbar"><button class="btn sm" data-act="colors-test" data-path="${esc(path)}" data-palette="color_default">Colour test</button>
+          <button class="btn sm" data-act="colors-panel" data-path="${esc(path)}" data-palette="color_default">Panel test</button></div></details>`;
     }
   } catch (e) { html = `<p class="note">${esc(e.message)}</p>`; }
   box.innerHTML = html;
@@ -3075,6 +3190,7 @@ async function attachTo(assets, file, label, copies = null, remake = false) {
     attachProgress = p ? f => p.set(`Encoding ${baseName(a.path)}… ${Math.round(f * 100)}%`, (i + f) / assets.length) : null;
     try {
       const blob = await fileForAsset(file, a);
+      if (p) p.set(`Sending ${baseName(a.path)} to the console…`, i / assets.length);
       await uploadVerified("/api/theme/file", { id: state.editId, path: a.path }, blob);
       state.files.add(a.path);
       if (!remake && state.keepOriginals && keepsOriginal(a) && blob !== file) {   /* so an option changed later needs no new upload */
@@ -3365,13 +3481,13 @@ async function renderEditor() {
     ${isLocal() && /PlayStation/i.test(navigator.userAgent)
       ? `<div class="banner">Attaching files is easiest from a computer or phone: open <b>http://${esc(state.status.ip)}:8095</b>.</div>` : ""}
     <div class="panel builder-head">
-      <label class="field">Name<input type="text" id="theme-name" maxlength="60" value="${esc(t.name)}"></label>
-      <label class="field">Firmware
+      <label class="field"><span>Name${help("The theme's name, shown in the library and in the console's notifications.")}</span><input type="text" id="theme-name" maxlength="60" value="${esc(t.name)}"></label>
+      <label class="field"><span>Firmware${help("The firmware the theme is for. It is applied only on a console with that firmware, unless you choose Any firmware; then each file is still checked against the console's own, and one that no longer matches is skipped.")}</span>
         <select id="theme-fw">
           <option value="${esc(state.status.fw)}" ${!fwAny ? "selected" : ""}>This console (${esc(state.status.fw)})</option>
           <option value="any" ${fwAny ? "selected" : ""}>Any firmware</option>
         </select></label>
-      <label class="field" title="Changing it makes the pictures and textures in this theme again from their kept originals.">How images are fitted
+      <label class="field"><span>How images are fitted${help("How a picture that isn't the shape of the file it replaces is fitted: Fill crops its edges, Fit keeps all of it with bars, Stretch squeezes it. Changing it makes the pictures and textures in this theme again from their kept originals. The Appearance pieces have their own placement.")}</span>
         <select id="fit">${[["cover", "Fill (crop edges)"], ["contain", "Fit (keep all)"], ["stretch", "Stretch"]]
           .map(([v, l]) => `<option value="${v}" ${state.fit === v ? "selected" : ""}>${l}</option>`).join("")}</select></label>
       <div class="field" id="originals-field">${originalsField()}</div>
@@ -3406,13 +3522,37 @@ function renderAspect(asp) {
   el.innerHTML = `
     <div class="aspect-head">
       <button class="switch" role="switch" aria-checked="${on}" aria-label="${esc(asp.title)}" data-act="toggle" data-aspect="${asp.id}"></button>
-      <div class="text"><h2>${esc(asp.title)}</h2><div class="sub">${esc(on ? summary : asp.sub)}</div></div>
+      <div class="text"><h2>${esc(asp.title)}${help(asp.sub)}</h2><div class="sub">${esc(on ? summary : asp.sub)}</div></div>
       ${confirming ? `<div class="confirm">Remove ${asp.mode === "music" ? "the music" : plural(replaced, "replaced file")}?
         <button class="btn sm danger armed" data-act="confirm-off" data-aspect="${asp.id}">Remove</button>
         <button class="btn sm ghost" data-act="cancel-off" data-aspect="${asp.id}">Keep</button></div>` : ""}
     </div>
     <div class="aspect-body" ${on ? "" : "hidden"}>${on ? aspectBody(asp) : ""}</div>`;
   if (asp.mode === "music" && state.trim) setupTrim();
+}
+
+/* What a piece in a list is and what replacing it changes, for its help mark. */
+function assetHelp(asp, a) {
+  const m = APPEARANCE_RE.exec(a.path);
+  if (m) {
+    const theme = `the ${APPEARANCE_THEMES[m[2]] || m[2]} Appearance theme`;
+    const what = m[1] === "homeui" ? "The artwork that hangs from the top of the home screen"
+      : m[3] === "top" ? "The corner piece behind the clock and the search and settings icons"
+      : "The panel behind the Control Center's row of icons (the menu the PS button opens)";
+    return `${what}, for ${theme}. It shows only while that theme is selected in Settings > Appearance and Sound, after rest mode.`;
+  }
+  if (asp.id === "fonts") {
+    return `${fontName(a.path)} (${baseName(a.path)}). ${FONT_HOME.test(baseName(a.path)) ? "The home screen and Settings draw their text in it." : "Web pages use it; the home screen doesn't."} Replace it with a TTF or OTF font: it goes only into the home screen, never into games, and shows after rest mode.`;
+  }
+  const kinds = {
+    audio: "A system sound or music clip. Your audio is converted to its format (WAV or ATRAC9) and loudness.",
+    texture: "A texture the interface draws. Your picture is encoded to its exact format and size.",
+    image: "A picture the interface shows. Your image is fitted to its size and written in its exact format.",
+    svg: "A vector picture the interface shows. Your image is drawn inside the console's own SVG.",
+    video: "A video clip. Use a clip in the same container (MP4 or WebM).",
+    json: "An animation or data file. It must keep the same structure and canvas size.",
+  };
+  return `${kinds[a.kind] || "A file the interface uses. It is checked against the console's own before it is accepted."} (${baseName(a.path)})`;
 }
 
 function dropZone(asp, title, detail) {
@@ -3450,7 +3590,7 @@ function aspectBody(asp) {
     const replaced = all.filter(a => state.files.has(a.path)).length;
     return `${dropZone(asp, "Drop an image or video here",
         chosen.length ? `Goes to ${plural(chosen.length, "file")} in the areas switched on below, each at its own size.` : "Switch on at least one area below.")}
-      <p class="note">Choose where your background is used:</p>
+      <p class="note">Choose where your background is used:${help("Each area is a place the home screen shows a background: the default background, the Game Library, a tile's background while that tile is selected, and others. Your picture goes to the areas switched on, made at each one's own size.")}</p>
       <div class="rows">${[...areas.entries()].sort((a, b) => a[0].localeCompare(b[0])).map(([name, list]) => {
         const on = !off.has(name), rep = list.filter(a => state.files.has(a.path)).length;
         return `<div class="row-item${rep ? " replaced" : ""}">
@@ -3489,28 +3629,8 @@ function aspectBody(asp) {
       ${all.some(a => state.files.has(a.path)) ? `<div><button class="btn sm ghost danger" data-act="reset-aspect" data-aspect="${asp.id}">Reset all ${esc(asp.title.toLowerCase())}</button></div>` : ""}`;
   }
 
-  const appearanceNote = asp.id === "appearance" ? `<p class="note">These pictures are drawn only while the matching theme is selected on the console
-      (<b>Settings &gt; Appearance and Sound</b>), so select the theme you change. Each picture is encoded to the texture's exact format
-      and size (the panels are about 2560 pixels wide) and <b>keeps its transparency</b>: use a PNG with a see-through background for the parts
-      that should stay clear. The Control Center panel sits behind its row of icons along the bottom; the top-right corner piece sits
-      behind the clock. Choose how your picture is placed with <b>Placement</b> beside each piece:
-      <b>Fill</b> crops the picture to the piece, keeping the part against the screen's edge (the bottom for the panel,
-      the top for the home screen's artwork);
-      <b>Fill with padding</b> does the same but leaves a clear margin at that edge, set in percent;
-      <b>Fit</b> shows the whole picture with clear sides; <b>Stretch</b> squeezes it to the piece.
-      The clock and the search and settings icons are drawn over the top of the top-right piece, so a white or solid picture
-      there hides them: <b>Keep the clock and icons clear</b> (on by default) leaves that band empty and puts the picture below it.
-      A change made to a picture already attached takes effect at once: the texture is made again from the original the theme keeps.
-      If one doesn't, change the option and attach the picture again. Apply the theme, then put the console in rest mode and wake it.</p>` : "";
-  const fontNote = asp.id === "fonts" ? `<p class="note">The text the home screen and its menus are drawn in. Replace one with a
-      TrueType or OpenType font (<b>.ttf</b> or <b>.otf</b>) that has the full Latin alphabet, digits and punctuation; fonts in
-      other formats, and ones that are damaged or lack those characters, are refused. A font goes only into the home screen,
-      not into games. It is read as the home screen starts: apply the theme, then put the console in rest mode and wake it.
-      If the home screen keeps restarting with a font, the plugin takes the theme down by itself.</p>
-    <p class="note">On a console tested with firmware 13.42, the home screen and Settings draw their text in the
-      <b>light</b> and <b>bold</b> weights (marked <b>Home screen</b> below). The regular and medium Latin fonts are used by
-      web pages only, so changing those shows nothing on the home screen. To see a change, replace
-      <b>Interface text (Latin), light</b> and <b>bold</b>, or use one font for all the Latin weights:</p>
+  const appearanceNote = asp.id === "appearance" ? `<p class="note">Shown only while that theme is selected in <b>Settings &gt; Appearance and Sound</b>, after rest mode. A PNG keeps its see-through parts.${help("Each picture is encoded to the texture's exact format and size (the panels are about 2560 pixels wide) and keeps its transparency. A change to Placement, padding or the clock band takes effect at once: the texture is made again from the original the theme keeps. If one doesn't, change the option and attach the picture again.")}</p>` : "";
+  const fontNote = asp.id === "fonts" ? `<p class="note">A .ttf or .otf font, for the home screen only (never games). The home screen draws in the weights marked <b>Home screen</b>; it shows after rest mode.${help("The font needs the full Latin alphabet, digits and punctuation; fonts in other formats, damaged ones and ones without those characters are refused. On firmware 13.42 the home screen and Settings use the light and bold weights; the regular and medium Latin fonts are used by web pages only. If the home screen keeps restarting with a font, the plugin takes the theme down by itself.")}</p>
     <div class="toolbar"><button class="btn" data-act="fonts-latin" data-aspect="fonts">Use one font for all Latin interface text</button></div>` : "";
   const list = asp.id === "fonts"
     ? shown.slice().sort((x, y) => fontRank(x.assets[0]) - fontRank(y.assets[0]) || fontName(x.assets[0].path).localeCompare(fontName(y.assets[0].path)))
@@ -3523,23 +3643,23 @@ function aspectBody(asp) {
       const play = asp.id === "sounds" && ext(a0.path) === "wav"
         ? `<audio controls preload="none" src="${esc(rep ? `/api/theme/file?${q({ id: state.editId, path: a0.path })}&v=${stamp}` : `/api/asset?${q({ path: a0.path })}`)}"></audio>` : "";
       return `<div class="row-item${rep ? " replaced" : ""}" data-drop-group="${esc(g.key)}" data-aspect="${asp.id}">
-        <div class="info"><div class="file">${esc(isFont ? fontName(a0.path) : isAppearance ? appearanceName(a0.path) : g.name)}${isFont && FONT_HOME.test(baseName(a0.path)) ? ` <span class="tag">Home screen</span>` : ""}${rep ? ` <span class="tag on">Replaced</span>` : ""}</div>
-          <div class="dir">${isFont || isAppearance ? `${esc(baseName(a0.path))} · ${fmtSize(a0.size)}` : esc(g.dir)}${g.assets.length > 1 ? ` · ${plural(g.assets.length, "variant")}` : ""}</div></div>
+        <div class="info"><div class="file">${esc(isFont ? fontName(a0.path) : isAppearance ? appearanceName(a0.path) : g.name)}${help(assetHelp(asp, a0))}${isFont && FONT_HOME.test(baseName(a0.path)) ? ` <span class="tag">Home screen</span>` : ""}${rep ? ` <span class="tag on">Replaced</span>` : ""}</div>
+          <div class="dir">${isFont || isAppearance ? `${esc(baseName(a0.path))} · ${fmtSize(a0.size)}` : esc(g.dir)}${g.assets.length > 1 ? ` · ${plural(g.assets.length, "variant")}` : ""}</div>${
+          isAppearance && textureAnchor(a0.path).band ? `<label class="note check"><input type="checkbox" data-keep="${esc(a0.path)}"${keepClearFor(a0.path) ? " checked" : ""}> Keep the clock and icons clear${help("The clock and the search and settings icons are drawn over the top of this piece: a white or solid picture there hides them. On, the top 26% is left empty and the picture goes below it.")}</label>` : ""}</div>
         <div class="acts">${play}${isAppearance ? (() => {
           const pl = placementFor(a0.path);
-          return `<label class="note" title="How your picture is placed on this piece. Changing it makes the texture again at once from the picture kept in the theme.">Placement
+          return `<label class="note">Placement${help("How your picture is placed on this piece. Fill crops it, keeping the part against the screen's edge the piece meets; Fill with padding leaves a clear margin there; Fit shows all of it; Stretch squeezes it. Changing it makes the texture again at once from the picture kept in the theme.")}
             <select data-place="${esc(a0.path)}" aria-label="Placement">
               <option value="fill"${pl.mode === "fill" ? " selected" : ""}>Fill (crop to the piece)</option>
               ${pl.hasEdge ? `<option value="pad"${pl.mode === "pad" ? " selected" : ""}>Fill with padding</option>` : ""}
               <option value="fit"${pl.mode === "fit" ? " selected" : ""}>Fit (whole picture)</option>
               <option value="stretch"${pl.mode === "stretch" ? " selected" : ""}>Stretch</option>
-            </select></label>${pl.mode === "pad" ? `<label class="note" title="Space left clear where the picture meets the screen's edge, in percent of the piece.">Padding
+            </select></label>${pl.mode === "pad" ? `<label class="note">Padding${help("Space left clear where the picture meets the screen's edge, in percent of the piece (0 to 40).")}
             <input type="number" min="0" max="40" step="1" value="${pl.pad}" data-pad="${esc(a0.path)}" style="width:64px" aria-label="Padding in percent"> %</label>` : ""}${
             rep && !state.sources.has(a0.path) ? (state.keepOriginals
               ? `<span class="note" title="This picture was attached before the original was kept in the theme. Changing an option makes the texture again from the picture inside it; attach the original once more to get back anything the earlier placement cropped away.">options use the texture's own picture</span>`
               : `<span class="note" title="This theme does not keep original pictures: options apply when you attach a picture.">options apply when you attach</span>`) : ""}${
-            textureAnchor(a0.path).band ? `<label class="note" title="The clock and the search and settings icons are drawn over the top of this piece: a white or solid picture there hides them.">
-              <input type="checkbox" data-keep="${esc(a0.path)}"${keepClearFor(a0.path) ? " checked" : ""}> Keep the clock and icons clear</label>` : ""}`;
+""}`;
         })() : ""}
           <button class="btn sm" data-act="attach-group" data-group="${esc(g.key)}" data-aspect="${asp.id}">${rep ? "Replace" : "Attach"}</button>
           ${rep ? `<button class="btn sm ghost danger" data-act="reset-group" data-group="${esc(g.key)}" data-aspect="${asp.id}">Reset</button>` : ""}
@@ -3558,7 +3678,7 @@ function musicBody() {
   const converted = state.files.has(HOME_MUSIC);
   if (!t.music && !converted) {
     return dropZone(aspectById("music"), "Drop a music file here",
-      "MP3, M4A, OGG, WAV, FLAC and more. Choose the part that loops; it is encoded on this device to the console's home music format (ATRAC9) at the same loudness, then decoded again and checked before upload.");
+      "MP3, M4A, OGG, WAV, FLAC and more. You choose the part that plays and loops.");
   }
   const status = !converted ? "Added with an earlier version. Convert it to make it the home music."
     : "Checking the home music file…";
