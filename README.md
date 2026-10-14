@@ -1157,6 +1157,60 @@ Sony's own 30th anniversary Appearance themes already ship in
   the corner piece). With **Keep original pictures** on, the originals take
   their size too, once however many files they were attached to.
 
+#### Guide: changing the bottom panel, the top-right piece and the home screen artwork
+
+1. **Make the picture.** A PNG or WebP, with transparent parts wherever the
+   console's own artwork is clear (a JPEG covers the whole piece). Any size
+   works, since it is fitted to the piece, but these match the pieces exactly:
+
+   | Piece | Size | Notes |
+   |---|---|---|
+   | Bottom panel | 2560 by 820 | Sits behind the row of Control Center icons: keep it calm and not too light, so the icons stay readable. |
+   | Top-right piece | 980 by 620 | The clock and the search and settings icons are drawn over its top band: a light picture there hides them. |
+   | Home screen artwork | 2560 wide | Hangs from the top of the home screen. Sony's own is solid at the top and fades to clear by about two thirds of the way down: do the same, so the home screen's own background shows below it. |
+
+   The home screen artwork is the Appearance theme's own layer, not the
+   **Background** section's picture; the two are changed separately.
+2. **Open the manager** at `http://<console-ip>:8095` on a computer or
+   phone, make a theme (or press **Edit** on an existing one), and switch on
+   **Appearance themes**. Each piece is a row named after its theme, for
+   example **PlayStation 2: Control Center, bottom panel**, **PlayStation 2:
+   Control Center, top-right corner** and **PlayStation 2: Home screen
+   artwork**. Use the rows of the theme you have selected on the console.
+3. **Choose how the picture is placed**, on the row, before or after
+   attaching:
+   - **Fill** crops the picture to the piece and keeps the part against the
+     screen's edge it meets (the bottom for the panel, the top for the
+     artwork and the corner piece).
+   - **Fill with padding** does the same and leaves a clear margin at that
+     edge: set it in percent (0 to 40).
+   - **Fit** shows the whole picture with clear sides, **Stretch** squeezes
+     it to the piece.
+   - **Keep the clock and icons clear** (corner piece, on by default) leaves
+     the top band empty and puts the picture below it. Turn it off only for a
+     picture that is dark there.
+4. **Attach the picture:** press **Attach** on the row, or drop the file on
+   it. The page makes the texture, the plugin checks it, and the row shows
+   **Replaced** with a message that it was added and verified.
+5. **Adjust it.** Change the placement, the padding or the clock band and the
+   texture is made again at once from the original the theme keeps (see
+   [Changing the options later](#appearance-themes) above for when it
+   isn't, and what to do). Judge the result on the console.
+6. **Save** the theme (the bar at the bottom) when you are happy, or
+   **Discard** to go back to the last save.
+7. **Apply to console**, then select the same Appearance theme in
+   **Settings > Appearance and Sound** if it isn't, and put the console in
+   **rest mode** and wake it. Press the PS button for the Control Center, and
+   look at the home screen for the artwork.
+8. **Go back.** **Reset** on a row removes your picture (and its kept
+   original) from the theme; apply again. **Restore stock** takes the whole
+   theme off the console.
+
+If it doesn't look right: a piece that stays as it was usually means a
+different Appearance theme is selected on the console or the console wasn't
+put through rest mode; a message that the theme was **applied partly** names
+the file that was refused and why, in the **Activity** list.
+
 ### Fonts
 
 The console keeps its text fonts as TrueType and OpenType files in
