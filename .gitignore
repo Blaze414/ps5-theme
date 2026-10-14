@@ -4,3 +4,4 @@ build-host/
 *.plugin
 .DS_Store
 tests/fuzz/out/
+__pycache__/

@@ -71,6 +71,11 @@ and **Apply to console**. **Restore stock** takes the whole theme off.
   interface's buttons, switches, menus and other parts are, part by part
   (0 makes a part square-cornered), then press **Use these shapes**. The
   home screen's tiles keep their shape.
+- **Colours**: in **Appearance themes**, **Edit colours** sets the Welcome
+  widgets and pills, the Control Center, the button hints, the text and the
+  accent. For the widgets, turn off **Use System Appearance for Widgets** in
+  the Welcome hub's settings. See
+  [Colours](appearance-themes.md#colours).
 - **Appearance themes** (the Control Center's bottom panel and top-right
   piece, and the home screen artwork of the PlayStation 1 to 4 themes): see
   [Appearance themes](appearance-themes.md).

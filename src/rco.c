@@ -16,8 +16,9 @@
    (png.c), since ShellUI crashed on start with pictures whose format had
    changed; each SVG must keep the console's own <svg> opening byte for byte
    and pass the SVG check; a shape list (shape_check) must keep its names, in
-   order, each with a number in range; every other embedded file (sounds,
-   strings, colours) must be unchanged. */
+   order, each with a number in range; a colour palette (color_check) must
+   keep its names, in order, each with a colour as the console writes them;
+   every other embedded file (sounds, strings) must be unchanged. */
 
 #include <fcntl.h>
 #include <stdint.h>
@@ -41,6 +42,8 @@
 #define SHAPE_MAX_NAMES  64
 #define SHAPE_MAX        100.0   /* a corner radius, in pixels at 1080p */
 #define SHAPE_RATIO_MAX  10.0    /* a multiplier, such as borderRadiusRatio */
+#define COLOR_MAX_BYTES  16384   /* 13.42's palettes are 4143 bytes, 92 names */
+#define COLOR_MAX_NAMES  128
 
 enum { T_TREE, T_IDSTR, T_IDINT, T_STR, T_CHAR, T_STYLE, T_INTARR, T_FLOATARR, T_FILE, T_COUNT };
 
@@ -147,17 +150,17 @@ svg_root_end(const uint8_t *d, size_t n) {
    corner radii by component, as a JSON object of names and numbers only,
    {"button.fill": 1.0, ..., "borderRadiusRatio": 1.0}. Its names and numbers
    in order; the count, or -1 if `d` is not exactly such an object. */
-typedef struct { char name[48]; double value; } shape_t;
+typedef struct { char name[48]; double value; int whole; } shape_t;   /* whole: written as digits only */
 
 static int
-shape_parse(const uint8_t *d, size_t n, shape_t *out) {
+shape_parse(const uint8_t *d, size_t n, shape_t *out, int max) {
   size_t i = 0;
   int count = 0;
 #define SHAPE_SPACE() while(i < n && (d[i] == ' ' || d[i] == '\t' || d[i] == '\r' || d[i] == '\n')) i++
   SHAPE_SPACE();
   if(i >= n || d[i++] != '{') return -1;
   for(;;) {
-    if(count == SHAPE_MAX_NAMES) return -1;
+    if(count == max) return -1;
     SHAPE_SPACE();
     if(i >= n || d[i++] != '"') return -1;
     size_t k = 0;
@@ -188,6 +191,7 @@ shape_parse(const uint8_t *d, size_t n, shape_t *out) {
     if(i - start >= sizeof(num)) return -1;
     memcpy(num, d + start, i - start);
     num[i - start] = 0;
+    out[count].whole = strspn(num, "0123456789") == i - start;
     out[count++].value = strtod(num, NULL);
     SHAPE_SPACE();
     if(i < n && d[i] == ',') { i++; continue; }
@@ -205,7 +209,7 @@ shape_parse(const uint8_t *d, size_t n, shape_t *out) {
 static int
 shape_check(const uint8_t *sd, size_t ssize, const uint8_t *cd, size_t csize, const char *id, char *why, size_t len) {
   shape_t s[SHAPE_MAX_NAMES], c[SHAPE_MAX_NAMES];   /* 7 KB: web workers have 512 KB stacks */
-  int ns = shape_parse(sd, ssize, s), nc = csize <= SHAPE_MAX_BYTES ? shape_parse(cd, csize, c) : -1;
+  int ns = shape_parse(sd, ssize, s, SHAPE_MAX_NAMES), nc = csize <= SHAPE_MAX_BYTES ? shape_parse(cd, csize, c, SHAPE_MAX_NAMES) : -1;
   if(ns <= 0) {
     snprintf(why, len, "cannot read the system's shapes (%s) to compare against", id);
     return -1;
@@ -229,8 +233,42 @@ shape_check(const uint8_t *sd, size_t ssize, const uint8_t *cd, size_t csize, co
 }
 
 
+/* The theme's colour palette against the console's (entries of type "color":
+   color_default, and color_ps1 to color_ps4 for the PlayStation 1 to 4
+   Appearance themes): the same names in the same order, each a colour as the
+   console writes them, a whole number from 0 to 4294967295 (0xAARRGGBB). */
+static int
+color_check(const uint8_t *sd, size_t ssize, const uint8_t *cd, size_t csize, const char *id, char *why, size_t len) {
+  shape_t *s = calloc(2 * COLOR_MAX_NAMES, sizeof(*s)), *c = s ? s + COLOR_MAX_NAMES : NULL;
+  if(!s) {
+    snprintf(why, len, "out of memory");
+    return -1;
+  }
+  int ns = shape_parse(sd, ssize, s, COLOR_MAX_NAMES), nc = csize <= COLOR_MAX_BYTES ? shape_parse(cd, csize, c, COLOR_MAX_NAMES) : -1;
+  int rc = 1;
+  if(ns <= 0) {
+    snprintf(why, len, "cannot read the system's colours (%s) to compare against", id);
+    rc = -1;
+  } else if(nc < 0) {
+    snprintf(why, len, "colours %s: not a list of names and colours like the console's", id);
+    rc = -1;
+  }
+  for(int i = 0; rc > 0 && (i < ns || i < nc); i++) {
+    if(i >= ns || i >= nc || strcmp(s[i].name, c[i].name)) {
+      snprintf(why, len, "colours %s must keep the console's %d names, in the same order", id, ns);
+      rc = -1;
+    } else if(!c[i].whole || !(c[i].value <= 4294967295.0)) {
+      snprintf(why, len, "colours %s: %s must be a whole number from 0 to 4294967295 (0xAARRGGBB)", id, c[i].name);
+      rc = -1;
+    }
+  }
+  free(s);
+  return rc;
+}
+
+
 /* One embedded file of `c` against the same one in `s`. 1 if it is a
-   changed picture or shape list, 0 if unchanged, -1 (with `why`) if not
+   changed picture, shape list or palette, 0 if unchanged, -1 (with `why`) if not
    allowed. */
 static int
 check_embedded(const rco_t *s, const rco_t *c, const char *ename, const char *etype, const char *id,
@@ -281,7 +319,8 @@ check_embedded(const rco_t *s, const rco_t *c, const char *ename, const char *et
     return 1;
   }
   if(!strcmp(ename, "file") && !strcmp(etype, "shape")) return shape_check(sd, ssize, cd, csize, id, why, len);
-  snprintf(why, len, "only pictures and shapes can be changed in a resource file (%s %s differs)", ename, id);
+  if(!strcmp(ename, "file") && !strcmp(etype, "color")) return color_check(sd, ssize, cd, csize, id, why, len);
+  snprintf(why, len, "only pictures, shapes and colours can be changed in a resource file (%s %s differs)", ename, id);
   return -1;
 }
 

@@ -175,8 +175,13 @@ of the apply, the section's note and a notification on the console say so.
 - **Video:** clips in the same container (MP4 or WebM).
 - **Appearance themes:** the artwork of the PlayStation, PlayStation 2, 3
   and 4 themes in **Settings > Appearance and Sound**: the Control Center's
-  bottom panel and top-right corner piece, and the home screen's artwork.
-  See [Appearance themes](appearance-themes.md).
+  bottom panel and top-right corner piece, and the home screen's artwork,
+  then the colours of the Welcome widgets, the Control Center, the button
+  hints, the text and the accent, for every Appearance theme (for the
+  widgets, turn off Use System Appearance for Widgets in the Welcome hub's
+  settings). See
+  [Appearance themes](appearance-themes.md) and its
+  [Colours](appearance-themes.md#colours).
 - **Textures:** other system DDS textures. Any image is encoded to the
   texture's exact format and size.
 

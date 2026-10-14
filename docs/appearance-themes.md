@@ -7,6 +7,7 @@ How to change the PlayStation 1 to 4 Appearance themes' artwork, what it needs, 
 - [Step by step](#step-by-step)
 - [Changing a piece later](#changing-a-piece-later)
 - [What it needs](#what-it-needs)
+- [Colours](#colours)
 - [How it depends on the anniversary assets](#how-it-depends-on-the-anniversary-assets)
 - [How the Appearance textures are made](#how-the-appearance-textures-are-made)
 
@@ -144,6 +145,92 @@ attach.
   the corner piece). With **Keep original pictures** on, the originals take
   their size too, once however many files they were attached to.
 
+## Colours
+
+The **Appearance themes** section ends with **Colours** (1.59): the colours of
+the parts the console tests found, for every Appearance theme at once.
+
+**Only the default look's palette is offered.** With Use System Appearance for
+Widgets off, the Welcome widgets, the Control Center and the button hints use
+the default look's palette whichever Appearance theme is selected: on the
+console, red picked there showed under the PlayStation 2 theme's artwork. The
+PlayStation 1 to 4 palettes changed nothing visible in any test (an edit of
+the PlayStation 2 palette, with red widgets, yellow text and a yellow accent,
+didn't show anywhere), so the editor leaves them alone. A theme that changed
+them earlier says so, with a button to put the console's colours back there.
+
+**Turn off Use System Appearance for Widgets** in the Welcome hub's settings on
+the console to see the widgets' colours. With it on, the Welcome hub picks the
+widgets' colours for each Appearance theme itself and ignores these; the
+manager says so at the top of the colours, on the widgets' colour, and after
+saving a new one.
+
+**Edit colours** opens one colour for each part the tests found on the
+console:
+
+| Colour | What it changes |
+|---|---|
+| **Welcome widgets and pills** | the Welcome hub's widget cards and the pills above them, with **Use System Appearance for Widgets** off in the Welcome hub |
+| **Control Center backdrop** | the backdrop behind the Control Center; it also tints the Media Gallery card |
+| **Control Center card** | the Control Center's card (Recently created) |
+| **Button hints** | the background behind Utilities and Edit Widgets |
+| **Text in Settings and menus** | every light text and label colour; dark labels on light buttons stay as they are |
+| **Accent** | buttons, switches, sliders and progress bars: the colour that changes with the Appearance theme, its darker and lighter shades following it in proportion |
+
+Each keeps the console's transparency. **Use these colours** saves them;
+**Console's colours** puts the console's back. Select that Appearance theme on
+the console, apply the theme, then use rest mode.
+
+For finding what else the other colours change, **Tests** (folded under the
+section's note) has two: the **colour test** paints each kind of colour in a
+bright colour of its own, and the **panel test** gives each panel and base mat
+colour one of its own, each with a key.
+
+Every palette lives in the same interface file (about 38 MB), and each change
+rewrites it. Changes made one after another are queued: each starts from the
+file as the one before left it, and the manager says when one is waiting. (In
+the first 1.59 build, a second click made while the first was still saving
+started from the old file and undid it, so only one palette took the test.)
+
+What the test showed on a PS5 with 13.42:
+
+| Kind (test colour) | What it changes |
+|---|---|
+| Base mat (magenta) | the backdrop behind the Control Center: with it open, the whole screen behind it |
+| Panels (green) | the Control Center's cards, and the button hints at the bottom right (Utilities, Edit Widgets); also menus and dialogs |
+| Text and labels (red) | the text in Settings and the system's menus: titles, the menu, the values. Some labels there stayed white |
+| Accent (yellow), focus (cyan), icons (orange), background (blue) | not seen clearly in the first photos |
+
+**The Welcome widgets follow these colours only with Use System Appearance
+for Widgets off** (a setting in the Welcome hub). With it on, the Welcome hub
+picks the widgets' colours for each Appearance theme itself (blue-violet with
+the default look, grey with PlayStation, near-black with PlayStation 3), and
+no file changes them: not the palettes, the backgrounds, the home artwork or
+the panel picture. With it off, the colour test turned the widget cards and
+the pills above them (Explore new monthly games, New features added) the
+panels' green, and the Media Gallery card's tint the base mat's magenta; the
+text on the cards stayed white.
+
+**Panel test** tells the panel colours apart: it gives each of the 11 panel
+colours and the 2 base mat colours a distinct colour of its own (the key lists
+them), and leaves every other colour as the console's. With Use System
+Appearance for Widgets off, a photo of the Welcome hub, the Control Center and
+a menu shows which one colours the widgets, the pills, the Control Center's
+cards and the button hints.
+
+What the panel test showed, with the setting off:
+
+| Colour name | What it changes |
+|---|---|
+| `menu.fill.enabled` (purple in the test) | **the Welcome widget cards, and the pills above them** |
+| `base-mat.overlay.enabled` (teal) | **the backdrop behind the Control Center**, and the Media Gallery card's tint over its screenshot |
+| `radio-button.overlay.fill.enabled` (magenta) | the Control Center's card (Recently created) |
+| `key-guide.overlay.fill.enabled` (green) | the button hints' background (Utilities, Edit Widgets) |
+| the other nine | nothing seen on the Welcome hub or in the Control Center |
+
+A colour editor, with these kinds as named colours for each theme, follows the
+tests.
+
 ## How it depends on the anniversary assets
 
 Nothing here is added to the console: every piece replaces a texture that
@@ -253,6 +340,7 @@ them.
 |---|---|
 | The artwork: 12 textures, three per theme | `/system/vsh_asset/control_center_<theme>_bottom.dds`, `control_center_<theme>_top.dds` and `homeui_<theme>.dds`, `<theme>` being `ps`, `ps2`, `ps3` or `ps4` |
 | The rest of that folder | the Welcome hub's backgrounds (22 JPEGs with thumbnails, 6 MP4s with thumbnails and placeholders) and a few PNGs (emoji, privacy and play-style pictures): 86 files, about 60 MB |
+| The colours: one palette per theme, and one for the default look | `/system_ex/vsh_asset/Sce.PlayStation.PUI_UI3.rco`, the interface's resource file: file entries `color_ps1` to `color_ps4` (named `ps1` where the textures say `ps`) and `color_default`, type `color` |
 | The previews in **Settings > Appearance and Sound** | `/system_ex/rnps/apps/NPXS40008/assets/src/modules/system/appearance/assets/texture/30thAnniv_Settings_Preview_<PS\|PS2\|PS3\|PS4\|PS5>_<CC\|list>.png`: for each theme, a picture of its Control Center (`CC`) and of its list |
 
 `/system/vsh_asset` is the `/system` partition's own folder, not the
@@ -260,6 +348,17 @@ them.
 `/preinst/vsh_asset`, with the boot movie). There is a **PS5** preview but no
 `ps5` textures: the console's default look is drawn without these files, so
 with it selected none of them is used.
+
+**The colours.** Each palette is a JSON object of 92 names, each a colour as
+a whole number, `0xAARRGGBB` (`"text.primary.enabled": 4294967295` is opaque
+white), 4,143 bytes with Windows line ends. The five differ in their accent
+(the default look's white, then grey `#333333`, blue `#367ed6`, purple
+`#8d66ff` and light blue `#55bcf5` for PlayStation 1 to 4) and in their dark
+fills for menus and dialogs (`#11141a`, `#101829`, `#172252`, `#251752`,
+`#234e66`); their text and labels are white in all five. A theme may change
+the numbers only: the plugin accepts a palette with the console's own names,
+in the same order, each a whole number from 0 to 4294967295, and nothing else
+in the file may change.
 
 **The container.** Each file is one zstd frame holding a whole DDS file,
 under a plain `.dds` name (no `.zst`). All twelve start

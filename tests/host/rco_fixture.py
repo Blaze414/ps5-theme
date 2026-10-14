@@ -178,8 +178,13 @@ def palette_png(w, h, index=lambda x, y: (x + y) % 3, depth=4, level=6, extra=b"
 SHAPES = (b'{\r\n  "bar.fill": 1.0,\r\n  "slider.thumb": 8.0,\r\n  "switch.track": 16.0,\r\n'
           b'  "tooltip.fill": 4.0,\r\n  "borderRadiusRatio": 1.0\r\n}')
 
+# As 13.42's color_default and color_ps2 (14 of their 92 names): colours as 0xAARRGGBB
+# whole numbers, the PlayStation 2 Appearance theme's tinted with its blue.
+COLORS_DEFAULT = b'{\r\n  \"background.enabled\": 4278190080,\r\n  \"base-mat.area.enabled\": 4294967295,\r\n  \"base-mat.overlay.enabled\": 4278322184,\r\n  \"button.fill.enabled\": 268435455,\r\n  \"button.indicator.track.focused\": 4290295992,\r\n  \"button.label.focused\": 4279505940,\r\n  \"dialog.fill.enabled\": 4279309338,\r\n  \"focus.fill.enabled\": 4278190080,\r\n  \"icon.primary.enabled\": 4294967295,\r\n  \"menu.fill.enabled\": 4279309338,\r\n  \"menu.label.primary.enabled\": 4294967295,\r\n  \"slider.thumb.enabled\": 4291611852,\r\n  \"text.primary.enabled\": 4294967295,\r\n  \"tooltip.error.fill.enabled\": 4294967295\r\n}'
+COLORS_PS2 = b'{\r\n  \"background.enabled\": 4278190080,\r\n  \"base-mat.area.enabled\": 4281761494,\r\n  \"base-mat.overlay.enabled\": 4279109919,\r\n  \"button.fill.enabled\": 255229654,\r\n  \"button.indicator.track.focused\": 4280769434,\r\n  \"button.label.focused\": 4279505940,\r\n  \"dialog.fill.enabled\": 4279706194,\r\n  \"focus.fill.enabled\": 4281761494,\r\n  \"icon.primary.enabled\": 4294967295,\r\n  \"menu.fill.enabled\": 4279706194,\r\n  \"menu.label.primary.enabled\": 4294967295,\r\n  \"slider.thumb.enabled\": 4291611852,\r\n  \"text.primary.enabled\": 4294967295,\r\n  \"tooltip.error.fill.enabled\": 4294967295\r\n}'
 
-def sample(png, svg, sound, colours):
+
+def sample(png, svg, sound, colours, colours_ps2=None):
     """A container shaped like ShellUI's: png(w, h) and svg() make pictures.
     It also holds a palette picture and, as 13.42's does, a picture declared
     as SVG that holds PNG data."""
@@ -203,6 +208,7 @@ def sample(png, svg, sound, colours):
         ]),
         ("filetable", [], [
             ("file", [("id", "id", "color_default"), ("src", "file", colours), ("type", "str", "color")], []),
+        ] + ([("file", [("id", "id", "color_ps2"), ("src", "file", colours_ps2), ("type", "str", "color")], [])] if colours_ps2 else []) + [
             ("file", [("id", "id", "shape_default"), ("src", "file", SHAPES), ("type", "str", "shape")], []),
         ]),
     ]))

@@ -475,7 +475,7 @@ function progressToast(label) {
   el.innerHTML = `<div class="label"></div><div class="progress"><i></i></div>`;
   const set = (text, frac) => { $(".label", el).textContent = text; $("i", el).style.width = `${Math.round(frac * 100)}%`; };
   set(label, 0);
-  return { set, done(msg, kind) { el.remove(); toast(msg, kind, 7000); } };
+  return { set, done(msg, kind) { el.remove(); if (msg) toast(msg, kind, 7000); } };
 }
 
 /* ================================================================ status & routing */
@@ -1053,6 +1053,121 @@ function shapesText(text, values) {
   return text.replace(SHAPE_PAIR, (all, head, name, old) => map.has(name) && map.get(name) !== Number(old) ? head + shapeNumber(map.get(name)) : all);
 }
 
+/* The interface's colour palettes (entries of type "color": color_default,
+   and color_ps1 to color_ps4 for the PlayStation 1 to 4 Appearance themes),
+   {"text.primary.enabled": 4294967295, ...}: each colour a whole number,
+   0xAARRGGBB. Their entries, texts and [name, colour] pairs in order. */
+const COLOR_PAIR = /("([^"\\]+)"\s*:\s*)(\d+)/g;
+function rcoColors(r) {
+  return r.files.filter(f => f.elem === "file" && f.type === "color").map(f => {
+    const text = new TextDecoder().decode(rcoData(r, f));
+    return { f, id: f.id, text, values: [...text.matchAll(COLOR_PAIR)].map(m => [m[2], Number(m[3])]) };
+  });
+}
+
+/* Each palette's Appearance theme, as Settings names it. */
+const PALETTE_NAMES = { color_default: "Default look", color_ps1: "PlayStation", color_ps2: "PlayStation 2", color_ps3: "PlayStation 3",
+                        color_ps4: "PlayStation 4" };
+const paletteRank = id => Object.keys(PALETTE_NAMES).indexOf(id) >>> 0;
+
+/* A palette with new colours, each written where the old one stands. */
+function colorsText(text, values) {
+  const map = new Map(values);
+  return text.replace(COLOR_PAIR, (all, head, name, old) =>
+    map.has(name) && map.get(name) !== Number(old) ? head + String(map.get(name) >>> 0) : all);
+}
+
+/* The colour test: each kind of colour in one bright colour of its own, its
+   transparency kept, in every palette, so a photo of the console shows what
+   each kind colours. The first group a name fits is its group; "varies" is
+   true for a name whose colour differs between the palettes (the Appearance
+   theme's own colour). Names in no group keep the console's colour. */
+const COLOR_TEST = [
+  { label: "Focus", rgb: 0x00e5ff, fits: n => /^focus\./.test(n) },
+  { label: "Text and labels (Settings and the system's menus)", rgb: 0xff1a1a, fits: n => /^text\.|label|^dialog\.(header|body)/.test(n) },
+  { label: "Icons", rgb: 0xff8c00, fits: n => /icon/.test(n) },
+  { label: "Base mat (the backdrop behind the Control Center)", rgb: 0xff00ff, fits: n => /^base-mat\./.test(n) },
+  { label: "Background", rgb: 0x1f4bff, fits: n => /^background\./.test(n) },
+  { label: "Panels (the Control Center's cards, button hints, menus, dialogs)", rgb: 0x00c853,
+    fits: n => /^(dialog|menu|form)\.fill|\.dark\.fill|overlay\.fill|key-guide\.tooltip\.fill/.test(n) },
+  { label: "Accent (the colours that change with the Appearance theme)", rgb: 0xffd600, fits: (n, varies) => varies },
+];
+/* The panel test: each panel and base mat colour in a distinct colour of its own, everything else as the console's,
+   to tell which one colours the Welcome widgets, the pills, the Control Center's cards and the button hints. */
+const COLOR_PANEL_TEST = [
+  ["button.overlay.fill.enabled", 0xff0000, "red"], ["checkbox.overlay.fill.enabled", 0xff8000, "orange"],
+  ["dialog.fill.enabled", 0xffee00, "yellow"], ["form.fill.selected.enabled", 0x80ff00, "lime"],
+  ["key-guide.overlay.fill.enabled", 0x00a000, "green"], ["key-guide.tooltip.fill.enabled", 0x00ffff, "cyan"],
+  ["menu.fill.disabled", 0x0040ff, "blue"], ["menu.fill.enabled", 0x8000ff, "purple"],
+  ["radio-button.overlay.fill.enabled", 0xff00ff, "magenta"], ["tag.dark.fill.enabled", 0xff80c0, "pink"],
+  ["tooltip.dark.fill.enabled", 0xffffff, "white"], ["base-mat.area.enabled", 0x8b4513, "brown"],
+  ["base-mat.overlay.enabled", 0x008080, "teal"],
+];
+function colorPanelValues(palettes) {
+  const map = new Map(COLOR_PANEL_TEST.map(([name, rgb]) => [name, rgb]));
+  return palettes.map(p => p.values.map(([name, v]) => [name, map.has(name) ? ((v & 0xff000000) | map.get(name)) >>> 0 : v]));
+}
+/* The colour editor: the colours whose effect the tests showed on the console, each named by what it changes. A
+   colour keeps the console's transparency. "text" is every light text and label colour (dark labels on light
+   buttons stay readable); "accent" is the colour that changes with the Appearance theme, its darker and lighter
+   shades following it in proportion. */
+/* "shared": the console uses the default look's palette (color_default) for these with every Appearance theme
+   selected (seen on the console with Use System Appearance for Widgets off), so they are edited there only. */
+const COLOR_EDIT = [
+  { key: "widgets", shared: true, label: "Welcome widgets and pills", hint: "turn off Use System Appearance for Widgets in the Welcome hub's settings to see it", names: ["menu.fill.enabled"] },
+  { key: "backdrop", shared: true, label: "Control Center backdrop", hint: "also tints the Media Gallery card", names: ["base-mat.overlay.enabled"] },
+  { key: "card", shared: true, label: "Control Center card", names: ["radio-button.overlay.fill.enabled"] },
+  { key: "hints", shared: true, label: "Button hints", hint: "behind Utilities and Edit Widgets", names: ["key-guide.overlay.fill.enabled"] },
+  { key: "text", label: "Text in Settings and menus", group: "text" },
+  { key: "accent", label: "Accent", hint: "buttons, switches, sliders and progress bars", group: "accent" },
+];
+const rgbOf = v => (v >>> 0) & 0xffffff;
+const lum = c => 0.299 * (c >> 16) + 0.587 * ((c >> 8) & 255) + 0.114 * (c & 255);
+/* For palette `i`: each editor colour's names, and the colour that stands for it (its "base"). */
+function colorEditSets(palettes, i) {
+  const values = new Map(palettes[i].values), sets = {};
+  const varies = name => new Set(palettes.map(p => (p.values.find(v => v[0] === name) || [])[1])).size > 1;
+  const groupOf = name => (COLOR_TEST.find(t => t.fits(name, varies(name))) || {}).label;
+  for (const e of COLOR_EDIT) {
+    let names;
+    if (e.names) names = e.names.filter(n => values.has(n));
+    else if (e.group === "text") names = [...values.keys()].filter(n => groupOf(n) === COLOR_TEST[1].label && rgbOf(values.get(n)) === 0xffffff);
+    else names = [...values.keys()].filter(n => groupOf(n) === COLOR_TEST[COLOR_TEST.length - 1].label);
+    if (!names.length) continue;
+    const count = new Map();
+    for (const n of names) count.set(rgbOf(values.get(n)), (count.get(rgbOf(values.get(n))) || 0) + 1);
+    const base = [...count].sort((a, b) => b[1] - a[1])[0][0];
+    sets[e.key] = { names, base };
+  }
+  return sets;
+}
+/* Palette `i` with the colours picked (`picks`: key -> 0xRRGGBB); a pick equal to the console's leaves its names
+   as they are. */
+function colorEditValues(palettes, i, picks) {
+  const sets = colorEditSets(palettes, i), out = new Map(palettes[i].values);
+  for (const [key, set] of Object.entries(sets)) {
+    const pick = picks[key];
+    if (pick === undefined || pick === set.base) continue;
+    for (const n of set.names) {
+      const v = out.get(n), rgb = rgbOf(v);
+      let c = pick;
+      if (rgb !== set.base) {       /* a shade of the accent: the same step from the new colour */
+        const r = lum(set.base) ? Math.min(2, lum(rgb) / lum(set.base)) : 1;
+        c = [16, 8, 0].reduce((acc, sh) => acc | (Math.max(0, Math.min(255, Math.round(((pick >> sh) & 255) * r))) << sh), 0);
+      }
+      out.set(n, ((v & 0xff000000) | c) >>> 0);
+    }
+  }
+  return palettes[i].values.map(([n]) => [n, out.get(n)]);
+}
+function colorTestValues(palettes) {
+  const varies = name => new Set(palettes.map(p => (p.values.find(v => v[0] === name) || [])[1])).size > 1;
+  return palettes.map(p => p.values.map(([name, v]) => {
+    const g = COLOR_TEST.find(t => t.fits(name, varies(name)));
+    return [name, g ? ((v & 0xff000000) | g.rgb) >>> 0 : v];
+  }));
+}
+
 /* A copy with some files replaced: `replace` maps "element\tattribute" to
    new bytes. Files keep their order, 16-byte aligned, and files the console
    shares between entries stay shared. */
@@ -1413,7 +1528,8 @@ async function rcoKey(onFile) {
 /* Number the pictures of one resource file (`vectorOnly`: only its SVG
    icons). The numbers come from the key, so they are the same whichever
    file is numbered first. */
-async function numberPictures(path, vectorOnly) {
+function numberPictures(path, vectorOnly) { return rcoQueued("Numbering the pictures", () => numberPicturesNow(path, vectorOnly), true); }
+async function numberPicturesNow(path, vectorOnly) {
   const p = progressToast("Reading the console's interface files…");
   try {
     const key = (await rcoKey((i, n, x) => p.set(`Reading ${baseName(x)}…`, i / n * 0.3))).filter(k => k.path === path);
@@ -1515,16 +1631,36 @@ async function rcoChanges(path) {
 }
 
 async function rcoSave(path, changes) {
+  let made = null;
   if (!changes.size) await resetAssets([{ path }]);
   else {
-    await uploadVerified("/api/theme/file", { id: state.editId, path }, new Blob([rcoRebuild(await rcoStock(path), changes)]));
+    made = rcoRebuild(await rcoStock(path), changes);
+    await uploadVerified("/api/theme/file", { id: state.editId, path }, new Blob([made]));
     state.files.add(path);
   }
   stamp = Date.now();
+  /* the file just sent is the theme's now: the next change starts from it without fetching it again */
+  if (made) rcoThemeCache.set(`${state.editId}|${path}|${stamp}`, rcoParse(made));
   await refreshStatus();
 }
 
-async function replacePicture(path, el, file) {
+/* Changes to a resource file, one at a time: each reads the theme's file as the change before it left it (a
+   change started meanwhile would otherwise start from the old file and undo the other when it is sent). */
+let rcoWork = Promise.resolve(), rcoWaiting = 0;
+function rcoQueued(label, fn, ownProgress = false) {
+  const waiting = rcoWaiting++ > 0;
+  const p = waiting || !ownProgress ? progressToast(waiting ? `${label}: waiting for the change before it…` : `${label}…`) : null;
+  const run = rcoWork.then(async () => {
+    if (p && ownProgress) { p.done("", ""); }
+    else if (p) p.set(`${label}…`, 0.3);
+    try { return await fn(); } finally { rcoWaiting--; if (p && !ownProgress) p.done("", ""); }
+  });
+  rcoWork = run.catch(() => {});
+  return run;
+}
+
+function replacePicture(path, el, file) { return rcoQueued("Adding your picture", () => replacePictureNow(path, el, file), true); }
+async function replacePictureNow(path, el, file) {
   const r = await rcoStock(path), pic = rcoPictures(r).find(p => p.el === el);
   if (!pic) return;
   const p = progressToast(`Adding your picture as ${pic.id}…`);
@@ -1543,7 +1679,8 @@ async function replacePicture(path, el, file) {
   renderAspect(aspectById("interface"));
 }
 
-async function resetPicture(path, el) {
+function resetPicture(path, el) { return rcoQueued("Putting the console's picture back", () => resetPictureNow(path, el)); }
+async function resetPictureNow(path, el) {
   const r = await rcoStock(path), pic = rcoPictures(r).find(p => p.el === el);
   const changes = await rcoChanges(path);
   for (const f of pic.files) changes.delete(`${f.el}\t${f.attr}`);
@@ -1881,7 +2018,135 @@ async function rcoShapesShow() {
   if (box) box.innerHTML = html;
 }
 
-async function saveShapes(path, reset) {
+/* The Appearance themes' colours: each theme's palette, kept in the interface's resource file, with the colour
+   test per palette and its key. */
+async function appearanceColorsShow() {
+  const box = $("#appearance-colors");
+  if (!box) return;
+  let html = "";
+  try {
+    for (const path of aspectAssets(aspectById("interface")).map(a => a.path).sort()) {
+      const r = await rcoStock(path).catch(() => null), pals = r ? rcoColors(r).sort((x, y) => paletteRank(x.id) - paletteRank(y.id)) : [];
+      if (!pals.length) continue;
+      const changes = await rcoChanges(path), group = colorTestValues(pals), panel = colorPanelValues(pals);
+      /* Only the default look's palette is offered: the console uses it for the widgets, the Control Center and the button
+         hints with every Appearance theme, and no change to a theme's own palette has shown on the console. A theme
+         changed earlier in one of those can have them put back. */
+      const hiddenChanged = pals.filter(p => p.id !== "color_default" && changes.has(`${p.f.el}\t${p.f.attr}`));
+      const panelKey = COLOR_PANEL_TEST.map(([name, rgb, word]) => `<span style="display:inline-flex;align-items:center;gap:6px;margin:2px 14px 2px 0">
+          <i style="width:14px;height:14px;border-radius:3px;background:#${rgb.toString(16).padStart(6, "0")}"></i>${esc(word)}: ${esc(name)}</span>`).join("");
+      const key = COLOR_TEST.map(g => `<span style="display:inline-flex;align-items:center;gap:6px;margin:2px 14px 2px 0">
+          <i style="width:14px;height:14px;border-radius:3px;background:#${g.rgb.toString(16).padStart(6, "0")}"></i>${esc(g.label)}</span>`).join("");
+      html += `<div class="banner"><b>For the Welcome widgets' colours, turn off Use System Appearance for Widgets</b> in the Welcome
+          hub's settings on the console. With it on, the Welcome hub picks the widgets' colours for each Appearance theme itself and
+          ignores these.</div>
+        <p class="note"><b>Colours.</b> <b>Edit colours</b> sets the Welcome widgets and pills, the Control Center's backdrop
+          and card, the button hints, the text in Settings and menus, and the accent. The console uses these with every Appearance theme
+          (they are the default look's palette; each Appearance theme has one of its own too, but changes to those didn't show on the
+          console, so they aren't offered). Each colour keeps the console's transparency, and <b>Console's colours</b> puts them back. The Welcome widgets follow these colours only with
+          <b>Use System Appearance for Widgets</b> off in the Welcome hub's settings; on, the Welcome hub picks them for each theme itself. The colours are kept in the interface's
+          resource file (${esc(baseName(path))}), so <b>Interface icons</b> shows that file as changed too. apply this theme, then put the console in rest mode and wake it.</p>
+        <details class="note"><summary><b>Tests</b>, for finding what other colours change</summary>
+        <p>The <b>colour test</b> paints each kind of colour in a bright colour of its own, so a photo shows what it changes:</p>
+        <div style="display:flex;flex-wrap:wrap">${key}</div>
+        <p>With <b>Use System Appearance for Widgets</b> off, the colour test turns the Welcome widgets and the pills above them the
+          panels' colour. The <b>panel test</b> gives each panel and base mat colour a colour of
+          its own, everything else as the console's, to tell which one colours what:</p>
+        <div style="display:flex;flex-wrap:wrap">${panelKey}</div></details>
+        ${hiddenChanged.length ? `<div class="banner">This theme also changes the colours of ${plural(hiddenChanged.length, "Appearance theme")}
+          (${hiddenChanged.map(p => esc(PALETTE_NAMES[p.id] || p.id)).join(", ")}), from an earlier test or edit. The console showed none of
+          those changes, and they are no longer offered. <button class="btn sm ghost danger" data-act="colors-reset-others" data-path="${esc(path)}">Put the console's colours back there</button></div>` : ""}
+        <div class="rows">${pals.map((p, i) => p.id !== "color_default" ? "" : (() => {
+          const mine = changes.get(`${p.f.el}\t${p.f.attr}`), text = mine ? new TextDecoder().decode(mine) : null;
+          const on = text === null ? "" : text === colorsText(p.text, panel[i]) ? "Panel test" : text === colorsText(p.text, group[i]) ? "Colour test" : "Your colours";
+          const editing = state.colorEdit === p.id;
+          let editor = "";
+          if (editing) {
+            const cur = new Map(text ? [...text.matchAll(COLOR_PAIR)].map(m => [m[2], Number(m[3])]) : p.values), sets = colorEditSets(pals, i);
+            const stockOf = new Map(p.values);
+            const hex = c => "#" + c.toString(16).padStart(6, "0");
+            editor = `<div class="row-item" style="display:block"><div style="display:grid;grid-template-columns:minmax(0,1fr) auto auto;gap:8px 14px;align-items:center;max-width:640px">
+              ${COLOR_EDIT.filter(e => sets[e.key] && (p.id === "color_default" || !e.shared)).map(e => {
+                const set = sets[e.key], name = set.names.find(n => rgbOf(stockOf.get(n)) === set.base) || set.names[0];
+                const now = rgbOf(cur.get(name));
+                return `<label for="ce-${e.key}"><b>${esc(e.label)}</b>${e.hint ? `<br><span class="muted" style="font-size:.85rem">${esc(e.hint)}</span>` : ""}</label>
+                  <input type="color" id="ce-${e.key}" data-color-edit="${e.key}" value="${hex(now)}" style="width:56px;height:34px;padding:0;border:0;background:none">
+                  <span class="muted" style="font-size:.85rem">console: ${hex(set.base)}</span>`;
+              }).join("")}</div>
+              <div class="toolbar"><button class="btn sm primary" data-act="colors-save" data-path="${esc(path)}" data-palette="${esc(p.id)}">Use these colours</button>
+                <button class="btn sm ghost" data-act="colors-close">Close</button></div></div>`;
+          }
+          return `<div class="row-item${on ? " replaced" : ""}"><div class="info">
+              <div class="file">${p.id === "color_default" ? "Colours" : `${esc(PALETTE_NAMES[p.id] || p.id)}: Colours`}${on ? ` <span class="tag on">${on}</span>` : ""}</div>
+              <div class="dir">${p.id === "color_default"
+                ? "The Welcome widgets and pills, the Control Center and the button hints use these with every Appearance theme"
+                : "This theme's own text and accent; what they change with this theme selected hasn't been seen on the console yet"}</div></div>
+            <div class="acts">${editing ? "" : `<button class="btn sm primary" data-act="colors-edit" data-palette="${esc(p.id)}">Edit colours</button>`}
+              ${on === "Colour test" ? "" : `<button class="btn sm" data-act="colors-test" data-path="${esc(path)}" data-palette="${esc(p.id)}">Colour test</button>`}
+              ${on === "Panel test" ? "" : `<button class="btn sm" data-act="colors-panel" data-path="${esc(path)}" data-palette="${esc(p.id)}">Panel test</button>`}
+              ${on ? `<button class="btn sm ghost danger" data-act="colors-reset" data-path="${esc(path)}" data-palette="${esc(p.id)}">Console's colours</button>` : ""}</div></div>${editor}`;
+        })()).join("")}</div>`;
+    }
+  } catch (e) { html = `<p class="note">${esc(e.message)}</p>`; }
+  box.innerHTML = html;
+}
+
+function saveColorEdit(path, palette) { return rcoQueued("Saving the colours", () => saveColorEditNow(path, palette)); }
+async function saveColorEditNow(path, palette) {
+  try {
+    const r = await rcoStock(path), pals = rcoColors(r), i = pals.findIndex(p => p.id === palette), changes = await rcoChanges(path);
+    if (i < 0) throw new Error("no such palette");
+    const picks = {};
+    for (const input of document.querySelectorAll("[data-color-edit]")) {
+      const m = /^#([0-9a-f]{6})$/i.exec(input.value.trim());
+      if (!m) throw new Error("use a colour like #3366ff");
+      picks[input.dataset.colorEdit] = parseInt(m[1], 16);
+    }
+    const p = pals[i], k = `${p.f.el}\t${p.f.attr}`, values = colorEditValues(pals, i, picks), text = colorsText(p.text, values);
+    const widgets = (colorEditSets(pals, i).widgets || { names: [] }).names;
+    const widgetsChanged = widgets.some(n => new Map(values).get(n) !== new Map(p.values).get(n));
+    if (text === p.text) changes.delete(k); else changes.set(k, new TextEncoder().encode(text));
+    await rcoSave(path, changes);
+    state.colorEdit = null;
+    toast(`${text === p.text ? "The console's own colours" : "Your colours"} saved and verified. Apply the theme, then put the console in rest mode and wake it.${widgetsChanged ? " For the widgets' colour, turn off Use System Appearance for Widgets in the Welcome hub's settings." : ""}`, "ok", 12000);
+  } catch (e) { toast(e.message, "err"); }
+  renderAspect(aspectById("appearance"));
+  renderAspect(aspectById("interface"));
+}
+
+function resetOtherPalettes(path) { return rcoQueued("Putting the console's colours back", () => resetOtherPalettesNow(path)); }
+async function resetOtherPalettesNow(path) {
+  try {
+    const r = await rcoStock(path), changes = await rcoChanges(path);
+    for (const p of rcoColors(r)) if (p.id !== "color_default") changes.delete(`${p.f.el}\t${p.f.attr}`);
+    await rcoSave(path, changes);
+    toast("The Appearance themes' own colours are the console's again in this theme. Apply the theme to use it.", "ok", 7000);
+  } catch (e) { toast(e.message, "err"); }
+  renderAspect(aspectById("appearance"));
+  renderAspect(aspectById("interface"));
+}
+
+function saveColors(path, reset, palette, panel = false) { return rcoQueued("Saving the colours", () => saveColorsNow(path, reset, palette, panel)); }
+async function saveColorsNow(path, reset, palette, panel = false) {
+  try {
+    const r = await rcoStock(path), pals = rcoColors(r), changes = await rcoChanges(path);
+    const test = panel ? colorPanelValues(pals) : colorTestValues(pals);
+    pals.forEach((p, i) => {
+      if (palette && p.id !== palette) return;
+      const k = `${p.f.el}\t${p.f.attr}`;
+      if (reset) changes.delete(k);
+      else changes.set(k, new TextEncoder().encode(colorsText(p.text, test[i])));
+    });
+    await rcoSave(path, changes);
+    toast(reset ? "The console's own colours are back in this theme. Apply the theme, then put the console in rest mode and wake it."
+      : `${panel ? "Panel test" : "Colour test"} added and verified. Apply the theme, put the console in rest mode and wake it, and compare with the key.`, "ok", 9000);
+  } catch (e) { toast(e.message, "err"); }
+  renderAspect(aspectById("appearance"));
+  renderAspect(aspectById("interface"));
+}
+
+function saveShapes(path, reset) { return rcoQueued("Saving the shapes", () => saveShapesNow(path, reset)); }
+async function saveShapesNow(path, reset) {
   try {
     const r = await rcoStock(path), sh = rcoShapes(r), k = `${sh.f.el}\t${sh.f.attr}`, changes = await rcoChanges(path);
     if (reset) changes.delete(k);
@@ -3233,6 +3498,7 @@ function aspectBody(asp) {
   const list = asp.id === "fonts"
     ? shown.slice().sort((x, y) => fontRank(x.assets[0]) - fontRank(y.assets[0]) || fontName(x.assets[0].path).localeCompare(fontName(y.assets[0].path)))
     : shown;
+  if (asp.id === "appearance") setTimeout(appearanceColorsShow);
   return `${search}${fontNote}${appearanceNote}<div class="rows">${list.map(g => {
       const rep = g.assets.filter(a => state.files.has(a.path)).length;
       const a0 = g.assets[0];
@@ -3261,7 +3527,7 @@ function aspectBody(asp) {
           <button class="btn sm" data-act="attach-group" data-group="${esc(g.key)}" data-aspect="${asp.id}">${rep ? "Replace" : "Attach"}</button>
           ${rep ? `<button class="btn sm ghost danger" data-act="reset-group" data-group="${esc(g.key)}" data-aspect="${asp.id}">Reset</button>` : ""}
         </div></div>`;
-    }).join("")}</div>${more}`;
+    }).join("")}</div>${more}${asp.id === "appearance" ? `<div id="appearance-colors"></div>` : ""}`;
 }
 
 const gainLabel = g => (g ? `${g > 0 ? "+" : "−"}${Math.abs(g)} dB` : "same loudness as the console's music");
@@ -4209,6 +4475,13 @@ document.addEventListener("click", async e => {
     case "rco-unpick": return resetPicture(el.dataset.path, +el.dataset.el);
     case "shapes-save": return saveShapes(el.dataset.path, false);
     case "shapes-reset": return saveShapes(el.dataset.path, true);
+    case "colors-test": el.disabled = true; el.textContent = "Saving…"; return saveColors(el.dataset.path, false, el.dataset.palette);
+    case "colors-reset": el.disabled = true; el.textContent = "Saving…"; return saveColors(el.dataset.path, true, el.dataset.palette);
+    case "colors-panel": el.disabled = true; el.textContent = "Saving…"; return saveColors(el.dataset.path, false, el.dataset.palette, true);
+    case "colors-reset-others": el.disabled = true; el.textContent = "Saving…"; return resetOtherPalettes(el.dataset.path);
+    case "colors-edit": state.colorEdit = el.dataset.palette; return renderAspect(aspectById("appearance"));
+    case "colors-close": state.colorEdit = null; return renderAspect(aspectById("appearance"));
+    case "colors-save": el.disabled = true; el.textContent = "Saving…"; return saveColorEdit(el.dataset.path, el.dataset.palette);
     case "tiles-number": return numberTileIcons();
     case "title-pic": {
       const file = await pickFile("image/*");

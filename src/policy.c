@@ -571,7 +571,7 @@ static int validate_now(const char *cand, const char *stock, char *why, size_t l
    result made by other rules is not trusted. Bump CHECK_RULES whenever what the checks accept or refuse
    changes: the same version number can ship twice while a feature is built, and a refusal remembered by the
    first build would otherwise be handed back by the second without its new code ever running. */
-#define CHECK_RULES "2"
+#define CHECK_RULES "3"
 #define CHECKED_TAG PLUGIN_VERSION "r" CHECK_RULES
 #define CHECKED_MAX  8192
 

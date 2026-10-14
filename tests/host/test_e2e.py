@@ -25,7 +25,7 @@ import urllib.parse
 import zlib
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from rco_fixture import Rco, SHAPES, palette_png, png_chunk, sample as rco_sample  # noqa: E402
+from rco_fixture import Rco, SHAPES, COLORS_DEFAULT, COLORS_PS2, palette_png, png_chunk, sample as rco_sample  # noqa: E402
 import font_fixture  # noqa: E402
 
 ASAN = "build-host/ps5-theme-asan"
@@ -228,6 +228,22 @@ fs.writeFileSync(process.argv[4], R.rcoRebuild(r, new Map([[sh.f.el + "\\t" + sh
 console.log(JSON.stringify({ names: sh.values.map(v => v[0]) }));
 """
 
+COLORS_JS = """
+const fs = require("fs");
+const html = fs.readFileSync(process.argv[2], "utf8");
+const block = html.slice(html.indexOf("/* rco:begin */"), html.indexOf("/* rco:end */"));
+const R = new Function("esc", block + ";return { rcoParse, rcoRebuild, rcoColors, colorsText, colorTestValues, colorPanelValues, colorEditValues };")(s => String(s));
+const r = R.rcoParse(new Uint8Array(fs.readFileSync(process.argv[3]))), pals = R.rcoColors(r);
+for (const p of pals) if (R.colorsText(p.text, p.values) !== p.text) throw new Error("unchanged colours changed the text");
+const edit = { widgets: 0x123456, backdrop: 0x0000ff, text: 0xffd000, accent: 0xff0000 };
+const test = process.argv[5] === "panel" ? R.colorPanelValues(pals)
+  : process.argv[5] === "edit" ? pals.map((p, i) => p.id === "color_ps2" ? R.colorEditValues(pals, i, edit) : p.values)
+  : R.colorTestValues(pals);
+const replace = new Map(pals.map((p, i) => [p.f.el + "\\t" + p.f.attr, new TextEncoder().encode(R.colorsText(p.text, test[i]))]));
+fs.writeFileSync(process.argv[4], R.rcoRebuild(r, replace));
+console.log(JSON.stringify({ palettes: pals.map(p => p.id) }));
+"""
+
 PICTURE_JS = """
 const fs = require("fs"), zlib = require("zlib");
 const html = fs.readFileSync(process.argv[2], "utf8");
@@ -368,7 +384,7 @@ def build_console():
           + b"w" * 4070 + b"titleId=PPSA06666/user/catalog_downloader/conceptmeta/888888/icon0.png\x00")
     write(f"{PS4_APP}/param.sfo", sfo("Test App"))
     write(UI_RCO, rco_sample(lambda w, h: png(w, h, (90, 90, 90)), lambda: SVG_ICON, bytes(range(256)) * 8,
-                             b'{"button.fill.enabled": 268435455}'))
+                             COLORS_DEFAULT, COLORS_PS2))
     write(f"{VSH}/bgm_home.at9", at9_stock())
     write(f"{VSH}/sfx_quiet.at9", at9_stock(10, 3, 0))        # silent: codes only 3 bands
     write(f"{MEDIA}/lib/native.sprx", b"\x7fELF")
@@ -514,7 +530,7 @@ S = {}  # shared state between ordered tests
 
 def t_startup():
     s = status()
-    assert s["fw"] == "13.42" and s["version"] == "1.58" and s["themes"] == [], s
+    assert s["fw"] == "13.42" and s["version"] == "1.59" and s["themes"] == [], s
     listing = open(f"{BASE}/dump/assets-v2-13.42.txt").read()
     assert f"{VSH}/bg_hub_default.dds.zst" in listing
     assert f"{HOME}/bg.png" in listing and "/mnt/rnps/apps/NPXS40099/a.png" in listing
@@ -524,7 +540,7 @@ def t_startup():
     assert open("/tmp/tile-registered").read().strip() == "THEM00001"
     assert "starting" in log_text()
     notes = open("/tmp/notifications.txt").read()
-    assert "ps5-theme 1.58 starting" in notes and "ps5-theme ready" in notes, notes
+    assert "ps5-theme 1.59 starting" in notes and "ps5-theme ready" in notes, notes
 
 
 def t_ui_and_icon_served():
@@ -1883,9 +1899,19 @@ def t_interface_pictures():
            (rco.replaced({("iconid_home", "src"): b'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"/>'}),
             "must keep the console's own <svg> opening"),
            (rco.replaced({("iconid_home", "src"): SVG_ICON.split(b">")[0] + b"><script>alert(1)</script></svg>"}), 'SVG contains "<script"'),
-           (rco.replaced({("snd_focus_move", "src"): bytes(2048)}), "only pictures and shapes can be changed"),
-           (rco.replaced({("color_default", "src"): b'{"button.fill.enabled": 1}'}), "only pictures and shapes can be changed"),
-           (rco.replaced({("en-US", "src"): b"strings" * 49 + b"STRING!"}), "only pictures and shapes can be changed"),
+           (rco.replaced({("snd_focus_move", "src"): bytes(2048)}), "only pictures, shapes and colours can be changed"),
+           (rco.replaced({("en-US", "src"): b"strings" * 49 + b"STRING!"}), "only pictures, shapes and colours can be changed"),
+           # Colours: the same names, in order, each a whole number 0..0xFFFFFFFF; nothing else.
+           (rco.replaced({("color_default", "src"): b'{"button.fill.enabled": 1}'}), "colours color_default must keep the console's 14 names"),
+           (rco.replaced({("color_ps2", "src"): COLORS_PS2.replace(b'"focus.fill', b'"focus.fills')}), "must keep the console's 14 names"),
+           (rco.replaced({("color_ps2", "src"): COLORS_PS2.replace(b'  "background.enabled": 4278190080,\r\n', b"")}),
+            "must keep the console's 14 names"),
+           (rco.replaced({("color_ps2", "src"): COLORS_PS2.replace(b"4278190080", b"-1")}), "background.enabled must be a whole number"),
+           (rco.replaced({("color_ps2", "src"): COLORS_PS2.replace(b"4278190080", b"4278190080.0")}), "background.enabled must be a whole number"),
+           (rco.replaced({("color_ps2", "src"): COLORS_PS2.replace(b"4278190080", b"4294967296")}), "background.enabled must be a whole number"),
+           (rco.replaced({("color_ps2", "src"): COLORS_PS2.replace(b"4278190080", b"4e9")}), "background.enabled must be a whole number"),
+           (rco.replaced({("color_ps2", "src"): COLORS_PS2.replace(b"4278190080", b'"#ff0000"')}), "not a list of names and colours"),
+           (rco.replaced({("color_ps2", "src"): COLORS_PS2 + b" " * 17000}), "not a list of names and colours"),
            # Shapes: the same names, in order, each a number in range; nothing else.
            (rco.replaced({("shape_default", "src"): SHAPES.replace(b'"bar.fill"', b'"bar.fills"')}), "must keep the console's 5 names"),
            (rco.replaced({("shape_default", "src"): SHAPES.replace(b"\r\n}", b',\r\n  "tile": 9.0\r\n}')}),
@@ -1914,6 +1940,55 @@ def t_interface_pictures():
     assert put_file("ui", UI_RCO, stock)[0] == 200          # the console's own file, unchanged, is fine too
     rounder = SHAPES.replace(b'"borderRadiusRatio": 1.0', b'"borderRadiusRatio": 3.5').replace(b"16.0", b"0")
     assert put_file("ui", UI_RCO, rco.replaced({("shape_default", "src"): rounder}))[0] == 200
+    red_text = COLORS_PS2.replace(b'"text.primary.enabled": 4294967295', b'"text.primary.enabled": 4294901760')
+    assert put_file("ui", UI_RCO, rco.replaced({("color_ps2", "src"): red_text, ("shape_default", "src"): rounder}))[0] == 200
+
+    # The page's colour test: every palette painted by group, transparency kept, names and layout as the console's;
+    # the console accepts it.
+    write("/tmp/colors.js", COLORS_JS.encode())
+    out = subprocess.run(["node", "/tmp/colors.js", WEB_PAGE, UI_RCO, "/tmp/colored.rco"], capture_output=True, text=True)
+    assert out.returncode == 0, out.stderr
+    colored = open("/tmp/colored.rco", "rb").read()
+    pals = {f[1]: json.loads(Rco(colored).data(f[5], f[6])) for f in Rco(colored).files() if f[1].startswith("color_")}
+    stock_pals = {f[1]: json.loads(rco.data(f[5], f[6])) for f in rco.files() if f[1].startswith("color_")}
+    want = {"focus.fill.enabled": 0x00e5ff, "text.primary.enabled": 0xff1a1a, "menu.label.primary.enabled": 0xff1a1a,
+            "button.label.focused": 0xff1a1a, "icon.primary.enabled": 0xff8c00, "base-mat.area.enabled": 0xff00ff,
+            "background.enabled": 0x1f4bff, "dialog.fill.enabled": 0x00c853, "button.fill.enabled": 0xffd600,
+            "slider.thumb.enabled": None, "tooltip.error.fill.enabled": None}      # the same in every palette: kept
+    for pid, pal in pals.items():
+        assert list(pal) == list(stock_pals[pid]), pid
+        for name, rgb in want.items():
+            before = stock_pals[pid][name]
+            got = pal[name]
+            assert got == (before if rgb is None else (before & 0xff000000) | rgb), (pid, name, hex(got))
+    assert put_file("ui", UI_RCO, colored)[0] == 200
+    # The panel test: each panel and base mat colour a distinct colour, everything else as the console's.
+    out = subprocess.run(["node", "/tmp/colors.js", WEB_PAGE, UI_RCO, "/tmp/panels.rco", "panel"], capture_output=True, text=True)
+    assert out.returncode == 0, out.stderr
+    panels = open("/tmp/panels.rco", "rb").read()
+    pals = {f[1]: json.loads(Rco(panels).data(f[5], f[6])) for f in Rco(panels).files() if f[1].startswith("color_")}
+    want = {"dialog.fill.enabled": 0xffee00, "base-mat.area.enabled": 0x8b4513, "base-mat.overlay.enabled": 0x008080, "menu.fill.enabled": 0x8000ff}
+    for pid, pal in pals.items():
+        assert list(pal) == list(stock_pals[pid]), pid
+        for name, before in stock_pals[pid].items():
+            got = pal[name]
+            assert got == ((before & 0xff000000) | want[name] if name in want else before), (pid, name, hex(got))
+    assert put_file("ui", UI_RCO, panels)[0] == 200
+    # The colour editor: each colour by what it changes, the console's transparency kept; light text only (dark labels
+    # on light buttons stay); the accent's shades follow it in proportion; the other palettes untouched.
+    out = subprocess.run(["node", "/tmp/colors.js", WEB_PAGE, UI_RCO, "/tmp/edited.rco", "edit"], capture_output=True, text=True)
+    assert out.returncode == 0, out.stderr
+    edited = open("/tmp/edited.rco", "rb").read()
+    pals = {f[1]: json.loads(Rco(edited).data(f[5], f[6])) for f in Rco(edited).files() if f[1].startswith("color_")}
+    assert pals["color_default"] == stock_pals["color_default"]
+    ps2 = pals["color_ps2"]
+    assert list(ps2) == list(stock_pals["color_ps2"])
+    expect = dict(stock_pals["color_ps2"])
+    expect.update({"menu.fill.enabled": 0xff123456, "base-mat.overlay.enabled": 0xff0000ff, "text.primary.enabled": 0xffffd000,
+                   "menu.label.primary.enabled": 0xffffd000, "button.fill.enabled": 0x0fff0000,
+                   "button.indicator.track.focused": 0xffb80000})   # 0x275b9a is 0.72 of 0x367ed6's brightness
+    assert ps2 == expect, {k: hex(v) for k, v in ps2.items() if v != expect[k]}
+    assert put_file("ui", UI_RCO, edited)[0] == 200
 
     # The page's shape editor: unchanged numbers give the console's own text,
     # new ones are written where the old ones stand, and the console accepts it.
@@ -1942,7 +2017,7 @@ def t_interface_pictures():
         numbered = open("/tmp/numbered.rco", "rb").read()
         new = {(f[1], f[3]): Rco(numbered).data(f[5], f[6]) for f in Rco(numbered).files()}
         for key, data in new.items():
-            if key[0] in ("default", "en-US", "snd_focus_move", "color_default", "shape_default"):
+            if key[0] in ("default", "en-US", "snd_focus_move", "color_default", "color_ps2", "shape_default"):
                 assert data == old[key], key
             elif old[key].startswith(b"\x89PNG"):
                 assert data != old[key], key
@@ -2498,7 +2573,7 @@ def t_appearance_textures():
     # A remembered check result is made by a version and a revision of the rules: results of other rules are
     # not trusted (the same version can ship twice while a feature is built).
     remembered = open(f"{BASE}/checked").read().splitlines()
-    assert remembered and all(re.match(r"1\.58r\d+\t", l) for l in remembered), remembered[:2]
+    assert remembered and all(re.match(r"1\.59r\d+\t", l) for l in remembered), remembered[:2]
     assert put_file("appear", f"{HOME}/bg.png", S["bg"])[0] == 200
 
     shell = "/mnt/sandbox/NPXS40087_000"
