@@ -54,6 +54,7 @@ background is shown, with a switch. On 13.42:
 | **Home: Game Library** | Behind the Game Library | On |
 | **Home: NPXS… tile** | Behind the home screen while that tile of the console's own is selected (13 of them: PlayStation Plus, PlayStation Store, Discover, Music Home, All Apps, Welcome and others) | On |
 | **Image load error placeholder** | Shown when a picture can't be loaded | Off |
+| **Welcome tab backgrounds** | The Welcome hub's own backgrounds, the ones chosen in its settings: short videos, each with a still picture shown while it loads and a small one to choose it by. A picture goes to the still ones, a video to the videos | Off |
 | **Other areas** | Backgrounds inside other screens: payment promotions, the accessibility widget, gradients, the VR tutorial | Off |
 
 - **Switching an area off** only changes where the next picture goes. A
@@ -82,9 +83,12 @@ background is shown, with a switch. On 13.42:
 - **A picture** the browser can open: JPEG, PNG, WebP and so on. Any size: it
   is fitted to each background. For the sharpest result, use 3840 by 2160 (4K,
   16:9).
-- **A still picture, not a video.** A video goes only to backgrounds that are
-  videos, and on 13.42 none of the home screen's is: dropping one says there
-  are no video backgrounds in the areas switched on.
+- **A picture for the home screen.** Its backgrounds are pictures on 13.42,
+  so a video can't go there. A video goes only to backgrounds that are
+  videos: the Welcome hub's own (switch on **Welcome tab backgrounds**). It
+  goes in as it is, without converting, so use an MP4 like the console's;
+  this hasn't been tried on a console yet. With no video background in the
+  areas switched on, dropping a video says so.
 - **A browser with canvas and `BigInt`** (current Chrome, Edge, Firefox or
   Safari), since the console doesn't make the textures itself.
 - **Disk space on the console:** each home background takes about 8 MB in the
