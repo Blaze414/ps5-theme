@@ -1,6 +1,6 @@
 # Home music
 
-How to give the home screen your own music, what it needs, and how it is made. Part of the [PS5 Themes](../README.md#documentation) documentation.
+How to give the home screen your own music, and the console your own wake-up sound: what they need, and how they are made. Part of the [PS5 Themes](../README.md#documentation) documentation.
 
 **On this page:**
 
@@ -9,6 +9,7 @@ How to give the home screen your own music, what it needs, and how it is made. P
 - [What it needs](#what-it-needs)
 - [When you hear it](#when-you-hear-it)
 - [If it doesn't play](#if-it-doesnt-play)
+- [The wake-up sound](#the-wake-up-sound)
 - [How it is made and stored](#how-it-is-made-and-stored)
 
 The home screen plays the console's own music. A theme can replace it with
@@ -116,6 +117,31 @@ everything else stays as the console's.
 - **On firmware other than 13.42:** not tested. The plugin checks every music
   file against the console's own and skips one that doesn't match, so the
   console's music plays instead.
+
+## The wake-up sound
+
+The console plays a short sound as it wakes from rest mode
+(`sfx_warmboot.at9`, 5.4 seconds on 13.42). A theme can replace it, and it
+has been heard on a PS5 with 13.42: the plugin keeps running through rest
+mode, and the console reads the sound as it wakes.
+
+1. In the theme's editor, switch on **Sounds** and press **Attach** on
+   `sfx_warmboot.at9`.
+2. Choose a short sound. It can be up to about twice as long as the
+   console's (on 13.42, about 10 seconds); a longer one is cut, fading out.
+   Its loudness is matched to the console's own sound.
+3. **Save**, then **Apply to console**.
+4. Put the console in rest mode and wake it.
+
+The other sounds in that list:
+
+| File | When it plays | Can a theme change it? |
+|---|---|---|
+| `sfx_warmboot.at9` | Waking from rest mode | **Yes**, heard on the console |
+| `sfx_coldboot.at9` | Switching the console on | No: it plays before the jailbreak and the plugin start |
+| `sfx_initialboot.at9` | Most likely the first start, during set-up | No: set-up comes before a jailbreak |
+| `sfx_transition.at9` | Not known yet | Not tried |
+| `bgm_onboarding.at9`, `bgm_onboarding_vr.at9` | Most likely the music during set-up (and VR set-up) | Not tried |
 
 ## How it is made and stored
 

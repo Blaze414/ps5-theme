@@ -131,6 +131,8 @@ Many icons exist in several sizes; your one file fills every size variant.
 System sounds and music clips, such as the wake-from-rest chime. Any audio
 file is converted to the sound's own format (WAV or ATRAC9) and loudness. The
 cold-boot sounds play before the jailbreak, so a theme can't reach them.
+`sfx_warmboot.at9`, the sound as the console wakes from rest mode, can be
+replaced: see [The wake-up sound](home-music.md#the-wake-up-sound).
 
 ### Home music
 

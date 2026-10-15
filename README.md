@@ -68,6 +68,8 @@ etaHEN 2.5B (unified build) and on its own from PS5 Payload Manager.
 - **Home music editor.** Pick the part of a song to use, an optional loop
   part, the order they play in, how the joints sound and the loudness, then
   hear it before you apply it.
+- **Wake-up sound.** Replace the sound the console plays as it wakes from
+  rest mode (see [The wake-up sound](docs/home-music.md#the-wake-up-sound)).
 - **Preview pictures.** Each theme's card shows its background, or any
   picture you choose, so you can tell themes apart at a glance.
 - **Save and Discard.** Changes are kept as unsaved until you save them, and
@@ -190,7 +192,7 @@ else stays stock.
 | Page | What's in it |
 |---|---|
 | [Backgrounds](docs/backgrounds.md) | Changing the home screen's backgrounds: a step-by-step guide, where each background is used, what it needs, and how they are made |
-| [Home music](docs/home-music.md) | Giving the home screen your own music: a step-by-step guide to the music editor, when you hear it, what it needs, and how it is made |
+| [Home music](docs/home-music.md) | Giving the home screen your own music: a step-by-step guide to the music editor, when you hear it, what it needs, and how it is made; and your own [wake-up sound](docs/home-music.md#the-wake-up-sound) |
 | [Changing game and app icons](docs/games-and-apps.md) | Installed games' and apps' icons, backgrounds and logos; the console's own tiles; interface icons |
 | [Appearance themes](docs/appearance-themes.md) | The Control Center's panels and the home screen artwork of the PlayStation 1 to 4 themes: a step-by-step guide, what it needs, how it depends on the anniversary assets, and how they are made and stored |
 | [Fonts](docs/fonts.md) | Replacing the console's text fonts, and which ones the home screen uses |
@@ -223,15 +225,17 @@ the table says where each one is now.
   stopping after rest mode is outside this plugin.
 - Background and icon sorting is by file name. Anything it misses is under
   **Other images**.
-- The home screen's layout can't be themed (it is code). Some of its colours
-  live in the interface resource files' palettes, which the plugin doesn't
-  change yet.
+- The home screen's layout can't be themed (it is code). Its colours are in
+  the interface's palettes: **Edit colours** changes the widgets, the Control
+  Center, the button hints, the text and the accent (see
+  [Colours](docs/appearance-themes.md#colours)).
+- The sound when the console is switched on plays before the jailbreak, so a
+  theme can't change it. The sound as it wakes from rest mode can.
 - Interface pictures: the console reads its resource files when the
   interface starts, so changed ones show after rest mode or a restart. The
   numbered test drew nothing beside the **Games** and **Media** tabs on 13.42.
-  Whether the console draws your own picture inside a vector icon, and
-  whether the home screen uses changed tile icons, hasn't been seen on the
-  console yet.
+  Whether the console draws your own picture inside a vector icon hasn't
+  been seen on the console yet.
 - etaHEN's plugin **Stop** ends the plugin at once: overlays stay until you
   choose **Restore stock**, start the plugin again, or reboot.
 
