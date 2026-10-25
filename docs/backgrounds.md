@@ -59,7 +59,8 @@ background is shown, with a switch. On 13.42:
 
 - **Switching an area off** only changes where the next picture goes. A
   picture already attached there stays until you reset it.
-- **The switches are remembered by the browser** you use, for each theme.
+- **The switches are kept with the theme** (since 1.62): the same on every
+  device you edit it from, and in an export.
 - **One tile only:** **Home screen tiles** has **Change background** for each
   of the console's tiles, with their names. **One game only:** see
   [Changing game and app icons](games-and-apps.md).

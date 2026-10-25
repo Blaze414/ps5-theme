@@ -530,7 +530,7 @@ S = {}  # shared state between ordered tests
 
 def t_startup():
     s = status()
-    assert s["fw"] == "13.42" and s["version"] == "1.61" and s["themes"] == [], s
+    assert s["fw"] == "13.42" and s["version"] == "1.62" and s["themes"] == [], s
     listing = open(f"{BASE}/dump/assets-v2-13.42.txt").read()
     assert f"{VSH}/bg_hub_default.dds.zst" in listing
     assert f"{HOME}/bg.png" in listing and "/mnt/rnps/apps/NPXS40099/a.png" in listing
@@ -540,7 +540,7 @@ def t_startup():
     assert open("/tmp/tile-registered").read().strip() == "THEM00001"
     assert "starting" in log_text()
     notes = open("/tmp/notifications.txt").read()
-    assert "ps5-theme 1.61 starting" in notes and "ps5-theme ready" in notes, notes
+    assert "ps5-theme 1.62 starting" in notes and "ps5-theme ready" in notes, notes
 
 
 def t_ui_and_icon_served():
@@ -1764,6 +1764,52 @@ def t_music_playlist():
     assert call("DELETE", "/api/themes", {"id": "mix"})[0] == 200
 
 
+def t_theme_choices():
+    """The editor's choices (how pictures are fitted, each piece's placement,
+    the sections and background areas switched on, song names) are kept with
+    the theme in choices.json: read back as sent, checked to be one JSON
+    object in UTF-8 text, undone by Discard, copied by Duplicate, and never
+    one of the files a theme applies."""
+    unsaved = lambda: {t["id"]: t for t in status()["themes"]}["picks"]["unsaved"]
+    def get(theme="picks"):
+        code, r = call("GET", "/api/theme/choices", {"id": theme})
+        assert code == 200, (code, r)
+        return r if isinstance(r, dict) else json.loads(r)
+    def put(body, **extra):
+        return call("PUT", "/api/theme/choices", {"id": "picks", "crc": f"{zlib.crc32(body):08x}", **extra}, body)
+    assert call("POST", "/api/themes", {"id": "picks", "name": "Picks"})[0] == 200
+    assert get() == {}                                                          # none yet
+    first = json.dumps({"v": 1, "fit": "contain", "songs": {"1": "Café ☕ – nuit"},
+                        "pieces": {f"{SYSA}/control_center_ps2_top.dds": {"place": "pad", "pad": 6, "keepClear": True}}},
+                       ensure_ascii=False).encode()
+    code, r = put(first)
+    assert code == 200 and r["size"] == len(first), (code, r)
+    assert get() == json.loads(first) and unsaved()                              # a change like any other
+    assert call("POST", "/api/theme/save", {"id": "picks"})[0] == 200 and not unsaved()
+    # Moved from the browser the first time a theme is opened: kept, but not a change to undo.
+    assert put(first, quiet="1")[0] == 200 and not unsaved()
+    # Discard puts the saved choices back.
+    assert put(b'{"v":1,"fit":"stretch"}')[0] == 200 and get()["fit"] == "stretch" and unsaved()
+    assert call("POST", "/api/theme/discard", {"id": "picks"})[0] == 200
+    assert get() == json.loads(first) and not unsaved()
+    # Only one JSON object in UTF-8 text, at most 64 KB.
+    for bad, needle in [(b"[1,2]", "JSON object"), (b"{ ", "JSON object"), (b'{"a":1}\x00', "JSON object"),
+                        (b'{"a":"\xff\xfe"}', "JSON object"), (b'{"a":"\xc3"}', "JSON object"), (b'{"a":\x01}', "JSON object"),
+                        (b"x", "64 KB")]:
+        code, r = put(bad)
+        assert code == 422 and needle in r["error"], (bad, code, r)
+    assert call("PUT", "/api/theme/choices", {"id": "picks"}, b"")[0] == 400
+    assert call("PUT", "/api/theme/choices", {"id": "picks"}, b"{}", headers={"Content-Length": str((64 << 10) + 1)})[0] == 413
+    assert call("PUT", "/api/theme/choices", {"id": "nosuch"}, b"{}")[0] == 404
+    assert get() == json.loads(first) and not unsaved()                          # refused uploads changed nothing
+    # A duplicate keeps them; they are never one of the files the theme applies.
+    assert call("POST", "/api/themes/duplicate", {"id": "picks", "new_id": "picks-copy", "name": "Picks copy"})[0] == 200
+    assert get("picks-copy") == json.loads(first)
+    assert call("GET", "/api/theme/files", {"id": "picks"})[1]["files"] == []
+    for theme in ("picks-copy", "picks"):
+        assert call("DELETE", "/api/themes", {"id": theme})[0] == 200
+
+
 def t_settings_and_duplicate():
     assert call("POST", "/api/theme/settings", {"id": "night", "name": "Night Sky\nfw=any"})[0] == 200
     ini = open(f"{BASE}/themes/night/theme.ini").read()
@@ -2797,7 +2843,7 @@ def t_appearance_textures():
     # A remembered check result is made by a version and a revision of the rules: results of other rules are
     # not trusted (the same version can ship twice while a feature is built).
     remembered = open(f"{BASE}/checked").read().splitlines()
-    assert remembered and all(re.match(r"1\.61r\d+\t", l) for l in remembered), remembered[:2]
+    assert remembered and all(re.match(r"1\.62r\d+\t", l) for l in remembered), remembered[:2]
     assert put_file("appear", f"{HOME}/bg.png", S["bg"])[0] == 200
 
     shell = "/mnt/sandbox/NPXS40087_000"
@@ -3231,7 +3277,7 @@ TESTS = [t_startup, t_ui_and_icon_served, t_mutations_need_token, t_create_theme
          t_stock_mirror_and_linked_staging, t_stage_folders_reused_without_links,
          t_firmware_mismatch_is_refused, t_delete_rules, t_concurrent_requests_during_apply,
          t_restore_stock_cleans_up, t_overlays_reach_system_views, t_crash_loop_takes_theme_down, t_busy_overlay_is_never_forced, t_recovers_after_hard_kill, t_update_from_payload_manager, t_update_from_plain_elf, t_update_hands_over, t_update_at_boot, t_web_comes_back_after_rest_mode, t_takeover_when_web_is_down, t_stop_tool_keeps_the_theme, t_failed_write_closes_its_file, t_survives_malformed_and_abusive_requests,
-         t_slow_clients_do_not_block_others, t_log_rotates, t_media_policy, t_music, t_music_playlist, t_settings_and_duplicate, t_preview_pictures, t_save_and_discard, t_cut_off_uploads_are_not_theme_files,
+         t_slow_clients_do_not_block_others, t_log_rotates, t_media_policy, t_music, t_music_playlist, t_theme_choices, t_settings_and_duplicate, t_preview_pictures, t_save_and_discard, t_cut_off_uploads_are_not_theme_files,
          t_home_background_textures, t_interface_pictures, t_title_pictures, t_fonts, t_bc7_keeps_transparency, t_page_writes_the_consoles_zstd_frames, t_page_builds_playlists, t_page_bleeds_colour_into_clear_pixels, t_page_places_textures_against_their_edge, t_texture_sources, t_appearance_textures, t_shellui_exit_releases_sandbox, t_shellui_exits_during_apply, t_title_where, t_watch_files, t_home_music_at9, t_long_mount_paths_use_parent_folder, t_system_is_byte_identical_afterwards, t_crash_is_reported_and_recovered,
          t_privilege_failure_exits_cleanly]
 

@@ -1311,6 +1311,102 @@ api_delete_preview(request_t *req) {
 }
 
 
+/* The editor's choices for a theme: how pictures are fitted, each Appearance
+   piece's placement, which background areas and sections are on, and the
+   playlist's song names. A small JSON object the page reads and writes, kept
+   with the theme (copied with it, undone by Discard) and never applied to the
+   console. The page checks every value it reads; this keeps out anything that
+   isn't such a file. */
+#define CHOICES_FILE      "choices.json"
+#define CHOICES_MAX_BYTES (64u << 10)
+
+static void
+choices_path(const char *id, char *out, size_t size) {
+  snprintf(out, size, "%s/%s/%s", THEMES_DIR, id, CHOICES_FILE);
+}
+
+
+static int
+is_blank(unsigned char c) {
+  return c == ' ' || c == '\t' || c == '\n' || c == '\r';
+}
+
+
+/* One JSON object as UTF-8 text, without control characters but tabs and line ends. */
+static int
+choices_ok(const char *path, char *why, size_t len) {
+  struct stat st;
+  int fd = open(path, O_RDONLY);
+  if(fd < 0 || fstat(fd, &st) || st.st_size < 2 || st.st_size > (off_t)CHOICES_MAX_BYTES) {
+    if(fd >= 0) close(fd);
+    snprintf(why, len, "the choices must be 2 bytes to 64 KB of text");
+    return 0;
+  }
+  size_t n = (size_t)st.st_size;
+  unsigned char *b = malloc(n);
+  int ok = b && pread(fd, b, n, 0) == (ssize_t)n;
+  close(fd);
+  for(size_t i = 0; ok && i < n; ) {
+    unsigned c = b[i];
+    if(c < 0x20) { ok = is_blank((unsigned char)c); i++; continue; }
+    if(c < 0x80) { i++; continue; }
+    size_t more = c >= 0xc2 && c <= 0xdf ? 1 : c >= 0xe0 && c <= 0xef ? 2 : c >= 0xf0 && c <= 0xf4 ? 3 : 0;
+    if(!more || i + more >= n) { ok = 0; break; }
+    for(size_t k = 1; k <= more; k++) if((b[i + k] & 0xc0) != 0x80) ok = 0;
+    i += more + 1;
+  }
+  size_t first = 0, last = n;
+  while(ok && first < n && is_blank(b[first])) first++;
+  while(ok && last > first && is_blank(b[last - 1])) last--;
+  if(ok && (last - first < 2 || b[first] != '{' || b[last - 1] != '}')) ok = 0;
+  free(b);
+  if(!ok) snprintf(why, len, "the choices must be one JSON object in UTF-8 text");
+  return ok;
+}
+
+
+static void
+api_get_choices(request_t *req) {
+  char id[128], path[PATH_MAX];
+  get_param(req->query, "id", id, sizeof(id));
+  if(!theme_exists(id)) return respond_error(req->fd, 404, "no such theme");
+  choices_path(id, path, sizeof(path));
+  if(access(path, F_OK)) {
+    strbuf_t sb = {0};
+    SB_LIT(&sb, "{}");
+    return respond_json(req->fd, 200, &sb);
+  }
+  respond_file(req, path);
+}
+
+
+/* `quiet=1`: choices the page moved from its browser storage the first time
+   the theme was opened, not a change for Discard to undo. */
+static void
+api_put_choices(request_t *req) {
+  char id[128], quiet[4], dst[PATH_MAX], part[PATH_MAX + 24], msg[160], crc_hex[9];
+  uint32_t crc;
+  uint64_t size = 0;
+
+  get_param(req->query, "id", id, sizeof(id));
+  int is_quiet = !get_param(req->query, "quiet", quiet, sizeof(quiet)) && !strcmp(quiet, "1");
+  if(!theme_exists(id)) return respond_error(req->fd, 404, "no such theme");
+  if(req->content_length <= 0) return respond_error(req->fd, 400, "empty upload");
+  if((uint64_t)req->content_length > CHOICES_MAX_BYTES) return respond_error(req->fd, 413, "the choices are larger than 64 KB");
+  choices_path(id, dst, sizeof(dst));
+  part_name(part, sizeof(part), dst);
+  if(receive_upload(req, part, &crc, crc_hex)) return;
+  if(!choices_ok(part, msg, sizeof(msg))) {
+    fs_unlink(part);
+    return respond_error(req->fd, 422, msg);
+  }
+  if(place_upload(req, id, part, dst, crc, &size, !is_quiet, (uint64_t)req->content_length)) return;
+  strbuf_t sb = {0};
+  sb_printf(&sb, "{\"ok\":true,\"size\":%llu,\"crc32\":\"%s\"}", (unsigned long long)size, crc_hex);
+  respond_json(req->fd, 200, &sb);
+}
+
+
 /* The shown picture, or the one named by `kind`. */
 /* A newer copy of the plugin asks this one to step aside. Only a process on
    the console itself may ask. */
@@ -2131,6 +2227,7 @@ route(request_t *req) {
   if(get && !strcmp(p, "/api/crash"))       return api_crash(req);
   if(get && !strcmp(p, "/api/theme/music")) return api_get_music(req);
   if(get && !strcmp(p, "/api/theme/preview")) return api_get_preview(req);
+  if(get && !strcmp(p, "/api/theme/choices")) return api_get_choices(req);
   if(get && !strcmp(p, "/api/mounts"))      return api_mounts(req);
   if(get && !strcmp(p, "/api/title/where")) return api_title_where(req);
   if(get && !strcmp(p, "/api/diag/watch")) return api_watch(req);
@@ -2149,6 +2246,7 @@ route(request_t *req) {
   if(put && !strcmp(p, "/api/theme/music")) return api_put_music(req);
   if(del && !strcmp(p, "/api/theme/music")) return api_delete_music(req);
   if(put && !strcmp(p, "/api/theme/preview")) return api_put_preview(req);
+  if(put && !strcmp(p, "/api/theme/choices")) return api_put_choices(req);
   if(del && !strcmp(p, "/api/theme/preview")) return api_delete_preview(req);
   if(post && !strcmp(p, "/api/theme/settings")) return api_theme_settings(req);
   if(post && !strcmp(p, "/api/themes/duplicate")) return api_duplicate_theme(req);

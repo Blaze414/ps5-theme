@@ -14,6 +14,22 @@ on Ubuntu 24.04. The `.plugin` file is the ELF with etaHEN's plugin header:
 (`tools/make_plugin.py`).
 
 
+## Continuous integration
+
+GitHub Actions (`.github/workflows/ci.yml`) runs on every push to main and
+every pull request:
+
+- the [end-to-end tests](testing.md), in a privileged container with real
+  mounts and again with mounts emulated;
+- the PS5 build, its three files and their SHA-256 sums attached to the run;
+- `tools/check_repo.py`: every local link and heading link in the README and
+  the docs resolves, and the version is the same in the Makefile, the
+  plugin, the README and the tests.
+
+The same checks run by hand: `tests/host/run.sh`, `tests/host/run.sh
+emulated`, `./build.sh` and `python3 tools/check_repo.py`.
+
+
 ## Project layout
 
 | Path | What |
@@ -39,7 +55,8 @@ on Ubuntu 24.04. The `.plugin` file is the ELF with etaHEN's plugin header:
 | `tools/klog/` | `ps5-klog.elf`: the kernel log on TCP port 3232, for finding out what the system does |
 | `tools/fonts/` | `ps5-fontscan.elf`: lists the font files each process has open or mapped, read-only, for the font test |
 | `tools/assetwatch/` | `ps5-assetwatch.elf`: for two minutes, logs the files the home screen and the web renderer map and unmap, read-only, to find where something on screen is loaded from |
-| `tools/` | Table generator, icon generator, plugin packer |
+| `tools/` | Table generator, icon generator, plugin packer, repository checks (`check_repo.py`) |
+| `.github/workflows/ci.yml` | The tests, the build and the repository checks on every push |
 | `tests/host/` | End-to-end tests and the fake console (`rco_fixture.py` builds resource files) |
 | `tests/atrac9/`, `tests/zstd/` | Codec cross-checks |
 | `tests/fuzz/` | Fuzzing the parsers |

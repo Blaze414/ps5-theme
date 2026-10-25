@@ -1,0 +1,64 @@
+# Every push to main and every pull request: the end-to-end tests (with real
+# mounts, and with mounts emulated), the PS5 build with its files attached to
+# the run, and the repository checks (docs links, the version everywhere).
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  tests:
+    name: End-to-end tests (${{ matrix.mode }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        mode: [full, emulated]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run the tests against the plugin on a fake console
+        run: |
+          if [ "${{ matrix.mode }}" = full ]; then
+            tests/host/run.sh               # a privileged container: real read-only mounts
+          else
+            tests/host/run.sh emulated      # inside a build step: mounts emulated
+          fi
+
+  build:
+    name: PS5 build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build with ps5-payload-sdk
+        run: ./build.sh
+      - name: Checksums
+        run: cd build && sha256sum ps5-theme.plugin ps5-theme.elf ps5-theme-stop.elf | tee SHA256SUMS
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ps5-theme-${{ github.sha }}
+          path: |
+            build/ps5-theme.plugin
+            build/ps5-theme.elf
+            build/ps5-theme-stop.elf
+            build/SHA256SUMS
+          if-no-files-found: error
+
+  checks:
+    name: Docs links and version
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - run: python3 tools/check_repo.py

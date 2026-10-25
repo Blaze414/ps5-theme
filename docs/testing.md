@@ -7,8 +7,9 @@ tests/host/run.sh
 ```
 
 Builds the real plugin sources for Linux with AddressSanitizer and UBSan and
-runs 54 end-to-end tests against a fake console tree in a privileged
-container. They cover:
+runs 57 end-to-end tests against a fake console tree in a privileged
+container (GitHub Actions runs them on every push: see
+[Building](building.md#continuous-integration)). They cover:
 
 - upload checks and the media policy, including files crafted to hang or
   exhaust the checks;
@@ -73,6 +74,14 @@ container. They cover:
 - Save and Discard, preview pictures and duplicates;
 - home music made by the browser's encoder, and damaged or wrong-format
   ATRAC9 files;
+- home music playlists: songs kept in numbered slots (`music.wav`,
+  `music2.wav` …) with their order and parts, wrong values refused, carried
+  by a duplicate, and an older `theme.ini` read as one song; the page's code,
+  run in Node, joining the songs by crossfade, fade or cut and looping back to
+  the start or repeating the last song;
+- the editor's choices kept with the theme (`choices.json`): read back as
+  sent, anything but one JSON object in UTF-8 text refused, undone by
+  Discard, copied by a duplicate;
 - apply progress;
 - a byte-for-byte check that `/system_ex` is unchanged afterwards.
 

@@ -491,7 +491,9 @@ const state = {
   sources: new Set(),    /* of those, the ones whose original picture is kept in the theme (see keepSource) */
   keepOriginals: true,   /* the theme keeps originals of what is attached (off: to save space) */
   originalsBytes: 0,     /* what the kept originals take on the console */
-  fit: localGet("fit") || "cover",
+  fit: "cover",          /* how pictures are fitted: the open theme's choice (loadChoices) */
+  choices: {},           /* the open theme's choices (see "the editor's choices") */
+  choicesId: "",
   confirming: "",        /* aspect waiting for "turn off" confirmation */
   pages: {},             /* per-aspect page size */
   filters: {},           /* per-aspect search text */
@@ -1245,15 +1247,115 @@ function areaOf(path) {
   const raw = segs[0] || m[1];
   return raw.replace(/[-_]+/g, " ").replace(/^./, c => c.toUpperCase());
 }
+/* ================================================================ the editor's choices
+
+   How pictures are fitted, each Appearance piece's placement, which
+   background areas and sections are on, and the playlist's song names belong
+   to the theme: the plugin keeps them in its choices.json (never applied to
+   the console), so they are the same on every device and go with an export.
+   What this browser kept for a theme before 1.62 moves there the first time
+   the theme is opened here. */
+
+const FITS = ["cover", "contain", "stretch"], PLACES = ["fill", "pad", "fit", "stretch"];
+
+/* Only what the page understands, as the right types: choices.json can come from an imported zip. */
+function cleanChoices(c) {
+  const out = {};
+  if (!c || typeof c !== "object" || Array.isArray(c)) return out;
+  if (FITS.includes(c.fit)) out.fit = c.fit;
+  if (c.sections && typeof c.sections === "object") {
+    for (const a of ASPECTS) if (c.sections[a.id]) (out.sections = out.sections || {})[a.id] = 1;
+  }
+  if (Array.isArray(c.bgOff)) out.bgOff = c.bgOff.filter(x => typeof x === "string" && x.length <= 120).slice(0, 200);
+  if (c.pieces && typeof c.pieces === "object" && !Array.isArray(c.pieces)) {
+    for (const [path, p] of Object.entries(c.pieces).slice(0, 500)) {
+      if (!path.startsWith("/") || path.length > 512 || !p || typeof p !== "object") continue;
+      const piece = {};
+      if (PLACES.includes(p.place)) piece.place = p.place;
+      if (typeof p.pad === "number" && Number.isFinite(p.pad)) piece.pad = Math.max(0, Math.min(40, Math.round(p.pad)));
+      if (typeof p.keepClear === "boolean") piece.keepClear = p.keepClear;
+      if (Object.keys(piece).length) (out.pieces = out.pieces || {})[path] = piece;
+    }
+  }
+  if (c.songs && typeof c.songs === "object" && !Array.isArray(c.songs)) {
+    for (let s = 1; s <= MUSIC_MAX_TRACKS; s++) {
+      const n = c.songs[s];
+      if (typeof n === "string" && n.trim()) (out.songs = out.songs || {})[s] = n.trim().slice(0, 80);
+    }
+  }
+  return out;
+}
+
+/* What this browser kept for a theme before 1.62. */
+function legacyChoices(id) {
+  const c = { pieces: {}, songs: {} };
+  const fit = localGet("fit");
+  if (fit) c.fit = fit;
+  try { c.sections = JSON.parse(localGet(`aspects:${id}`) || "{}"); } catch (e) { /* none */ }
+  try { const off = localGet(`bg-off:${id}`); if (off) c.bgOff = JSON.parse(off); } catch (e) { /* none */ }
+  try {
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i) || "", m = /^(keep|place|pad):([^:]+):(\/.+)$/.exec(key);
+      if (!m || m[2] !== id) continue;
+      const v = localStorage.getItem(key), p = c.pieces[m[3]] = c.pieces[m[3]] || {};
+      if (m[1] === "keep") p.keepClear = v !== "0";
+      else if (m[1] === "place") p.place = v;
+      else p.pad = +v;
+    }
+  } catch (e) { /* no storage */ }
+  for (let s = 1; s <= MUSIC_MAX_TRACKS; s++) { const n = localGet(`track-name:${id}:${s}`); if (n) c.songs[s] = n; }
+  return cleanChoices(c);
+}
+
+let choicesWork = Promise.resolve();
+/* Send a theme's choices, one write at a time. `quiet`: moved from this browser, not a change for Discard to undo. */
+function putChoices(id, c, quiet = false) {
+  const bytes = new TextEncoder().encode(JSON.stringify({ v: 1, ...c })), crc = hex8(crc32(bytes));
+  const run = choicesWork.then(async () => {
+    const r = await api("PUT", "/api/theme/choices", quiet ? { id, quiet: 1, crc } : { id, crc }, bytes);
+    if (r.crc32 !== crc || r.size !== bytes.length) throw new Error("the console stored something different from what was sent");
+  });
+  choicesWork = run.catch(() => {});
+  return run;
+}
+
+async function loadChoices(id) {
+  let c = null, fresh = false;
+  try {
+    const res = await fetch(`/api/theme/choices?${q({ id })}&v=${Date.now()}`);
+    if (res.ok) { const raw = await res.json(); fresh = !raw || !("v" in raw); c = cleanChoices(raw); }
+  } catch (e) { /* not reachable or not readable: the defaults */ }
+  if (c && fresh) {
+    const old = legacyChoices(id);
+    if (Object.keys(old).length) { c = old; putChoices(id, c, true).catch(() => {}); }
+  }
+  state.choices = c || {};
+  state.choicesId = id;
+  state.fit = state.choices.fit || "cover";
+}
+
+/* Change the open theme's choices: sent at once, and saved or discarded with the theme like any change. */
+function setChoice(change) {
+  const id = state.editId;
+  if (state.choicesId !== id) return Promise.resolve();
+  change(state.choices);
+  return putChoices(id, state.choices).then(() => refreshStatus(), e => toast(`This choice could not be kept: ${e.message}`, "err"));
+}
+const pieceChoice = (c, path) => ((c.pieces = c.pieces || {})[path] = c.pieces[path] || {});
+const songName = slot => (state.choices.songs || {})[slot] || "";
+function setSongNames(change) {
+  return setChoice(c => { c.songs = c.songs || {}; change(c.songs); if (!Object.keys(c.songs).length) delete c.songs; });
+}
+
 function bgOff() {
-  const saved = localGet(`bg-off:${state.editId}`);
-  if (saved) { try { return new Set(JSON.parse(saved)); } catch (e) { /* fall through to the default */ } }
+  const saved = state.choices.bgOff;
+  if (saved) return new Set(saved);
   /* Default: only the home screen's own backgrounds, when this firmware has them. */
   const areas = new Set(aspectAssets(aspectById("background")).map(a => areaOf(a.path)));
   const home = [...areas].some(a => a.startsWith("Home:"));
   return new Set(home ? [...areas].filter(a => !a.startsWith("Home:")) : []);
 }
-function setBgOff(set) { localSet(`bg-off:${state.editId}`, JSON.stringify([...set])); }
+function setBgOff(set) { setChoice(c => { c.bgOff = [...set]; }); }
 /* ================================================================ interface pictures
 
    The console keeps its interface pictures (icons, buttons, symbols) in
@@ -2624,14 +2726,15 @@ function aspectReplaced(asp) {
   if (asp.mode === "music") return (themeById(state.editId) || {}).music || state.files.has(HOME_MUSIC) ? 1 : 0;
   return aspectAssets(asp).filter(a => state.files.has(a.path)).length;
 }
-function aspectFlags() {
-  try { return JSON.parse(localGet(`aspects:${state.editId}`) || "{}"); } catch (e) { return {}; }
-}
+function aspectFlags() { return state.choices.sections || {}; }
 function aspectOn(asp) { return aspectReplaced(asp) > 0 || !!aspectFlags()[asp.id]; }
 function setAspectFlag(asp, on) {
-  const f = aspectFlags();
-  if (on) f[asp.id] = 1; else delete f[asp.id];
-  localSet(`aspects:${state.editId}`, JSON.stringify(f));
+  if (!!aspectFlags()[asp.id] === on) return;
+  setChoice(c => {
+    const f = c.sections = c.sections || {};
+    if (on) f[asp.id] = 1; else delete f[asp.id];
+    if (!Object.keys(f).length) delete c.sections;
+  });
 }
 
 /* ================================================================ conversions (verified) */
@@ -3299,14 +3402,14 @@ function textureDraw(path, pct, fit, w, h, iw, ih, keepClear) {
 }
 /* pad:end */
 /* Whether a top-right piece keeps the band its clock and icons are drawn over clear: on unless switched off. */
-const keepClearFor = path => localGet(`keep:${state.editId}:${path}`) !== "0";
+const keepClearFor = path => ((state.choices.pieces || {})[path] || {}).keepClear !== false;
 
-/* A piece's saved placement: the choice and its padding (per theme, remembered in this browser). */
+/* A piece's saved placement: the choice and its padding (kept with the theme). */
 function placementFor(path) {
   const a = textureAnchor(path), hasEdge = !!(a.top || a.right || a.bottom);
-  const mode = localGet(`place:${state.editId}:${path}`), pad = localGet(`pad:${state.editId}:${path}`);
-  return { mode: ["fill", "pad", "fit", "stretch"].includes(mode) && (hasEdge || mode !== "pad") ? mode : "fill",
-    pad: pad === null ? PAD_DEFAULT : Math.max(0, Math.min(40, +pad || 0)), hasEdge };
+  const { place: mode, pad } = (state.choices.pieces || {})[path] || {};
+  return { mode: PLACES.includes(mode) && (hasEdge || mode !== "pad") ? mode : "fill",
+    pad: pad === undefined ? PAD_DEFAULT : Math.max(0, Math.min(40, +pad || 0)), hasEdge };
 }
 
 /* Textures with see-through parts keep their transparency: the Appearance themes' panels and bars. */
@@ -3478,7 +3581,7 @@ async function removeMusic() {
   for (const slot of extra) await api("DELETE", "/api/theme/music", { id, slot }).catch(() => {});
   await api("DELETE", "/api/theme/music", { id }).catch(() => {});
   if (extra.length) await api("POST", "/api/theme/settings", { id, sequence: "1", tracks: 1, loop_start: -1, loop_end: -1, order: "music" }).catch(() => {});
-  for (const slot of [1, ...extra]) localSet(trackNameKey(id, slot), null);
+  setSongNames(names => { for (const k of Object.keys(names)) delete names[k]; });
   songCacheDrop(id);
   await resetAssets([{ path: HOME_MUSIC }]);
 }
@@ -4021,7 +4124,7 @@ async function renderEditor() {
   loads.set("open", -1);
   view.innerHTML = loadingMarker("open", `Opening ${t.name}…`);
   paintLoads(view);
-  await Promise.all([loadAssets(), loadThemeFiles(t.id)]);
+  await Promise.all([loadAssets(), loadThemeFiles(t.id), loadChoices(t.id)]);
   const on = state.status.applied === t.id;
   const fwAny = t.fw === "any";
 
@@ -4525,7 +4628,7 @@ async function openTrim(id, chans, rate, part, fresh, track = null) {
     if (track.loopLast && !hasLoop) { state.trim.loopStart = state.trim.start; state.trim.loopEnd = end; }
   } else if (!hasLoop) defaultLoop(state.trim);
   clampTrim("end");
-  setAspectFlag(aspectById("music"), true);
+  if (!aspectReplaced(aspectById("music"))) setAspectFlag(aspectById("music"), true);
   renderAspect(aspectById("music"));
 }
 
@@ -4817,7 +4920,7 @@ async function saveTrim() {
     if (t.fresh) {
       p.set("Sending the music to the console…", 0, 0.2);
       await uploadVerified("/api/theme/music", { id: t.id }, pcmWav(t.chans, t.rate));
-      localSet(trackNameKey(t.id, 1), t.name || null);
+      setSongNames(names => { if (t.name) names[1] = t.name; else delete names[1]; });
       songCacheDrop(t.id, 1);
     }
     await api("POST", "/api/theme/settings", {
@@ -4999,10 +5102,9 @@ function playlistSeconds(t) {
   return tracks.reduce((n, tr, i) => n + trackSeconds(tr, songDuration(t, tr.slot), pl, i === tracks.length - 1), 0);
 }
 
-const trackNameKey = (id, slot) => `track-name:${id}:${slot}`;
 const songTitle = file => file.name.replace(/\.[^.]+$/, "").slice(0, 80);
-/* A song's name as attached in this browser, or its place in the playlist. */
-function trackLabel(id, slot, pos) { return localGet(trackNameKey(id, slot)) || `Song ${pos + 1}`; }
+/* A song's name (from the file it came from), or its place in the playlist. */
+function trackLabel(id, slot, pos) { return (id === state.choicesId && songName(slot)) || `Song ${pos + 1}`; }
 
 function freeSlot(t) {
   const used = new Set(themeTracks(t).map(x => x.slot));
@@ -5150,7 +5252,7 @@ function playlistBody(t) {
     </div>
     <label class="field">Loudness <span id="gain-label">${esc(gainLabel(t.gain || 0))}</span>
       <input type="range" min="-12" max="12" step="1" value="${t.gain || 0}" id="music-gain"></label>
-    <p class="note">Each song is brought to the same loudness first, so none is much louder than the others. Song names are remembered by this browser.${converted ? ` ${esc(MUSIC_HEAR_NOTE)} ${esc(MUSIC_PLACE_NOTE)}` : ""}</p>`;
+    <p class="note">Each song is brought to the same loudness first, so none is much louder than the others.${converted ? ` ${esc(MUSIC_HEAR_NOTE)} ${esc(MUSIC_PLACE_NOTE)}` : ""}</p>`;
 }
 
 /* Adding or replacing a song opens the part editor; nothing is saved until "Use this". */
@@ -5191,7 +5293,7 @@ async function openSongPart(pos) {
     await openTrim(id, s.chans, s.rate, {
       start: tr.start, end: tr.end, loop: pl.join, blend: pl.blend, order: "music",
       loopStart: repeats ? pl.loopStart : null, loopEnd: repeats ? pl.loopEnd : null,
-    }, false, { slot: tr.slot, pos, name: localGet(trackNameKey(id, tr.slot)) || "" });
+    }, false, { slot: tr.slot, pos, name: songName(tr.slot) });
     p.done("Choose the part of the song to use.", "");
     const handle = $("#trim-start");
     if (handle) handle.focus();
@@ -5207,7 +5309,7 @@ async function saveSongPart() {
     if (t.fresh) {
       p.set("Sending the song to the console…", 0, 0.9);
       await uploadVerified("/api/theme/music", { id, slot: tr.slot }, pcmWav(t.chans, t.rate));
-      localSet(trackNameKey(id, tr.slot), tr.name || null);
+      setSongNames(names => { if (tr.name) names[tr.slot] = tr.name; else delete names[tr.slot]; });
     }
     const params = tr.slot === 1 ? { start: toMs(t.start), end: toMs(t.end), play_from: -1 }
                                  : { [`start${tr.slot}`]: toMs(t.start), [`end${tr.slot}`]: toMs(t.end) };
@@ -5248,8 +5350,8 @@ async function removeSong(pos) {
       if (!res.ok) throw new Error("a song could not be read from the console");
       await uploadVerified("/api/theme/music", { id, slot: 1 }, new Blob([await res.arrayBuffer()]));
       await api("DELETE", "/api/theme/music", { id, slot: mover.slot });
-      localSet(trackNameKey(id, 1), localGet(trackNameKey(id, mover.slot)));
-      localSet(trackNameKey(id, mover.slot), null);
+      const moved = mover.slot;
+      setSongNames(names => { if (names[moved]) names[1] = names[moved]; else delete names[1]; delete names[moved]; });
       const kept = songCache.get(`${id}|${mover.slot}`);
       songCacheDrop(id, 1);
       songCacheDrop(id, mover.slot);
@@ -5258,7 +5360,7 @@ async function removeSong(pos) {
       mover.slot = 1;
     } else {
       await api("DELETE", "/api/theme/music", { id, slot: gone.slot });
-      localSet(trackNameKey(id, gone.slot), null);
+      setSongNames(names => { delete names[gone.slot]; });
       songCacheDrop(id, gone.slot);
     }
     const seq = rest.map(x => x.slot);
@@ -5483,6 +5585,9 @@ async function exportTheme(id) {
       const res = await fetch(`/api/theme/preview?${q({ id, kind })}`);
       if (res.ok) out.push({ path: name, data: new Uint8Array(await res.arrayBuffer()) });
     }
+    /* the editor's choices (placement, fit, song names …), when the theme has any */
+    const choices = cleanChoices(await fetch(`/api/theme/choices?${q({ id })}`).then(r => r.ok ? r.json() : {}).catch(() => ({})));
+    if (Object.keys(choices).length) out.push({ path: "choices.json", data: new TextEncoder().encode(JSON.stringify({ v: 1, ...choices })) });
     const zip = makeZip(out);
     const back = await readZip(new File([zip], "check.zip"));   /* verify before handing it over */
     if (back.length !== out.length) throw new Error("export did not verify");
@@ -5537,6 +5642,7 @@ async function importEntries(entries, fallbackName) {
   if (music && !seq.includes(1)) seq.unshift(1);
   const playlist = seq.length > 1;
   const pictures = PREVIEW_FILES.map(([kind, name]) => [kind, entries.find(e => e.path === prefix + name)]).filter(([, e]) => e);
+  const choicesEntry = entries.find(e => e.path === prefix + "choices.json");
   /* Everything under the theme's files/ folder (the console decides what it
      accepts); without a theme.ini, anything under a themable folder. */
   const files = [];
@@ -5614,6 +5720,13 @@ async function importEntries(entries, fallbackName) {
   }
   for (const [kind, e] of pictures) {
     try { await uploadVerified("/api/theme/preview", { id, kind }, await e.blob()); } catch (err) { /* optional */ }
+  }
+  if (choicesEntry) {
+    /* only what the page understands goes in; a damaged file is left out */
+    try {
+      const c = cleanChoices(JSON.parse(await (await choicesEntry.blob()).text()));
+      if (Object.keys(c).length) await putChoices(id, c);
+    } catch (err) { /* optional */ }
   }
   await api("POST", "/api/theme/save", { id }).catch(() => {});   /* an imported theme starts saved */
   await refreshStatus();
@@ -5899,8 +6012,8 @@ async function placementChangedNow(path) {
 document.addEventListener("input", e => {
   if (e.target.dataset && e.target.dataset.pad) {
     const v = Math.max(0, Math.min(40, Math.round(+e.target.value || 0)));
-    localSet(`pad:${state.editId}:${e.target.dataset.pad}`, String(v));
-    return;     /* made again when the box is left (its change event) */
+    pieceChoice(state.choices, e.target.dataset.pad).pad = v;
+    return;     /* kept and made again when the box is left (its change event) */
   }
   const aspId = e.target.dataset && e.target.dataset.filterAspect;
   if (aspId) {
@@ -5929,14 +6042,16 @@ document.addEventListener("input", e => {
 
 document.addEventListener("change", async e => {
   if (e.target.dataset && e.target.dataset.keep) {
-    localSet(`keep:${state.editId}:${e.target.dataset.keep}`, e.target.checked ? "1" : "0");
+    const on = e.target.checked;
+    setChoice(c => { pieceChoice(c, e.target.dataset.keep).keepClear = on; });
     return placementChanged(e.target.dataset.keep, false);
   }
   if (e.target.dataset && e.target.dataset.place) {
-    localSet(`place:${state.editId}:${e.target.dataset.place}`, e.target.value);
+    const mode = e.target.value;
+    setChoice(c => { pieceChoice(c, e.target.dataset.place).place = mode; });
     return placementChanged(e.target.dataset.place, true);   /* "Fill with padding" shows its padding box */
   }
-  if (e.target.dataset && e.target.dataset.pad) return placementChanged(e.target.dataset.pad, false);
+  if (e.target.dataset && e.target.dataset.pad) { setChoice(() => {}); return placementChanged(e.target.dataset.pad, false); }
   const t = e.target;
   if (t.id === "pv-look") { pvState.look = t.value; return previewRender(state.editId); }
   if (t.id === "pl-join") return setPlaylistJoin(+t.value);
@@ -5953,7 +6068,7 @@ document.addEventListener("change", async e => {
     ASPECTS.forEach(renderAspect);
     return;
   }
-  if (t.id === "fit") { state.fit = t.value; localSet("fit", state.fit); return refitPictures(); }
+  if (t.id === "fit") { state.fit = t.value; setChoice(c => { c.fit = t.value; }); return refitPictures(); }
   try {
     if (t.id === "theme-name" && t.value.trim()) {
       await api("POST", "/api/theme/settings", { id: state.editId, name: t.value.trim() });

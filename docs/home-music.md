@@ -113,8 +113,9 @@ the manager puts the songs together into it.
 - **Loudness:** each song is first brought to the same loudness, so none is
   much louder than the others; **Loudness** then sets the whole playlist
   against the console's own music.
-- **Song names** are the file names, remembered by the browser you added them
-  with; elsewhere the songs show as Song 1, Song 2 and so on.
+- **Song names** are the file names, kept with the theme (since 1.62): the
+  same on every device, and in an export. Songs added before 1.62 in another
+  browser show as Song 1, Song 2 and so on.
 - **Back to one song:** remove songs until one is left; it then plays as a
   single song again, its part repeating. **Remove all** takes every song out.
 

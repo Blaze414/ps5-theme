@@ -55,7 +55,7 @@ between themes.
 
 - **Name** and **Firmware.**
 - **How images are fitted:** fill (crop the edges), fit (keep the whole
-  picture) or stretch. When you attach a picture to a texture or an image,
+  picture) or stretch, for each theme. When you attach a picture to a texture or an image,
   the theme keeps your original too (never applied to the console; one
   picture attached at several sizes is sent once, and the console keeps a copy
   for each). Changing this setting

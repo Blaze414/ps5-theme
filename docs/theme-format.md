@@ -11,6 +11,7 @@ my-theme/
   music2.wav         optional: a playlist's other songs, music2.wav to music8.wav, the same format
   preview.jpg        optional: library picture made from the background
   picture.jpg        optional: library picture you chose (shown first)
+  choices.json       optional: the editor's choices for this theme (see below)
   files/
     system_ex/vsh_asset/bg_hub_default.dds.zst     the default home background
     system_ex/vsh_asset/bgm_home.at9               home music, encoded from music.wav
@@ -68,6 +69,15 @@ music2_end=95000
   song) or `loop-last` (the last song keeps repeating `music_loop_start` to
   `music_loop_end`, or its whole part).
 - In a playlist, `music_order` and `music_play_from` are not used.
+
+`choices.json` keeps what you chose in the editor, so it is the same on every
+device and goes with an export: how pictures are fitted (`fit`), each
+Appearance piece's placement, padding and clock band (`pieces`, by the path of
+the file), the background areas switched off (`bgOff`), sections switched on
+with nothing in them yet (`sections`) and the playlist's song names (`songs`,
+by song number). It is one JSON object of at most 64 KB, never applied to the
+console; the editor reads only the values it knows, and a theme without it
+uses the defaults.
 
 On the console:
 

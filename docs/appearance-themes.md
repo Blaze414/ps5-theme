@@ -115,9 +115,8 @@ theme again, change the option and then **attach the picture again** (Replace
 on that piece). Attaching always makes the texture fresh with the options as
 they are at that moment, so it works whenever the automatic step did not.
 Then **Apply** the theme again and put the console in rest mode. The options
-(placement, padding, the clock band) are remembered by the browser you used,
-so in another browser they start at their defaults: set them first, then
-attach.
+(placement, padding, the clock band) are kept with the theme (since 1.62), so
+they are the same on every device you edit it from and go with an export.
 
 ## What it needs
 
