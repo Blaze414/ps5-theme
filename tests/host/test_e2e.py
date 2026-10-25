@@ -295,6 +295,13 @@ def webp_header(w, h, fill=0):
     return b"RIFF" + struct.pack("<I", 12 + len(vp8)) + b"WEBPVP8 " + struct.pack("<I", len(vp8)) + vp8
 
 
+def copy_program(src, dst):
+    """A program copied where an earlier one may still be running: beside it, then renamed
+    over it (writing into a running program fails with "Text file busy" on a native kernel)."""
+    shutil.copy(src, dst + ".part")
+    os.rename(dst + ".part", dst)
+
+
 def write(path, data):
     os.makedirs(os.path.dirname(path), exist_ok=True)
     with open(path, "wb") as f:
@@ -1097,8 +1104,12 @@ def take_over(path, data, version, boot=False):
             got += chunk
         conn.close()
         received.append(got)
-        write("/tmp/ps5-theme-new", got)
-        os.chmod("/tmp/ps5-theme-new", 0o755)
+        # The copy handing over may still run from /tmp/ps5-theme-new (an earlier update
+        # test started it there): write beside it and rename, never into a running program
+        # (a native kernel refuses that with "Text file busy"; the emulated amd64 doesn't).
+        write("/tmp/ps5-theme-new.part", got)
+        os.chmod("/tmp/ps5-theme-new.part", 0o755)
+        os.rename("/tmp/ps5-theme-new.part", "/tmp/ps5-theme-new")
         S["new"] = Plugin(binary="/tmp/ps5-theme-new", env={"PS5THEME_TEST_VERSION": version})
         started.set()
 
@@ -1270,7 +1281,7 @@ def clear_sandboxes():
 
 def start_shellui():
     """A stand-in for ShellUI's process (SceShellUI), once the plugin watches it."""
-    shutil.copy("/bin/sleep", "/tmp/SceShellUI")
+    copy_program("/bin/sleep", "/tmp/SceShellUI")
     shell = subprocess.Popen(["/tmp/SceShellUI", "600"])
     end = time.time() + 10
     while f"watching ShellUI (pid {shell.pid})" not in log_text():
@@ -2912,7 +2923,7 @@ def t_shellui_exit_releases_sandbox():
     if EMULATED:
         print("      (skipped: needs real mounts)", flush=True)
         return
-    shutil.copy("/bin/sleep", "/tmp/SceShellUI")
+    copy_program("/bin/sleep", "/tmp/SceShellUI")
     shell = subprocess.Popen(["/tmp/SceShellUI", "600"])
     boxes = []
 
@@ -2970,11 +2981,11 @@ def t_shellui_exit_releases_sandbox():
         # ShellUI starts again in a new sandbox: covered at once.
         new = sandbox(2)
         shell = subprocess.Popen(["/tmp/SceShellUI", "600"])
-        end = time.time() + 0.5
-        while crc_file(f"{new}/user/appmeta/PPSA01234/icon0.png") != zlib.crc32(mine):
+        end = time.time() + 0.5                                 # its /user and /system_ex views, one after the other
+        while (crc_file(f"{new}/user/appmeta/PPSA01234/icon0.png") != zlib.crc32(mine)
+               or crc_file(f"{new}{HOME}/bg.png") != zlib.crc32(S["bg"])):
             assert time.time() < end, "the new sandbox was not covered within half a second"
             time.sleep(0.02)
-        assert crc_file(f"{new}{HOME}/bg.png") == zlib.crc32(S["bg"])
 
         # An older sandbox of it showing up again is never covered.
         again = f"{old}/user"
