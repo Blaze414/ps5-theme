@@ -182,6 +182,9 @@ mode, and the console reads the sound as it wakes.
 3. **Save**, then **Apply to console**.
 4. Put the console in rest mode and wake it.
 
+The sounds of moving around the interface (the navigation sound and the
+rest) are a different kind: see [Interface sounds](manager.md#interface-sounds).
+
 The other sounds in that list:
 
 | File | When it plays | Can a theme change it? |
@@ -189,7 +192,7 @@ The other sounds in that list:
 | `sfx_warmboot.at9` | Waking from rest mode | **Yes**, heard on the console |
 | `sfx_coldboot.at9` | Switching the console on | No: it plays before the jailbreak and the plugin start |
 | `sfx_initialboot.at9` | Most likely the first start, during set-up | No: set-up comes before a jailbreak |
-| `sfx_transition.at9` | Not known yet | Not tried |
+| `sfx_transition.at9` | Not known yet: a soft swell of about 6 seconds, most likely on the way into the home screen | Not tried on the console; any sound converts for it (since 1.62: before, a pure tone such as a beep didn't) |
 | `bgm_onboarding.at9`, `bgm_onboarding_vr.at9` | Most likely the music during set-up (and VR set-up) | Not tried |
 
 ## How it is made and stored

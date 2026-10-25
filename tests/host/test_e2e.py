@@ -25,7 +25,7 @@ import urllib.parse
 import zlib
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from rco_fixture import Rco, SHAPES, COLORS_DEFAULT, COLORS_PS2, palette_png, png_chunk, sample as rco_sample  # noqa: E402
+from rco_fixture import Rco, SHAPES, COLORS_DEFAULT, COLORS_PS2, hevag, palette_png, png_chunk, sample as rco_sample  # noqa: E402
 import font_fixture  # noqa: E402
 
 ASAN = "build-host/ps5-theme-asan"
@@ -244,6 +244,38 @@ fs.writeFileSync(process.argv[4], R.rcoRebuild(r, replace));
 console.log(JSON.stringify({ palettes: pals.map(p => p.id) }));
 """
 
+SOUNDS_JS = """
+const fs = require("fs");
+const html = fs.readFileSync(process.argv[2], "utf8");
+const grab = n => html.slice(html.indexOf(`/* ${n}:begin */`), html.indexOf(`/* ${n}:end */`));
+const R = new Function("esc", grab("rco") + grab("vag") + ";return { rcoParse, rcoRebuild, rcoData, vagInfo, vagSamples, vagDecode, vagEncode, vagMaxSamples, vagLayoutProblem, uiSoundPrepare };")(s => String(s));
+const r = R.rcoParse(new Uint8Array(fs.readFileSync(process.argv[3])));
+const entry = id => r.files.find(f => f.id === id && f.type === "sound/vag");
+const out = {};
+const replace = new Map();
+for (const [id, seconds, mono] of [["snd_focus_move", 1, false], ["snd_2_focus_move", 0.01, true]]) {
+  const f = entry(id), stock = R.rcoData(r, f), info = R.vagInfo(stock);
+  if (R.vagLayoutProblem(stock, stock) !== "") throw new Error("the console's own sound is not laid out as the console's");
+  /* Your audio: silence, a falling tone with a click, silence; one channel for the theme's sound. */
+  const n = Math.round(seconds * info.rate), lead = 2000, chans = [];
+  for (let c = 0; c < (mono ? 1 : 2); c++) {
+    const x = new Float32Array(lead + n + 3000);
+    for (let i = 0; i < n; i++) x[lead + i] = 0.6 * Math.sin(2 * Math.PI * (900 - 400 * i / n) * i / info.rate) * (c ? 0.5 : 1) + (i === 5 ? 0.3 : 0);
+    chans.push(x);
+  }
+  const prep = R.uiSoundPrepare(chans, info.rate, R.vagDecode(stock).chans, R.vagMaxSamples(stock));
+  const made = R.vagEncode(stock, prep.chans);
+  let tooLong = "";
+  try { R.vagEncode(stock, [new Float32Array(R.vagMaxSamples(stock) + 1)]); } catch (e) { tooLong = e.message; }
+  out[id] = { cut: prep.cut, samples: made.samples, max: R.vagMaxSamples(stock), snr: made.snr, layout: R.vagLayoutProblem(stock, made.bytes),
+              size: made.bytes.length, stockSize: stock.length, tooLong, started: prep.chans[0].findIndex(v => Math.abs(v) > 0.001) };
+  replace.set(f.el + "\\t" + f.attr, made.bytes);
+  fs.writeFileSync(process.argv[4] + "." + id, made.bytes);
+}
+fs.writeFileSync(process.argv[4], R.rcoRebuild(r, replace));
+console.log(JSON.stringify(out));
+"""
+
 PICTURE_JS = """
 const fs = require("fs"), zlib = require("zlib");
 const html = fs.readFileSync(process.argv[2], "utf8");
@@ -267,11 +299,12 @@ const R = new Function("esc", block + ";return { rcoParse, rcoPictures, rcoRebui
 AT9_TOOL = os.path.join(os.path.dirname(os.path.abspath(__file__)), "at9_fixture.js")
 
 
-def at9_stock(seconds=3, cci=3, level=0.05):
+def at9_stock(seconds=3, cci=3, level=0.05, precision=7):
     """A stand-in for the console's bgm_home.at9 (ATRAC9 5.1, 48 kHz), made by
-    the theme builder's own encoder (web/atrac9.js)."""
-    out = f"/tmp/at9-stock-{cci}-{seconds}-{level}.at9"
-    subprocess.run(["node", AT9_TOOL, "stock", out, str(seconds), str(cci), str(level)], check=True, capture_output=True)
+    the theme builder's own encoder (web/atrac9.js); `precision`: the most it
+    codes any part with (13.42's sfx_transition.at9 never goes above 6)."""
+    out = f"/tmp/at9-stock-{cci}-{seconds}-{level}-{precision}.at9"
+    subprocess.run(["node", AT9_TOOL, "stock", out, str(seconds), str(cci), str(level), str(precision)], check=True, capture_output=True)
     return open(out, "rb").read()
 
 
@@ -390,10 +423,11 @@ def build_console():
           + b"titleId=PPSA05555" + b"z" * 300 + b"/user/catalog_downloader/conceptmeta/777777/icon0.png\x00"
           + b"w" * 4070 + b"titleId=PPSA06666/user/catalog_downloader/conceptmeta/888888/icon0.png\x00")
     write(f"{PS4_APP}/param.sfo", sfo("Test App"))
-    write(UI_RCO, rco_sample(lambda w, h: png(w, h, (90, 90, 90)), lambda: SVG_ICON, bytes(range(256)) * 8,
+    write(UI_RCO, rco_sample(lambda w, h: png(w, h, (90, 90, 90)), lambda: SVG_ICON, hevag(),
                              COLORS_DEFAULT, COLORS_PS2))
     write(f"{VSH}/bgm_home.at9", at9_stock())
     write(f"{VSH}/sfx_quiet.at9", at9_stock(10, 3, 0))        # silent: codes only 3 bands
+    write(f"{VSH}/sfx_transition.at9", at9_stock(3, 3, 0.05, 6))   # as 13.42's: never above precision 6
     write(f"{MEDIA}/lib/native.sprx", b"\x7fELF")
     os.makedirs("/data", exist_ok=True)
     os.makedirs("/user/app", exist_ok=True)
@@ -2114,7 +2148,8 @@ def t_home_background_textures():
     stock_dds = subprocess.run(["zstd", "-d", "-c", "-q", stock_path], capture_output=True, check=True).stdout
     code, r = call("GET", "/api/assets", {"q": "system_ex/vsh_asset"})
     assert {a["path"]: a["kind"] for a in r["assets"]} == {stock_path: "texture", f"{VSH}/bgm_home.at9": "audio",
-                                                          f"{VSH}/sfx_quiet.at9": "audio", f"{VSH}/eboot_like.rco": "rco",
+                                                          f"{VSH}/sfx_quiet.at9": "audio", f"{VSH}/sfx_transition.at9": "audio",
+                                                          f"{VSH}/eboot_like.rco": "rco",
                                                           UI_RCO: "rco", f"{VSH}/bg_NPXS40037.dds.zst": "texture"}, r
     code, info = call("GET", "/api/asset/texture", {"path": stock_path})
     assert code == 200 and info["format"] == "BC7" and info["dxgi"] == 98 and info["zstd"] is True, info
@@ -2219,8 +2254,7 @@ def t_interface_pictures():
            (rco.replaced({("iconid_home", "src"): b'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"/>'}),
             "must keep the console's own <svg> opening"),
            (rco.replaced({("iconid_home", "src"): SVG_ICON.split(b">")[0] + b"><script>alert(1)</script></svg>"}), 'SVG contains "<script"'),
-           (rco.replaced({("snd_focus_move", "src"): bytes(2048)}), "only pictures, shapes and colours can be changed"),
-           (rco.replaced({("en-US", "src"): b"strings" * 49 + b"STRING!"}), "only pictures, shapes and colours can be changed"),
+           (rco.replaced({("en-US", "src"): b"strings" * 49 + b"STRING!"}), "only pictures, sounds, shapes and colours can be changed"),
            # Colours: the same names, in order, each a whole number 0..0xFFFFFFFF; nothing else.
            (rco.replaced({("color_default", "src"): b'{"button.fill.enabled": 1}'}), "colours color_default must keep the console's 14 names"),
            (rco.replaced({("color_ps2", "src"): COLORS_PS2.replace(b'"focus.fill', b'"focus.fills')}), "must keep the console's 14 names"),
@@ -2251,6 +2285,33 @@ def t_interface_pictures():
            (pointing(good, ("emoji_game", "src"), 8), "points outside its data"),
            (good[:-16], "not a resource file"),
            (b"RCOF" + bytes(300), "not a resource file")]
+    # Sounds: laid out as the console's, byte for byte where its bytes don't depend on the sound (header but the
+    # length, opening and closing frames), every frame in between a plain sound frame, no longer; vibration kept.
+    snd = hevag(30, seed=9)                       # a valid sound, shorter than the console's (40 frame groups)
+    assert put_file("ui", UI_RCO, rco.replaced({("snd_focus_move", "src"): snd}))[0] == 200
+    def sound(edit):
+        b = bytearray(snd)
+        edit(b)
+        return rco.replaced({("snd_focus_move", "src"): bytes(b)})
+    def set_be32(at, v):
+        return lambda b: b.__setitem__(slice(at, at + 4), v.to_bytes(4, "big"))
+    group = 32                                     # two channels' frames
+    bad += [(rco.replaced({("snd_focus_move", "src"): bytes(2048)}), "must keep the console's own header"),
+            (sound(lambda b: b.__setitem__(0x20, b[0x20] ^ 1)), "must keep the console's own header"),
+            (sound(set_be32(16, 44100)), "must keep the console's own header"),
+            (sound(lambda b: b.__setitem__(0x1e, 1)), "must keep the console's own header"),
+            (sound(set_be32(12, len(snd) - 48 - group)), "its data doesn't match its header"),
+            (rco.replaced({("snd_focus_move", "src"): snd[:-16]}), "its data doesn't match its header"),
+            (rco.replaced({("snd_focus_move", "src"): hevag(41, seed=9)}), "longer than the console's"),
+            (sound(lambda b: b.__setitem__(48, 0x0c)), "must start as the console's does"),
+            (sound(lambda b: b.__setitem__(len(b) - 1, 0x76)), "must play once and end as the console's do"),
+            (sound(lambda b: b.__setitem__(48 + group * 5 + 1, b[48 + group * 5 + 1] | 2)), "must play once and end"),   # a loop mark
+            (sound(lambda b: b.__setitem__(48 + group * 5 + 1, b[48 + group * 5 + 1] | 1)), "must play once and end"),   # ends early
+            (sound(lambda b: b.__setitem__(len(b) - 2 * group + 1, b[len(b) - 2 * group + 1] & 0xf0)), "must play once and end"),
+            (sound(lambda b: b.__setitem__(48 + group * 3, (b[48 + group * 3] & 0xf0) | 13)), "is damaged at"),        # shift 13
+            (sound(lambda b: b.__setitem__(48 + group * 3 + 1, 0xc0)), "is damaged at"),                                  # predictor 192+
+            (rco.replaced({("snd_focus_move_vibration", "src"): hevag(12, name=b"psfx_focus_move_v", seed=8)}),
+             "drives the controller's vibration and can't be changed")]
     for data, needle in bad:
         code, r = put_file("ui", UI_RCO, data)
         assert code == 422 and needle in r["error"], (needle, code, r)
@@ -2337,7 +2398,8 @@ def t_interface_pictures():
         numbered = open("/tmp/numbered.rco", "rb").read()
         new = {(f[1], f[3]): Rco(numbered).data(f[5], f[6]) for f in Rco(numbered).files()}
         for key, data in new.items():
-            if key[0] in ("default", "en-US", "snd_focus_move", "color_default", "color_ps2", "shape_default"):
+            if key[0] in ("default", "en-US", "snd_focus_move", "snd_focus_move_vibration", "snd_2_focus_move", "color_default",
+                          "color_ps2", "shape_default"):
                 assert data == old[key], key
             elif old[key].startswith(b"\x89PNG"):
                 assert data != old[key], key
@@ -2348,6 +2410,27 @@ def t_interface_pictures():
                 assert data.startswith(head) and b'fill="#ff00ff"' in data, key
         code, r = put_file("ui", UI_RCO, numbered)
         assert code == 200, (mode, r)
+
+    # The page's sounds: your audio trimmed to start at once, cut to the console's length with a fade, as loud as the
+    # console's; laid out as the console's byte for byte where its bytes don't depend on the sound; decoded again it
+    # gives exactly what the encoder meant (checked in the page); the console accepts it, everything else unchanged.
+    write("/tmp/sounds.js", SOUNDS_JS.encode())
+    out = subprocess.run(["node", "/tmp/sounds.js", WEB_PAGE, UI_RCO, "/tmp/sounds.rco"], capture_output=True, text=True)
+    assert out.returncode == 0, out.stderr
+    info = json.loads(out.stdout)
+    move, ps2 = info["snd_focus_move"], info["snd_2_focus_move"]
+    assert move["cut"] and move["samples"] == move["max"] and move["size"] == move["stockSize"], move
+    assert not ps2["cut"] and ps2["size"] < ps2["stockSize"], ps2
+    for s in (move, ps2):
+        assert s["layout"] == "" and s["snr"] > 12 and s["started"] < 60 and "longer than the console's" in s["tooLong"], s
+    sounds = open("/tmp/sounds.rco", "rb").read()
+    for sid in ("snd_focus_move", "snd_2_focus_move"):
+        made, stock_snd = open(f"/tmp/sounds.rco.{sid}", "rb").read(), old[(sid, "src")]
+        assert made[:12] == stock_snd[:12] and made[16:48] == stock_snd[16:48], sid               # the header, but the length
+        assert made[48:80] == stock_snd[48:80] and made[-32:] == stock_snd[-32:], sid             # opening and closing frames
+    new = {(f[1], f[3]): Rco(sounds).data(f[5], f[6]) for f in Rco(sounds).files()}
+    assert {k for k in new if new[k] != old[k]} == {("snd_focus_move", "src"), ("snd_2_focus_move", "src")}
+    assert put_file("ui", UI_RCO, sounds)[0] == 200
 
     # Your own picture in a vector icon: the console's SVG opening, then the
     # picture as an <image>, accepted. A tile icon numbered by the page is
@@ -3254,7 +3337,7 @@ def t_home_music_at9():
     struct.pack_into("<I", shorter, 4, len(shorter) - 8)
     struct.pack_into("<I", shorter, data - 4, len(shorter) - data)
     at9_stock(3, 2)                                                 # stereo: another ATRAC9 format
-    stereo = at9_music("/tmp/at9-stock-2-3-0.05.at9", 2)
+    stereo = at9_music("/tmp/at9-stock-2-3-0.05-7.at9", 2)
     listed = music + b"LIST" + struct.pack("<I", 4) + b"INFO"
     listed = listed[:4] + struct.pack("<I", len(listed) - 8) + listed[8:]
     # The unused end of a superframe must be filled like Sony fills it (0x01):
@@ -3313,6 +3396,12 @@ def t_home_music_at9():
     assert open(quiet, "rb").read() != open(f"{BASE}/themes/tune9/files{quiet}", "rb").read()
     assert call("POST", "/api/apply", {"id": "none"})[0] == 200
     wait_applied("")
+
+    # A sound coded at most at precision 6, as 13.42's sfx_transition.at9 is: a loud, pure tone still encodes (the
+    # encoder lowers precision further for it; it used to give up, "bitrate too low") and the console accepts it.
+    transition = f"{VSH}/sfx_transition.at9"
+    code, r = put_file("tune9", transition, at9_music(transition, 2, 660))
+    assert code == 200, r
     assert call("DELETE", "/api/themes", {"id": "tune9"})[0] == 200
 
 

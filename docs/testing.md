@@ -20,9 +20,19 @@ container (GitHub Actions runs them on every push: see
 - interface resource files: pictures swapped and accepted, anything else
   refused (pixel formats, extra chunks, other compression, damaged or short
   image data, invalid row filters, colours outside the palette, an SVG where
-  the console has PNG data, sounds, strings, colours, structure, pointers),
+  the console has PNG data, strings, colours, structure, pointers),
   and the manager page's own code, run in Node, numbering every picture in
   the console's exact formats, compressed and in stored blocks;
+- interface sounds: a sound laid out as the console's accepted, and refused
+  with another header, name, sample rate or channel count, a data size that
+  doesn't match, longer than the console's, another opening or ending, a loop
+  mark, a sound frame flagged as the last too early or not at all, a shift
+  of 13, a predictor beyond the 128, or a changed vibration pattern; the
+  page's encoder, run in Node, trimming the silence before a sound, cutting
+  one that is too long to the console's length, refusing to write a longer
+  one, keeping the console's header, opening and closing frames byte for
+  byte, decoding again to exactly the samples it meant, and changing only
+  the sounds it was given;
 - the interface's shape list: new numbers accepted, and refused with a name
   changed, added or missing, a number out of range, or anything that isn't
   a plain number; the page's editor writes the numbers where the console's
@@ -80,7 +90,8 @@ container (GitHub Actions runs them on every push: see
   theme again only when the console shows other files than the ones it puts
   back;
 - home music made by the browser's encoder, and damaged or wrong-format
-  ATRAC9 files;
+  ATRAC9 files; a pure tone encoded for a sound never coded above precision
+  6, as 13.42's `sfx_transition.at9` is;
 - home music playlists: songs kept in numbered slots (`music.wav`,
   `music2.wav` …) with their order and parts, wrong values refused, carried
   by a duplicate, and an older `theme.ini` read as one song; the page's code,

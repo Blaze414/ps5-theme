@@ -2,11 +2,12 @@
 /* ATRAC9 fixtures for the end-to-end tests, made with the theme builder's own
    encoder (web/atrac9.js):
 
-     at9_fixture.js stock <out> <seconds> [cci] [level]
+     at9_fixture.js stock <out> <seconds> [cci] [level] [precision]
          a stand-in for the console's bgm_home.at9: the same ATRAC9 format as
          13.42's (48 kHz 5.1, 800-byte superframes, loop chunk) by default,
          or channel layout `cci` (2 = stereo), holding a soft chord (peak
-         `level`, default 0.05)
+         `level`, default 0.05), coded at most at `precision` (default 7;
+         13.42's sfx_transition.at9 never goes above 6)
      at9_fixture.js music <stock> <out> <seconds> <hz>
          a replacement encoded against <stock>, as the browser makes it
 
@@ -50,10 +51,11 @@ function tone(seconds, freqs, level) {
 
 module.exports = { template };
 if (require.main === module) (async () => {
-  const [mode, a, b, c, d] = process.argv.slice(2);
+  const [mode, a, b, c, d, e] = process.argv.slice(2);
   let res;
   if (mode === 'stock') {
     const [L, R] = tone(+b, [220, 277, 330], d === undefined ? 0.05 : +d);
+    if (e !== undefined) ATRAC9.DEFAULT_PROFILE.maxPrecision = +e;
     res = await ATRAC9.encode(template(c === undefined ? 3 : +c), L, R);
     fs.writeFileSync(a, res.bytes);
   } else if (mode === 'music') {

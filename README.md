@@ -71,6 +71,10 @@ etaHEN 2.5B (unified build) and on its own from PS5 Payload Manager.
   of up to 8 songs that play one after another.
 - **Wake-up sound.** Replace the sound the console plays as it wakes from
   rest mode (see [The wake-up sound](docs/home-music.md#the-wake-up-sound)).
+- **Interface sounds.** Replace the sounds of moving between items,
+  selecting, going back and the rest, and the PlayStation 1 to 4 Appearance
+  themes' own, from any audio file, written in Sony's own sound format and
+  layout (see [Sounds](docs/manager.md#sounds)).
 - **Preview pictures.** Each theme's card shows its background, or any
   picture you choose, so you can tell themes apart at a glance.
 - **Save and Discard.** Changes are kept as unsaved until you save them, and
@@ -296,6 +300,9 @@ openness and the time they gave freely, none of this would exist.
   the tests. Without it, home music would not have been possible.
 - **[FFmpeg](https://ffmpeg.org/)** and its ATRAC9 decoder, the second
   independent reference in the codec tests.
+- **[vgmstream](https://github.com/vgmstream/vgmstream)**, by Adam Gashlin,
+  bnnm and contributors (ISC licence): its HE-VAG decoder and predictor table
+  are how the manager plays the interface's sounds and writes new ones.
 - **[ShadowMountPlus](https://github.com/drakmor/ShadowMountPlus)** by
   drakmor, **[PS5-File-Explorer](https://github.com/juma-sayeh/PS5-File-Explorer)**
   by juma-sayeh and **[onionHEN](https://github.com/aydencharles/onionHEN)**
@@ -336,6 +343,8 @@ Copyright (C) 2026 Blaze414
 - The ATRAC9 tables are generated from LibAtrac9, © 2018 Alex Barney, MIT
   License (`licenses/LibAtrac9.txt`), which allows their use in a GPL
   project.
+- The HE-VAG predictor table is from vgmstream, © 2008-2025 Adam Gashlin et
+  al., ISC licence (`licenses/vgmstream.txt`), which allows the same.
 - No system files are included. The plugin works with the files on your own
   console, and the stock copies it keeps never leave it.
 - "PlayStation", "PS5" and "ATRAC" are trademarks of Sony Interactive

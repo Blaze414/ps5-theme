@@ -66,8 +66,8 @@ are the numbers from those runs, made after the fixes below:
 | JSON | 3,274,997 in 60 s | no findings |
 | SVG check | 24,814,338 in 3 min | no findings |
 | PNG pictures against the console's own (with the plugin's inflate) | 26,897,248 in 3 min | no findings |
-| Interface resource files | 8,437,490 in 3 min | no findings |
-| Interface resource files, structure kept (only pointers and embedded files vary) | 6,744,214 in 3 min | no findings |
+| Interface resource files, with the sound checks (26 October) | 10,444,860 in 3 min | no findings |
+| Interface resource files, structure kept (only pointers and embedded files vary), with the sound checks (26 October) | 7,377,665 in 3 min | no findings |
 
 "No findings" means no crash, no sanitizer report and no input taking more
 than 10 seconds. The runs used a Linux x86-64 build of the same source, not

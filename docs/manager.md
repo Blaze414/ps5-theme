@@ -141,6 +141,29 @@ cold-boot sounds play before the jailbreak, so a theme can't reach them.
 `sfx_warmboot.at9`, the sound as the console wakes from rest mode, can be
 replaced: see [The wake-up sound](home-music.md#the-wake-up-sound).
 
+#### Interface sounds
+
+Below the files, **Interface sounds** lists the sounds the interface makes as
+you use it (since 1.62): moving between items, selecting, going back,
+reaching the end of a list, and **Show all** for the other default ones
+(menus, dialogs, switches, notifications, trophies, the keyboard and more).
+The PlayStation, PlayStation 2, 3 and 4 Appearance themes' own moving,
+selecting and going-back sounds follow.
+
+- **Play** plays the console's sound on the device you're using; **Play
+  yours** plays the theme's.
+- **Attach** takes any audio file. Silence at its start is trimmed so it
+  plays the moment you press, and it is made as loud as the sound it
+  replaces. It can be as long as the console's sound at most (moving between
+  items is 0.41 seconds on 13.42); a longer one is cut with a short fade.
+- Apply, then put the console in rest mode and wake it: the interface reads
+  its sounds as it starts.
+- The controller's vibration patterns, which sit beside the sounds, stay the
+  console's.
+
+How the sounds are written, byte for byte in Sony's layout, is in
+[Interface sounds, in Sony's layout](how-it-works.md#interface-sounds-in-sonys-layout).
+
 ### Home music
 
 ![The home music section](screenshots/home-music.png)

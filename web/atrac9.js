@@ -871,12 +871,20 @@ const MIN_SEGMENT_SNR = -3;
 const QUIET = 2 ** -15;          // passages below this RMS are only checked for added noise
 const SILENCE = 2 ** -20;        // silent channels stay below 1/32 of a 16-bit step
 
-const CANDIDATES = [];
-for (const start of GRAD_STARTS) for (const value of GRAD_VALUES) for (const boundary of BOUNDARIES) {
-  const g = new Int32Array(32);
-  fillGradient(g, start, 31, value, 31, 31);
-  CANDIDATES.push({ start, value, boundary, g });
+function candidates(values) {
+  const out = [];
+  for (const start of GRAD_STARTS) for (const value of values) for (const boundary of BOUNDARIES) {
+    const g = new Int32Array(32);
+    fillGradient(g, start, 31, value, 31, 31);
+    out.push({ start, value, boundary, g });
+  }
+  return out;
 }
+const CANDIDATES = candidates(GRAD_VALUES);
+// For a system sound that never codes above precision 6 (13.42's
+// sfx_transition.at9): higher gradients lower every unit's precision further,
+// without which a loud, pure tone needs 7 somewhere whatever the gradient.
+const CANDIDATES_LOW = candidates([...GRAD_VALUES, 12, 13, 14, 15]);
 const SILENT_GRADIENT = new Int32Array(32);
 fillGradient(SILENT_GRADIENT, SILENT_PLAN.start, 31, SILENT_PLAN.value, 31, 31);
 
@@ -1178,6 +1186,7 @@ async function encode(stockBytes, left, right, progress, intro = 0) {
     lfeReuse: profile.lfeReuse & 2 ? 1 : 0,
     padding: paddingByte(profile),
   };
+  ctx.candidates = ctx.maxPrecision < MAX_PRECISION ? CANDIDATES_LOW : CANDIDATES;
 
   const N = cfg.frameSamples, delay = Math.max(N, stock.fact ? stock.fact[2] : 0);
   const frames = Math.ceil((delay + n) / N);
@@ -1238,7 +1247,7 @@ async function encode(stockBytes, left, right, progress, intro = 0) {
 
     const wr = new Writer(data, s * cfg.superframeBytes);
     for (let fi = 0; fi < fps; fi++) {
-      const start = wr.pos, c = CANDIDATES[choice[fi]];
+      const start = wr.pos, c = ctx.candidates[choice[fi]];
       for (const blk of states[fi]) {
         if (audible(blk)) writeBlock(wr, ctx, blk, fi, c, c.g);
         else writeBlock(wr, ctx, blk, fi, SILENT_PLAN, SILENT_GRADIENT);
@@ -1280,14 +1289,14 @@ function withTail(x, song, from, tail) {
   return out;
 }
 
-/* Pick one allocation (index into CANDIDATES) per frame: the least total
+/* Pick one allocation (index into ctx.candidates) per frame: the least total
    squared error with every frame within `cap` and the superframe within
    `budget`. Returns null if even the smallest allocations do not fit. */
 function allocate(ctx, states, audible, budget, cap) {
   const costs = states.map(blocks => {
     let fixedBits = 0;
     for (const blk of blocks) if (!audible(blk)) fixedBits += blockCost(ctx, blk, SILENT_GRADIENT, 0)[0];
-    return CANDIDATES.map(c => {
+    return ctx.candidates.map(c => {
       let bits = fixedBits, err = 0;
       for (const blk of blocks) {
         if (!audible(blk)) continue;
@@ -1442,7 +1451,7 @@ function rms(chs) {
   return n ? Math.sqrt(sum / n) : 0;
 }
 
-const ATRAC9 = { parseFile, decode, encode, downmixRms, fitsProfile, At9Error, GUID: ATRAC9_GUID, LOOP_TAIL };
+const ATRAC9 = { parseFile, decode, encode, downmixRms, fitsProfile, At9Error, GUID: ATRAC9_GUID, LOOP_TAIL, DEFAULT_PROFILE };
 if (typeof module !== "undefined" && module.exports) module.exports = ATRAC9;
 else root.ATRAC9 = ATRAC9;
 

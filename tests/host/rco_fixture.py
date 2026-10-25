@@ -184,10 +184,34 @@ COLORS_DEFAULT = b'{\r\n  \"background.enabled\": 4278190080,\r\n  \"base-mat.ar
 COLORS_PS2 = b'{\r\n  \"background.enabled\": 4278190080,\r\n  \"base-mat.area.enabled\": 4281761494,\r\n  \"base-mat.overlay.enabled\": 4279109919,\r\n  \"button.fill.enabled\": 255229654,\r\n  \"button.indicator.track.focused\": 4280769434,\r\n  \"button.label.focused\": 4279505940,\r\n  \"dialog.fill.enabled\": 4279706194,\r\n  \"focus.fill.enabled\": 4281761494,\r\n  \"icon.primary.enabled\": 4294967295,\r\n  \"menu.fill.enabled\": 4279706194,\r\n  \"menu.label.primary.enabled\": 4294967295,\r\n  \"slider.thumb.enabled\": 4291611852,\r\n  \"text.primary.enabled\": 4294967295,\r\n  \"tooltip.error.fill.enabled\": 4294967295\r\n}'
 
 
+def hevag(groups=40, channels=2, rate=48000, name=b"psfx_focus_move", seed=1):
+    """An interface sound laid out as 13.42's (Sony's HEVAG, VAGp version
+    0x00020001): the big-endian header with the channel count at 0x1E and a
+    name at 0x20; then `groups` groups of one frame per channel: a silent
+    one, sound frames using predictors beyond the classic five (as Sony's
+    do), each channel's last sound frame flagged 1, then the closing frames
+    (flag 7)."""
+    rnd = seed
+    def nxt():
+        nonlocal rnd
+        rnd = (rnd * 1103515245 + 12345) & 0x7FFFFFFF
+        return rnd >> 8
+    data = bytearray(16 * channels)
+    for g in range(groups - 2):
+        for _ in range(channels):
+            pred, shift = (0, 1, 2, 38, 76, 107)[nxt() % 6], 10 + nxt() % 3
+            flag = 1 if g == groups - 3 else 0
+            data += bytes([(pred & 15) << 4 | shift, (pred & 0xF0) | flag]) + bytes(nxt() & 0x33 for _ in range(14))
+    data += (b"\x00\x07" + b"\x77" * 14) * channels
+    head = b"VAGp" + struct.pack(">IIII", 0x00020001, 0, len(data), rate) + bytes(10) + bytes([channels, 0])
+    return head + name.ljust(16, b"\0") + bytes(data)
+
+
 def sample(png, svg, sound, colours, colours_ps2=None):
     """A container shaped like ShellUI's: png(w, h) and svg() make pictures.
     It also holds a palette picture and, as 13.42's does, a picture declared
-    as SVG that holds PNG data."""
+    as SVG that holds PNG data; besides the navigation sound `sound`, a
+    PlayStation 2 Appearance theme's one and a vibration pattern."""
     return build(("resource", [("id", "id", "rco"), ("type", "str", "normal"), ("version", "float", 0.11)], [
         ("texturetable", [], [
             ("texture", [("type", "str", "texture/png"), ("id", "id", "image_button_base"), ("src", "file", png(16, 16)),
@@ -205,6 +229,10 @@ def sample(png, svg, sound, colours, colours_ps2=None):
         ]),
         ("sounddatatable", [], [
             ("sounddata", [("id", "id", "snd_focus_move"), ("src", "file", sound), ("type", "str", "sound/vag")], []),
+            ("sounddata", [("id", "id", "snd_focus_move_vibration"), ("src", "file", hevag(12, name=b"psfx_focus_move_v", seed=7)),
+                           ("type", "str", "sound/vag")], []),
+            ("sounddata", [("id", "id", "snd_2_focus_move"), ("src", "file", hevag(60, name=b"PS2_coursol_Slim", seed=3)),
+                           ("type", "str", "sound/vag")], []),
         ]),
         ("filetable", [], [
             ("file", [("id", "id", "color_default"), ("src", "file", colours), ("type", "str", "color")], []),

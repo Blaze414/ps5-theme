@@ -1364,8 +1364,9 @@ function setBgOff(set) { setChoice(c => { c.bgOff = [...set]; }); }
    The console keeps its interface pictures (icons, buttons, symbols) in
    resource files in /system_ex/vsh_asset (RCOF 0x110): a header with nine
    tables, an element tree whose type-8 attributes point into the file table
-   at the end, and the files themselves. A theme may swap pictures; the
-   console refuses anything else that differs from its own file. The block
+   at the end, and the files themselves. A theme may swap pictures and
+   sounds and change colours and shapes; the console refuses anything else
+   that differs from its own file. The block
    between the markers runs in the tests too (no DOM). */
 /* rco:begin */
 const RCO_HEADER = 0x50, RCO_FILE_TABLE = 8;
@@ -1887,6 +1888,249 @@ async function numberPicture(n, stock, deflate) {
 }
 /* rco:end */
 
+/* vag:begin */
+/* Interface sounds: the "sound/vag" entries of the interface's resource file
+   (snd_focus_move, the sound of moving between items, and 106 others on
+   13.42). They are Sony's HEVAG (High Efficiency VAG, VAGp version
+   0x00020001): a 48-byte big-endian header ("VAGp", the version, the data
+   size at 12, the sample rate at 16, the channel count at 0x1E, a name at
+   0x20), then 16-byte frames, one per channel in turn: a shift and a
+   predictor, a flag, and 28 four-bit samples. A sample is its code scaled
+   by the shift, plus a prediction from the four samples before it by one of
+   128 predictors. The predictors are vgmstream's (src/coding/psv_decoder.c,
+   ISC licence: see the README's acknowledgements), as whole numbers of
+   1/8192.
+
+   All 107 of 13.42's sounds are laid out alike, byte for byte wherever the
+   bytes don't depend on the sound: the header (apart from the data size),
+   one silent frame per channel to open, each channel's last sound frame
+   flagged 1, then the same closing frames (flag 7). A new sound takes those
+   bytes from the console's own, and its frames use the classic VAG
+   predictors 0-4, which HEVAG decodes as the original VAG does. Decoded
+   again it must give exactly the samples the encoder meant, and the console
+   checks the same layout (rco.c). */
+const HEVAG_COEFS = Int16Array.of(
+  0,0,0,0,7680,0,0,0,14720,-6656,0,0,12544,-7040,0,0,
+  15616,-7680,0,0,14731,-7059,0,0,14507,-7366,0,0,13920,-7522,0,0,
+  13133,-7680,0,0,12028,-7680,0,0,10764,-7680,0,0,9359,-7680,0,0,
+  7832,-7680,0,0,6201,-7680,0,0,4488,-7680,0,0,2717,-7680,0,0,
+  910,-7680,0,0,-910,-7680,0,0,-2717,-7680,0,0,-4488,-7680,0,0,
+  -6201,-7680,0,0,-7832,-7680,0,0,-9359,-7680,0,0,-10764,-7680,0,0,
+  -12028,-7680,0,0,-13133,-7680,0,0,-13920,-7522,0,0,-14507,-7366,0,0,
+  -14731,-7059,0,0,5376,-9216,3328,-3072,-6400,-7168,-3328,-2304,-10496,-7424,-3584,-1024,
+  -167,-2722,-494,-541,-7430,-2221,-2298,424,-8001,-3166,-2814,289,6018,-4750,2649,-1298,
+  3798,-6946,3875,-1216,-8237,-2596,-2071,227,9199,1982,-1382,-2316,13021,-3044,-3792,1267,
+  13112,-4487,-2250,1665,-1668,-3744,-6456,840,7819,-4328,2111,-506,9571,-1336,-757,487,
+  10032,-2562,300,199,-4745,-4122,-5486,-1493,-5896,2378,-4787,-6947,-1193,-9117,-1237,-3114,
+  2783,-7108,-1575,-1447,-7334,-2062,-2212,446,6127,-2577,-315,-18,9457,-1858,102,258,
+  7876,-4483,2126,-538,-7172,-1795,-2069,482,-7358,-2102,-2233,440,-9170,-3509,-2674,-391,
+  -2638,-2647,-1929,-1637,1873,9183,1860,-5746,9214,1859,-1124,-2427,13204,-3012,-4139,1370,
+  12437,-4792,-256,622,-2653,-1144,-3182,-6878,9331,-1048,-828,507,1642,-620,-946,-4229,
+  4246,-7585,-533,-2259,-8988,-3891,-2807,44,-2562,-2735,-1730,-1899,3182,-483,-714,-1421,
+  7937,-3844,2821,-1019,10069,-2609,314,195,8400,-3297,1551,-155,-8529,-2775,-2432,-336,
+  9477,-1882,108,256,75,-2241,-298,-6937,-9143,-4160,-2963,5,-7270,-1958,-2156,460,
+  -2740,3745,5936,-1089,8993,1948,-683,-2704,13101,-2835,-3854,1055,9543,-1961,130,250,
+  5272,-4270,3124,-3157,-7696,-3383,-2907,-456,7309,2523,434,-2461,10275,-2867,391,172,
+  10940,-3721,665,97,24,-310,-1262,320,-8122,-2411,-2311,-271,-8511,-3067,-2337,163,
+  326,-3846,419,-933,8895,2194,-541,-2880,12073,-1876,-2017,-601,8729,-3423,1674,-169,
+  12950,-3847,-3007,1946,10038,-2570,302,198,9385,-2757,1008,41,-4720,-5006,-2852,-1161,
+  7869,-4326,2135,-501,2450,-8597,1299,-2780,10192,-2763,360,181,11313,-4213,833,53,
+  10154,-2716,345,185,9638,-1417,-737,482,3854,-4554,2843,-3397,6699,-5659,2249,-1074,
+  11082,-3908,728,80,-1026,-9810,-805,-3462,10396,-3746,1367,-96,10287,988,-1915,-1437,
+  7953,3878,-764,-3263,12689,-3375,-3354,2079,6641,3166,231,-2089,-2348,-7354,-1944,-4122,
+  9290,-4039,1885,-246,4633,-6403,1748,-1619,11247,-4125,802,61,9807,-2284,219,222,
+  9736,-1536,-706,473,8440,-3436,1562,-176,9307,-1021,-835,509,1698,-9025,688,-3037,
+  10214,-2791,368,179,8390,3248,-758,-2989,7201,3316,46,-2614,-88,-7809,-538,-4571,
+  6193,-5189,2760,-1245,12325,-1290,-3284,253,13064,-4075,-2824,1877,5333,2999,775,-1132);
+const VAG_HEADER = 0x30, VAG_SAMPLES = 28;
+
+const vagBe32 = (b, o) => ((b[o] << 24) | (b[o + 1] << 16) | (b[o + 2] << 8) | b[o + 3]) >>> 0;
+
+/* A sound's layout; an error if it isn't laid out as the console's are. */
+function vagInfo(b) {
+  if (b.length < VAG_HEADER + 16 || b[0] !== 0x56 || b[1] !== 0x41 || b[2] !== 0x47 || b[3] !== 0x70 || vagBe32(b, 4) !== 0x00020001) {
+    throw new Error("not one of the interface's sounds");
+  }
+  const channels = b[0x1e] || 1, size = vagBe32(b, 12), rate = vagBe32(b, 16), group = 16 * channels;
+  if (channels > 2 || !rate || size !== b.length - VAG_HEADER || size % group || size / group < 3) throw new Error("a damaged sound");
+  return { channels, rate, size, group, groups: size / group };
+}
+
+/* Decode the frame at `f`: 28 samples into out[at..], continuing from the four before it (h, newest first). The
+   history is kept unrounded, as Sony's decoder keeps it; what plays is rounded. */
+function vagFrame(b, f, h, out, at) {
+  let idx = (b[f + 1] & 0xf0) | (b[f] >> 4);
+  if (idx > 127) idx = 0;
+  const shift = b[f] & 15, flag = b[f + 1] & 15, k = 4 * idx;
+  const c0 = HEVAG_COEFS[k] / 8192, c1 = HEVAG_COEFS[k + 1] / 8192, c2 = HEVAG_COEFS[k + 2] / 8192, c3 = HEVAG_COEFS[k + 3] / 8192;
+  for (let i = 0; i < VAG_SAMPLES; i++) {
+    let s = 0;
+    if (flag < 7) {   /* a closing frame is silence */
+      const nib = ((b[f + 2 + (i >> 1)] >> (i & 1 ? 4 : 0)) << 28) >> 28;
+      s = ((nib << 12) >> shift) + h[0] * c0 + h[1] * c1 + h[2] * c2 + h[3] * c3;
+    }
+    out[at + i] = Math.max(-32768, Math.min(32767, Math.round(s)));
+    h[3] = h[2]; h[2] = h[1]; h[1] = h[0]; h[0] = s;
+  }
+}
+
+/* A sound's samples per channel, as the console plays them (-32768..32767). */
+function vagSamples(b) {
+  const v = vagInfo(b);
+  const chans = [...Array(v.channels)].map(() => new Int16Array(v.groups * VAG_SAMPLES));
+  for (let c = 0; c < v.channels; c++) {
+    const h = [0, 0, 0, 0];
+    for (let g = 0; g < v.groups; g++) vagFrame(b, VAG_HEADER + g * v.group + 16 * c, h, chans[c], g * VAG_SAMPLES);
+  }
+  return { rate: v.rate, chans };
+}
+
+/* The same, as -1..1 channel data (to play, or to match loudness against). */
+function vagDecode(b) {
+  const s = vagSamples(b);
+  return { rate: s.rate, chans: s.chans.map(c => Float32Array.from(c, x => x / 32768)) };
+}
+
+/* The most samples a new sound may hold: as many sound frames as the console's own. */
+function vagMaxSamples(stock) {
+  const v = vagInfo(stock);
+  return (v.groups - 2) * VAG_SAMPLES;
+}
+
+/* What keeps `b` from being laid out as the console's sound `stock` is, byte for byte where the console's bytes
+   don't depend on the sound ("" if nothing): the same checks as the console's (rco.c). */
+function vagLayoutProblem(stock, b) {
+  const s = vagInfo(stock);
+  let v;
+  try { v = vagInfo(b); } catch (e) { return e.message; }
+  const same = (x0, y0, n) => { for (let i = 0; i < n; i++) if (stock[x0 + i] !== b[y0 + i]) return false; return true; };
+  if (!same(0, 0, 12) || !same(16, 16, VAG_HEADER - 16)) return "its header differs from the console's";
+  if (b.length > stock.length) return "it is longer than the console's";
+  if (!same(VAG_HEADER, VAG_HEADER, s.group)) return "it doesn't start as the console's does";
+  if (!same(stock.length - s.group, b.length - s.group, s.group)) return "it doesn't end as the console's does";
+  for (let g = 1; g + 1 < v.groups; g++) {
+    for (let c = 0; c < v.channels; c++) {
+      const f = VAG_HEADER + g * v.group + 16 * c, flag = b[f + 1] & 15;
+      if (flag !== (g + 2 === v.groups ? 1 : 0)) return "its frames are flagged differently from the console's";
+      if ((b[f] & 15) > 12 || ((b[f + 1] & 0xf0) | (b[f] >> 4)) > 127) return "a frame is damaged";
+    }
+  }
+  return "";
+}
+
+/* `chans` (-1..1, at the console's sound's sample rate) as a new sound in the console's layout: its header with
+   the new length, its opening frames, the new frames, its closing frames. Each frame takes the predictor (0-4)
+   and shift that come closest. Decoded again, the sound must give exactly the samples the encoder meant, and
+   be laid out as the console's (vagLayoutProblem). */
+function vagEncode(stock, chans) {
+  const v = vagInfo(stock), n = Math.min(...chans.map(c => c.length));
+  if (!n) throw new Error("the sound is empty");
+  if (n > vagMaxSamples(stock)) throw new Error("the sound is longer than the console's");
+  const src = chans.length === v.channels ? chans : v.channels === 2 ? [chans[0], chans[0]]
+    : [Float32Array.from({ length: n }, (_, i) => chans.reduce((sum, c) => sum + c[i], 0) / chans.length)];
+  const frames = Math.ceil(n / VAG_SAMPLES), groups = frames + 2, size = groups * v.group;
+  const out = new Uint8Array(VAG_HEADER + size);
+  out.set(stock.subarray(0, VAG_HEADER + v.group));                           /* header and opening frames */
+  out.set(stock.subarray(stock.length - v.group), VAG_HEADER + size - v.group); /* closing frames */
+  out[12] = size >>> 24; out[13] = (size >>> 16) & 255; out[14] = (size >>> 8) & 255; out[15] = size & 255;
+  const x = new Float64Array(VAG_SAMPLES), q = new Int8Array(VAG_SAMPLES), bestQ = new Int8Array(VAG_SAMPLES);
+  const meant = [];
+  let signal = 0, noise = 0;
+  for (let c = 0; c < v.channels; c++) {
+    const want = new Int16Array(groups * VAG_SAMPLES);   /* the opening and closing frames play silence */
+    let h1 = 0, h2 = 0;
+    for (let fr = 0; fr < frames; fr++) {
+      for (let i = 0; i < VAG_SAMPLES; i++) {
+        const t = fr * VAG_SAMPLES + i;
+        x[i] = t < n ? Math.max(-1, Math.min(1, src[c][t])) * 32767 : 0;
+      }
+      let best = Infinity, bf = 0, bs = 0;
+      for (let f = 0; f <= 4; f++) {
+        const c0 = HEVAG_COEFS[4 * f] / 8192, c1 = HEVAG_COEFS[4 * f + 1] / 8192;
+        for (let shift = 0; shift <= 12; shift++) {
+          const step = 1 << (12 - shift);
+          let a = h1, b = h2, err = 0;
+          for (let i = 0; i < VAG_SAMPLES && err < best; i++) {
+            let k = Math.round((x[i] - (a * c0 + b * c1)) / step);
+            k = k < -8 ? -8 : k > 7 ? 7 : k;
+            const s = k * step + a * c0 + b * c1;   /* as the decoder adds it up */
+            const y = Math.max(-32768, Math.min(32767, Math.round(s)));
+            err += (x[i] - y) ** 2 + (s > 32767.49 || s < -32768.49 ? 1e15 : 0);   /* never rely on clipping */
+            q[i] = k; b = a; a = s;
+          }
+          if (err < best) { best = err; bf = f; bs = shift; bestQ.set(q); }
+        }
+      }
+      const o = VAG_HEADER + (fr + 1) * v.group + 16 * c;
+      const c0 = HEVAG_COEFS[4 * bf] / 8192, c1 = HEVAG_COEFS[4 * bf + 1] / 8192, step = 1 << (12 - bs);
+      out[o] = (bf << 4) | bs;                  /* predictors 0-4: the high bits in the next byte stay 0 */
+      out[o + 1] = fr === frames - 1 ? 1 : 0;   /* each channel's last sound frame is flagged 1 */
+      for (let i = 0; i < VAG_SAMPLES; i++) {
+        const k = bestQ[i];
+        out[o + 2 + (i >> 1)] |= (k & 15) << (i & 1 ? 4 : 0);
+        const s = k * step + h1 * c0 + h2 * c1;
+        const y = Math.max(-32768, Math.min(32767, Math.round(s)));
+        want[(fr + 1) * VAG_SAMPLES + i] = y;
+        if (fr * VAG_SAMPLES + i < n) { signal += x[i] * x[i]; noise += (x[i] - y) ** 2; }
+        h2 = h1; h1 = s;
+      }
+    }
+    meant.push(want);
+  }
+  const problem = vagLayoutProblem(stock, out);
+  if (problem) throw new Error(`the converted sound did not verify: ${problem}`);
+  const got = vagSamples(out).chans;
+  for (let c = 0; c < v.channels; c++) {
+    for (let i = 0; i < got[c].length; i++) if (got[c][i] !== meant[c][i]) throw new Error("the converted sound did not verify");
+  }
+  const snr = signal > 0 ? 10 * Math.log10(signal / Math.max(noise, 1e-9)) : Infinity;
+  if (signal / (n * v.channels) > 10 && snr < 6) throw new Error("the converted sound did not verify");
+  return { bytes: out, samples: n, snr };
+}
+
+/* The loudness of the loud part of a sound: the RMS of its 10 ms windows within 30 dB of the loudest. */
+function loudRms(chans, rate) {
+  const n = Math.min(...chans.map(c => c.length)), w = Math.max(1, Math.round(rate * 0.01)), powers = [];
+  for (let s = 0; s < n; s += w) {
+    let sum = 0, m = 0;
+    for (const c of chans) for (let i = s; i < Math.min(n, s + w); i++) { sum += c[i] * c[i]; m++; }
+    powers.push(sum / Math.max(m, 1));
+  }
+  const top = Math.max(0, ...powers), loud = powers.filter(p => p >= top / 1000);
+  return top > 0 ? Math.sqrt(loud.reduce((a, b) => a + b, 0) / loud.length) : 0;
+}
+
+/* Your audio for an interface sound: the silence before and after it trimmed (it plays the moment you press), no
+   longer than `max` samples (cut with a short fade), and as loud as the console's sound (`target`, by their loud
+   parts), with a soft limit just below full scale. */
+function uiSoundPrepare(chans, rate, target, max) {
+  const n = Math.min(...chans.map(c => c.length)), quiet = 0.001;
+  const heard = i => chans.some(c => Math.abs(c[i]) > quiet);
+  let a = 0, z = n;
+  while (a < n && !heard(a)) a++;
+  while (z > a && !heard(z - 1)) z--;
+  if (a >= z) throw new Error("the sound is silent");
+  a = Math.max(0, a - Math.round(rate * 0.001));
+  z = Math.min(n, z + Math.round(rate * 0.005));
+  const cut = z - a > max, len = Math.min(z - a, max);
+  const fade = cut ? Math.min(Math.round(rate * 0.03), Math.floor(len / 4)) : Math.min(Math.round(rate * 0.002), len);
+  const out = chans.map(c => {
+    const o = c.slice(a, a + len);
+    for (let i = 0; i < fade; i++) o[len - fade + i] *= 1 - (i + 1) / fade;
+    return o;
+  });
+  const want = loudRms(target, rate), have = loudRms(out, rate);
+  const g = want > 0 && have > 0 ? want / have : 1, knee = 0.89;
+  for (const o of out) {
+    for (let i = 0; i < o.length; i++) {
+      const v = o[i] * g, m = Math.abs(v);
+      o[i] = m <= knee ? v : Math.sign(v) * (knee + (1 - knee) * Math.tanh((m - knee) / (1 - knee)));
+    }
+  }
+  return { chans: out, cut, seconds: len / rate };
+}
+/* vag:end */
+
 async function zlibDeflate(data) {
   if (typeof CompressionStream === "undefined") return zlibStored(data);
   const stream = new Blob([data]).stream().pipeThrough(new CompressionStream("deflate"));
@@ -2141,6 +2385,162 @@ async function resetPictureNow(path, el) {
   try { await rcoSave(path, changes); toast(`${pic.id} is back to the console's own.`, "ok"); }
   catch (e) { toast(e.message, "err"); }
   renderAspect(aspectById("interface"));
+}
+
+/* ---------------------------------------------------------------- interface sounds */
+
+/* What each interface sound is for, by the console's name for it (snd_<name>), in the order shown. */
+const UI_SOUND_NAMES = {
+  focus_move: "Moving between items", enter: "Selecting", cancel: "Going back", cannot_move_focus: "Reaching the end of a list",
+  open_option_menu: "Opening the options menu", close_option_menu: "Closing the options menu",
+  open_control_center: "Opening the Control Center", close_control_center: "Closing the Control Center",
+  open_home: "Going to the home screen", change_space: "Changing space", change_panel: "Changing panel", change_panel2: "Changing panel (2)",
+  open_dialog: "A dialog opening", open_error_dialog: "An error dialog opening", yes_in_dialog: "Confirming in a dialog",
+  no_in_dialog: "Declining in a dialog", neutral_in_dialog: "Another choice in a dialog", error: "An error",
+  switch_on: "Turning a switch on", switch_off: "Turning a switch off", checkbox_on: "Ticking a box", checkbox_off: "Unticking a box",
+  slider_level_meter: "Moving a slider", take_screenshot: "Taking a screenshot",
+  informative_toasts_something_to_read: "A notification", interactive_toasts_something_to_do: "A notification to act on",
+  error_toasts_something_is_broken: "An error notification", trophy_toast: "A trophy", platinum_trophy_toast: "A platinum trophy",
+  join_party: "Joining a party", leave_party: "Leaving a party", log_out: "Logging out", pass_code: "Entering a passcode",
+  face_recognition: "Face recognition", open_osk: "The keyboard opening", text_input: "Typing", focus_move_in_keyboard: "Moving on the keyboard",
+  backspace: "Deleting on the keyboard", error_in_text_box: "A typing error", voice_recognition_for_osk_starts: "Voice typing starting",
+  voice_recognition_for_osk_ends: "Voice typing ending", voice_recognition_for_osk_error: "Voice typing failing",
+  agent_wake_up: "A voice command listening", agent_utterance_received: "A voice command heard", agent_no_results: "A voice command not understood",
+  purchase_universal_checkout: "A purchase", open_discover_tour: "Opening the tour", psvr2_setup_section_finish: "A PS VR2 setup step done",
+  psvr2_room_scale_finish: "The PS VR2 play area done", set_pad_orientation_1: "Controller orientation (1)",
+  set_pad_orientation_2: "Controller orientation (2)", undefined: "A sound without its own",
+};
+const UI_SOUND_FIRST = 4;   /* moving, selecting, going back, the end of a list: shown without "Show all" */
+const UI_SOUND_SETS = { "": "Default", 1: "PlayStation", 2: "PlayStation 2", 3: "PlayStation 3", 4: "PlayStation 4" };
+
+/* The interface's sounds (default ones, then each Appearance theme's: snd_2_focus_move is the PlayStation 2
+   theme's), in the order above. The controller's vibration patterns (ids ending in _vibration) are left out:
+   they stay the console's. */
+function uiSounds(r) {
+  const order = Object.keys(UI_SOUND_NAMES), out = [];
+  for (const f of r.files) {
+    if (f.elem !== "sounddata" || f.type !== "sound/vag" || /_vibration$/.test(f.id)) continue;
+    const m = /^snd_(?:([1-4])_)?(.+)$/.exec(f.id);
+    if (!m) continue;
+    const set = m[1] || "", key = m[2], stick = /^stick_sensitivity_(\d+)$/.exec(key);
+    const name = stick ? `Stick sensitivity (${+stick[1]})` : UI_SOUND_NAMES[key] || key.replace(/_/g, " ");
+    const rank = order.includes(key) ? order.indexOf(key) : order.length + (stick ? +stick[1] : 100);
+    out.push({ f, id: f.id, set, key, name, rank, label: set ? `${name} (${UI_SOUND_SETS[set]} theme)` : name });
+  }
+  return out.sort((a, b) => (a.set || "0").localeCompare(b.set || "0") || a.rank - b.rank || a.id.localeCompare(b.id));
+}
+
+/* The resource file that holds the sounds (Sce.PlayStation.PUI_UI3.rco on 13.42, read first) and its parse. */
+async function uiSoundFile(onWait) {
+  for (const path of rcoPaths()) {
+    if (rcoFailed.has(path)) throw new Error(rcoFailed.get(path));
+    if (onWait && !(state.rco && state.rco.has(path))) onWait(path);
+    const r = await rcoStock(path);
+    if (r && uiSounds(r).length) return { path, r };
+  }
+  return null;
+}
+
+let uiSoundsLast = null;   /* the list as last shown, and for which theme: shown again at once when the section is redrawn */
+function uiSoundsBox() {
+  if (uiSoundsLast && uiSoundsLast.id === state.editId) return uiSoundsLast.html;
+  const first = rcoPaths()[0];
+  return first ? loadingMarker(`stock:${first}`, "Reading the interface sounds…", colorsWaitNote(first)) : "";
+}
+async function uiSoundsShow() {
+  const box = $("#ui-sounds");
+  if (!box) return;
+  const id = state.editId, shown = uiSoundsLast && uiSoundsLast.id === id;
+  const wait = (key, label, path) => {
+    if (!box.isConnected || shown) return;
+    box.innerHTML = loadingMarker(key, label, colorsWaitNote(path));
+    paintLoads(box);
+  };
+  let html = "", replaced = 0;
+  try {
+    const found = await uiSoundFile(path => wait(`stock:${path}`, "Reading the interface sounds…", path));
+    if (found) {
+      const { path, r } = found;
+      if (!rcoThemeReady(path)) wait(`theme:${path}`, "Reading this theme's sounds…", path);
+      const changes = await rcoChanges(path), list = uiSounds(r);
+      const mineOf = s => changes.has(`${s.f.el}\t${s.f.attr}`);
+      const length = s => { try { const d = rcoData(r, s.f); return `${(vagMaxSamples(d) / vagInfo(d).rate).toFixed(2)} s`; } catch (e) { return ""; } };
+      const row = s => {
+        const mine = mineOf(s), at = `data-path="${esc(path)}" data-id="${esc(s.id)}"`;
+        return `<div class="row-item${mine ? " replaced" : ""}">
+          <div class="info"><div class="file">${esc(s.name)}${mine ? ` <span class="tag on">Replaced</span>` : ""}</div>
+            <div class="dir">${esc(s.id)} · ${length(s)}</div></div>
+          <div class="acts"><button class="btn sm ghost" data-act="uisnd-play" ${at}>Play</button>
+            ${mine ? `<button class="btn sm ghost" data-act="uisnd-play" ${at} data-mine="1">Play yours</button>` : ""}
+            <button class="btn sm" data-act="uisnd-pick" ${at}>${mine ? "Replace" : "Attach"}</button>
+            ${mine ? `<button class="btn sm ghost danger" data-act="uisnd-reset" ${at}>Reset</button>` : ""}</div></div>`;
+      };
+      const defaults = list.filter(s => !s.set), all = state.uiSoundsAll;
+      const showDefaults = all ? defaults : defaults.filter((s, i) => i < UI_SOUND_FIRST || mineOf(s));
+      const sets = Object.keys(UI_SOUND_SETS).filter(k => k && list.some(s => s.set === k));
+      replaced = list.filter(mineOf).length;
+      html = `<h3 class="sub-head">Interface sounds</h3>
+        <p class="note">The sounds of moving between items, selecting, going back and the rest${replaced ? ` (${plural(replaced, "replaced")})` : ""}. Apply, then use rest mode.${help(`Any audio file, converted on this device to the console's own sound format, as loud as the sound it replaces and no longer: a longer one is cut with a short fade (moving between items is 0.41 s on 13.42). Silence at its start is trimmed, so it plays the moment you press. The PlayStation to PlayStation 4 sounds are the Appearance themes' own (Settings > Appearance and Sound). The controller's vibration patterns stay the console's. The sounds are kept in the interface's resource file (${baseName(path)}), so Interface icons shows that file as changed too.`)}</p>
+        <div class="rows">${showDefaults.map(row).join("")}</div>
+        ${defaults.length > UI_SOUND_FIRST ? `<div><button class="btn sm ghost" data-act="uisnd-all">${all ? "Show fewer" : `Show all ${defaults.length} default sounds`}</button></div>` : ""}
+        ${sets.map(k => `<p class="note" style="margin-top:14px"><b>${esc(UI_SOUND_SETS[k])}</b> Appearance theme</p>
+          <div class="rows">${list.filter(s => s.set === k).map(row).join("")}</div>`).join("")}`;
+    }
+  } catch (e) {
+    html = `<p class="note">The interface sounds could not be read: ${esc(e.message)} <button class="btn sm" data-act="uisnd-retry">Try again</button></p>`;
+  }
+  if (state.editId !== id) return;
+  const before = uiSoundsLast && uiSoundsLast.id === id ? uiSoundsLast.replaced : 0;
+  uiSoundsLast = { id, html, replaced };
+  if (replaced !== before) return renderAspect(aspectById("sounds"));   /* the section's count too; shown from uiSoundsLast */
+  if (box.isConnected) box.innerHTML = html;
+}
+
+/* Play the console's sound, or this theme's (`mine`), decoded on this device. */
+let uiSoundAudio = null;
+async function playUiSound(path, id, mine) {
+  const r = await rcoStock(path), s = r && uiSounds(r).find(x => x.id === id);
+  if (!s) return;
+  try {
+    const bytes = mine ? (await rcoChanges(path)).get(`${s.f.el}\t${s.f.attr}`) : rcoData(r, s.f);
+    if (!bytes) return;
+    const d = vagDecode(bytes);
+    if (uiSoundAudio) { uiSoundAudio.pause(); URL.revokeObjectURL(uiSoundAudio.src); }
+    uiSoundAudio = new Audio(URL.createObjectURL(pcmWav(d.chans, d.rate)));
+    await uiSoundAudio.play();
+  } catch (e) { toast(`${s.label}: ${e.message}`, "err"); }
+}
+
+function replaceUiSound(path, id, file) { return rcoQueued("Adding your sound", () => replaceUiSoundNow(path, id, file), true); }
+async function replaceUiSoundNow(path, id, file) {
+  const r = await rcoStock(path), s = r && uiSounds(r).find(x => x.id === id);
+  if (!s) return;
+  const p = progressToast(`Converting your sound for ${s.label.toLowerCase()}…`);
+  try {
+    const stock = rcoData(r, s.f), info = vagInfo(stock);
+    const chans = await decodeAudio(file, info.rate, info.channels);
+    const prep = uiSoundPrepare(chans, info.rate, vagDecode(stock).chans, vagMaxSamples(stock));
+    const made = vagEncode(stock, prep.chans);
+    const changes = await rcoChanges(path);
+    changes.set(`${s.f.el}\t${s.f.attr}`, made.bytes);
+    p.set(`Sending ${baseName(path)} to the console…`, 0.6);
+    await rcoSave(path, changes);
+    p.done(`${s.label}: replaced and verified${prep.cut ? ` (cut to ${prep.seconds.toFixed(2)} s, the console's length)` : ""}. Apply the theme, then put the console in rest mode and wake it.`, "ok");
+  } catch (e) {
+    p.done(`${s.label}: ${e.message}`, "err");
+  }
+  renderAspect(aspectById("sounds"));
+}
+
+function resetUiSound(path, id) { return rcoQueued("Putting the console's sound back", () => resetUiSoundNow(path, id)); }
+async function resetUiSoundNow(path, id) {
+  const r = await rcoStock(path), s = r && uiSounds(r).find(x => x.id === id);
+  if (!s) return;
+  const changes = await rcoChanges(path);
+  changes.delete(`${s.f.el}\t${s.f.attr}`);
+  try { await rcoSave(path, changes); toast(`${s.label} is back to the console's own.`, "ok"); }
+  catch (e) { toast(e.message, "err"); }
+  renderAspect(aspectById("sounds"));
 }
 
 /* ---------------------------------------------------------------- home screen tiles */
@@ -2409,7 +2809,7 @@ function rcoBody(asp) {
         ${rep ? `<button class="btn sm ghost danger" data-act="rco-reset" data-path="${esc(a.path)}">Remove</button>` : ""}
       </div></div>`;
   }).join("");
-  return `<p class="note">To find a picture, number a file's pictures, apply, use rest mode, then look up the number you see.${help("Each picture becomes a number on a pink square. Start with Sce.PlayStation.PUI_UI3.rco and its vector icons. The interface reads these files when it starts, so apply the theme, then put the console in rest mode and wake it. If it keeps restarting, the plugin takes the theme down by itself. Only pictures change in these files; everything else stays the console's own.")}</p>
+  return `<p class="note">To find a picture, number a file's pictures, apply, use rest mode, then look up the number you see.${help("Each picture becomes a number on a pink square. Start with Sce.PlayStation.PUI_UI3.rco and its vector icons. The interface reads these files when it starts, so apply the theme, then put the console in rest mode and wake it. If it keeps restarting, the plugin takes the theme down by itself. Only pictures, sounds (under Sounds), colours and corner shapes change in these files; everything else stays the console's own.")}</p>
     <div class="rows">${rows}</div>
     <p class="note">Look up a picture by its number or its name (search, settings, home, power…), then choose an image.${help("Your image is written in exactly the format of the console's picture; for a vector icon it is drawn inside the console's own SVG. Numbering a file again replaces your pictures in it.")}</p>
     <div class="toolbar"><input type="search" id="rco-lookup" placeholder="A number from the screen, or a name" aria-label="Look up a picture"
@@ -4182,6 +4582,8 @@ function renderAspect(asp) {
   } else {
     const total = aspectAssets(asp).length;
     summary = total ? `${replaced} of ${plural(total, "file")} replaced` : "None on this firmware";
+    const sounds = asp.id === "sounds" && uiSoundsLast && uiSoundsLast.id === state.editId ? uiSoundsLast.replaced : 0;
+    if (sounds) summary += ` · ${plural(sounds, "interface sound")} replaced`;
   }
   const confirming = state.confirming === asp.id;
   el.innerHTML = `
@@ -4241,8 +4643,11 @@ function aspectBody(asp) {
   if (asp.mode === "rco") { setTimeout(rcoLookup); return rcoBody(asp); }
   if (asp.mode === "systiles") return tilesBody(asp);
   if (asp.mode === "titles") return titlesBody(asp);
+  /* Sounds: the interface's own sounds follow the sound files */
+  const uiBox = asp.id === "sounds" ? `<div id="ui-sounds">${uiSoundsBox()}</div>` : "";
+  if (uiBox) setTimeout(uiSoundsShow);
   const all = aspectAssets(asp);
-  if (!all.length) return `<p class="note">This firmware has no ${esc(asp.title.toLowerCase())} that can be themed. Anything else replaceable is under Other images.</p>`;
+  if (!all.length) return `<p class="note">This firmware has no ${esc(asp.title.toLowerCase())} that can be themed. Anything else replaceable is under Other images.</p>${uiBox}`;
 
   if (asp.mode === "single") {
     const off = bgOff();
@@ -4330,7 +4735,7 @@ function aspectBody(asp) {
           <button class="btn sm" data-act="attach-group" data-group="${esc(g.key)}" data-aspect="${asp.id}">${rep ? "Replace" : "Attach"}</button>
           ${rep ? `<button class="btn sm ghost danger" data-act="reset-group" data-group="${esc(g.key)}" data-aspect="${asp.id}">Reset</button>` : ""}
         </div></div>`;
-    }).join("")}</div>${more}${asp.id === "appearance" ? `<div id="appearance-colors">${colorsBox()}</div>` : ""}`;
+    }).join("")}</div>${more}${asp.id === "appearance" ? `<div id="appearance-colors">${colorsBox()}</div>` : ""}${uiBox}`;
 }
 
 const gainLabel = g => (g ? `${g > 0 ? "+" : "−"}${Math.abs(g)} dB` : "same loudness as the console's music");
@@ -5894,6 +6299,15 @@ document.addEventListener("click", async e => {
       return;
     }
     case "rco-unpick": return resetPicture(el.dataset.path, +el.dataset.el);
+    case "uisnd-play": return playUiSound(el.dataset.path, el.dataset.id, el.dataset.mine === "1");
+    case "uisnd-pick": {
+      const file = await pickFile("audio/*,.wav,.mp3,.m4a,.aac,.ogg,.flac");
+      if (file) replaceUiSound(el.dataset.path, el.dataset.id, file);
+      return;
+    }
+    case "uisnd-reset": el.disabled = true; el.textContent = "Resetting…"; return resetUiSound(el.dataset.path, el.dataset.id);
+    case "uisnd-all": state.uiSoundsAll = !state.uiSoundsAll; uiSoundsLast = null; return renderAspect(aspectById("sounds"));
+    case "uisnd-retry": rcoFailed.clear(); uiSoundsLast = null; return renderAspect(aspectById("sounds"));
     case "shapes-save": return saveShapes(el.dataset.path, false);
     case "shapes-reset": return saveShapes(el.dataset.path, true);
     case "colors-test": el.disabled = true; el.textContent = "Saving…"; return saveColors(el.dataset.path, false, el.dataset.palette);

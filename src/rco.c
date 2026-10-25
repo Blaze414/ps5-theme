@@ -18,7 +18,9 @@
    and pass the SVG check; a shape list (shape_check) must keep its names, in
    order, each with a number in range; a colour palette (color_check) must
    keep its names, in order, each with a colour as the console writes them;
-   every other embedded file (sounds, strings) must be unchanged. */
+   a sound (vag_check) must keep the console's header and ending, be no
+   longer and never loop; every other embedded file (strings, the
+   controller's vibration patterns) must be unchanged. */
 
 #include <fcntl.h>
 #include <stdint.h>
@@ -44,6 +46,9 @@
 #define SHAPE_RATIO_MAX  10.0    /* a multiplier, such as borderRadiusRatio */
 #define COLOR_MAX_BYTES  16384   /* 13.42's palettes are 4143 bytes, 92 names */
 #define COLOR_MAX_NAMES  128
+#define VAG_HEADER       0x30
+#define VAG_FRAME        16
+#define VAG_VERSION      0x00020001u
 
 enum { T_TREE, T_IDSTR, T_IDINT, T_STR, T_CHAR, T_STYLE, T_INTARR, T_FLOATARR, T_FILE, T_COUNT };
 
@@ -267,8 +272,82 @@ color_check(const uint8_t *sd, size_t ssize, const uint8_t *cd, size_t csize, co
 }
 
 
+/* An interface sound (an entry of type "sound/vag": snd_focus_move, the
+   navigation sound, and 106 others on 13.42) against the console's. They are
+   Sony's HEVAG: a 48-byte big-endian header ("VAGp", version 0x00020001, the
+   data size at 12, the sample rate at 16, the channel count at 0x1E, a name
+   at 0x20), then 16-byte frames, one per channel in turn, each a shift and
+   one of 128 predictors, a flag, and 28 4-bit samples. All 107 of 13.42's
+   are laid out alike, and a theme's sound must be too, byte for byte where
+   the console's bytes don't depend on the sound: its header apart from the
+   data size, its silent opening frames and its closing frames (flag 7).
+   In between, every frame is flagged 0 (never a loop mark) except each
+   channel's last sound frame (1), with a shift of at most 12 and one of the
+   128 predictors; and it is no longer than the console's sound.
+   The controller's vibration patterns (ids ending in _vibration: the
+   DualSense plays them on its haptic motors) stay the console's own. */
+static uint32_t
+be32(const uint8_t *p) {
+  return (uint32_t)p[0] << 24 | (uint32_t)p[1] << 16 | (uint32_t)p[2] << 8 | (uint32_t)p[3];
+}
+
+static int
+vag_check(const uint8_t *sd, size_t ssize, const uint8_t *cd, size_t csize, const char *id, char *why, size_t len) {
+  size_t idlen = strlen(id);
+  if(idlen >= 10 && !strcmp(id + idlen - 10, "_vibration")) {
+    snprintf(why, len, "sound %s drives the controller's vibration and can't be changed", id);
+    return -1;
+  }
+  unsigned ch = ssize >= VAG_HEADER ? (sd[0x1e] ? sd[0x1e] : 1) : 0;
+  if(ssize < VAG_HEADER + 3 * VAG_FRAME || memcmp(sd, "VAGp", 4) || be32(sd + 4) != VAG_VERSION || ch > 2 ||
+     be32(sd + 12) != ssize - VAG_HEADER || (ssize - VAG_HEADER) % (VAG_FRAME * ch) || !be32(sd + 16)) {
+    snprintf(why, len, "sound %s is in a format this plugin can't change", id);
+    return -1;
+  }
+  if(csize < VAG_HEADER || memcmp(cd, sd, 12) || memcmp(cd + 16, sd + 16, VAG_HEADER - 16)) {
+    snprintf(why, len, "sound %s must keep the console's own header (format, sample rate, channels and name)", id);
+    return -1;
+  }
+  size_t data = csize - VAG_HEADER, group = VAG_FRAME * ch;
+  if(be32(cd + 12) != data || data % group || data / group < 3) {
+    snprintf(why, len, "sound %s is damaged: its data doesn't match its header", id);
+    return -1;
+  }
+  if(csize > ssize) {
+    double most = (double)((ssize - VAG_HEADER) / group) * 28 / be32(sd + 16);
+    snprintf(why, len, "sound %s is longer than the console's (%.2f s at most)", id, most);
+    return -1;
+  }
+  size_t groups = data / group;
+  /* Byte for byte the console's: its silent opening frames and its closing ones. */
+  if(memcmp(cd + VAG_HEADER, sd + VAG_HEADER, group)) {
+    snprintf(why, len, "sound %s must start as the console's does", id);
+    return -1;
+  }
+  if(memcmp(cd + csize - group, sd + ssize - group, group)) {
+    snprintf(why, len, "sound %s must play once and end as the console's do", id);
+    return -1;
+  }
+  for(size_t g = 1; g + 1 < groups; g++) {
+    for(unsigned c = 0; c < ch; c++) {
+      const uint8_t *f = cd + VAG_HEADER + g * group + c * VAG_FRAME;
+      unsigned shift = f[0] & 15, predictor = (f[1] & 0xf0) | f[0] >> 4, flag = f[1] & 15;
+      if(flag != (g + 2 == groups ? 1u : 0u)) {
+        snprintf(why, len, "sound %s must play once and end as the console's do", id);
+        return -1;
+      }
+      if(shift > 12 || predictor > 127) {
+        snprintf(why, len, "sound %s is damaged at %.3f s", id, (double)(g * 28) / be32(sd + 16));
+        return -1;
+      }
+    }
+  }
+  return 1;
+}
+
+
 /* One embedded file of `c` against the same one in `s`. 1 if it is a
-   changed picture, shape list or palette, 0 if unchanged, -1 (with `why`) if not
+   changed picture, shape list, palette or sound, 0 if unchanged, -1 (with `why`) if not
    allowed. */
 static int
 check_embedded(const rco_t *s, const rco_t *c, const char *ename, const char *etype, const char *id,
@@ -320,7 +399,8 @@ check_embedded(const rco_t *s, const rco_t *c, const char *ename, const char *et
   }
   if(!strcmp(ename, "file") && !strcmp(etype, "shape")) return shape_check(sd, ssize, cd, csize, id, why, len);
   if(!strcmp(ename, "file") && !strcmp(etype, "color")) return color_check(sd, ssize, cd, csize, id, why, len);
-  snprintf(why, len, "only pictures, shapes and colours can be changed in a resource file (%s %s differs)", ename, id);
+  if(!strcmp(ename, "sounddata") && !strcmp(etype, "sound/vag")) return vag_check(sd, ssize, cd, csize, id, why, len);
+  snprintf(why, len, "only pictures, sounds, shapes and colours can be changed in a resource file (%s %s differs)", ename, id);
   return -1;
 }
 

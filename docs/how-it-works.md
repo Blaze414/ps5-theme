@@ -388,9 +388,12 @@ the builder carries its own (`web/atrac9.js`, run in a Web Worker):
   and right channels; the others stay silent.
 - It writes only the coding features the system file itself uses. On 13.42
   every system ATRAC9 file uses bit allocation mode 3, at most 13 bands
-  (13.5 kHz, the console's own music bandwidth), precisions up to 7 or 8 and
-  the same LFE coding. The encoder and the plugin both derive these limits
-  from the console's own file.
+  (13.5 kHz, the console's own music bandwidth), precisions up to 6, 7 or 8
+  and the same LFE coding. The encoder and the plugin both derive these
+  limits from the console's own file. For a file that never goes above 6
+  (`sfx_transition.at9`), the encoder also has higher gradients that lower
+  every part's precision further; without them, a loud, pure tone needed 7
+  somewhere and couldn't be encoded (fixed in 1.62).
 - It fills the unused end of every superframe with `0x01`, as Sony's files
   do. See [the ticking music](challenges.md#the-music-that-ticked).
 - It matches the loudness of the system music (the RMS of its stereo
@@ -455,8 +458,11 @@ themes use.
   data must be exactly the size the header implies, its checksums (chunk CRCs
   and Adler-32) right, every row's filter valid, and every pixel of a palette
   picture inside the palette. Each SVG must keep the console's opening and
-  pass the SVG check. Every other embedded file (sounds, strings, colours)
-  must be unchanged.
+  pass the SVG check. A colour palette or the shape list must keep the
+  console's names in order, each with a value in range; a sound is checked
+  as described [below](#interface-sounds-in-sonys-layout). Every other
+  embedded file (the strings, the controller's vibration patterns) must be
+  unchanged.
 - **Your own pictures, in the same format.** Your image is fitted (cover,
   contain or stretch, as chosen above the sections) to the picture's size and
   written with the same encoder: in a palette picture each pixel takes the
@@ -473,6 +479,54 @@ copy for each firmware, written into the system. A file from another firmware
 can break the home screen, and writing it into the system makes that
 permanent. Rebuilding the console's own file and checking it against the
 original avoids both, and the overlay goes with a restart.
+
+## Interface sounds, in Sony's layout
+
+The interface's sounds (since 1.62) are the `sound/vag` entries of
+`Sce.PlayStation.PUI_UI3.rco`: 107 on 13.42, among them `snd_focus_move`
+(moving between items), `snd_enter`, `snd_cancel`, the PlayStation 1 to 4
+Appearance themes' own (`snd_1_focus_move` to `snd_4_cancel`, 12 in all)
+and 23 vibration patterns for the controller's haptic motors
+(`..._vibration`), which the manager doesn't offer.
+
+- **The format: Sony's HE-VAG.** A 48-byte big-endian header (`VAGp`,
+  version `0x00020001`, the data size, the sample rate, the channel count at
+  `0x1E`, a name at `0x20`), then 16-byte frames, one per channel in turn:
+  a shift and a predictor, a flag, and 28 four-bit samples. Each sample is
+  its code scaled by the shift plus a prediction from the four samples before
+  it, by one of 128 predictors; Sony's sounds use them all (58% of their
+  frames use more than the classic five). Stereo, 48 kHz (one at 44.1 kHz).
+  Common tools read these files as mono PSX ADPCM, which they are not.
+- **Sony's layout, byte for byte.** All 107 are laid out alike: the data size
+  equals the data, the reserved header bytes are zero, each starts with one
+  silent frame per channel, every frame is flagged 0 except each channel's
+  last sound frame (flagged 1), and all end with the same closing frames
+  (`00 07 77 …`, flag 7). A new sound takes the header (all but the data
+  size), the opening frames and the closing frames from the console's own
+  sound, and lays its own frames out the same way. Its frames use the
+  classic VAG predictors 0 to 4, which HE-VAG decodes as the original VAG
+  does, each frame with the predictor and shift that come closest.
+- **Checked in the browser.** Decoded again, a new sound must give exactly
+  the samples the encoder meant, sample for sample, and its layout must pass
+  the same checks the plugin makes.
+- **Checked by the plugin** (`vag_check` in `src/rco.c`): the header byte for
+  byte apart from the data size, which must match the data; the opening and
+  closing frames byte for byte; every frame in between flagged 0 (never a
+  loop mark) except each channel's last sound frame; shifts of at most 12 and
+  predictors among the 128; no longer than the console's sound. A vibration
+  pattern can't be changed.
+- **Tested on 13.42's own file** (locally; Sony's file stays out of the
+  repository): the manager's decoder against vgmstream's on five sounds, a
+  rebuild of the 39 MB file with one sound swapped that changes only that
+  entry and its pointers, accepted by the plugin, and seven damaged versions
+  refused (a loop mark, another name, a non-silent opening, another ending, a
+  shift of 13, one frame group too long, a changed vibration pattern).
+
+**Why:** the interface reads these sounds as it starts, like its pictures,
+and Sony's player is the only one that ever reads them. Keeping every byte
+that doesn't carry the sound exactly as Sony's, and refusing loop marks,
+means a new sound is played the way the console's own is, once, and can't
+keep playing.
 
 ## Overlays still in use
 
