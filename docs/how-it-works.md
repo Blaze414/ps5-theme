@@ -62,6 +62,17 @@ enforced, not assumed. Every write the plugin makes goes through
   `unlink` semantics).
 - Theme files, settings and uploads are written under a temporary name and
   renamed into place, so a crash never leaves half a file.
+- **One exception** (since 1.62): replacing an older installed copy of
+  ps5-theme itself with the running version (see
+  [Updating in place](#updating-in-place)). It is a separate call,
+  `fs_replace_payload`, that only replaces an existing regular file named
+  `.plugin` or `.elf`, directly in etaHEN's plugin folder or at most two
+  folders deep in `/data/pldmgr/payloads/`, whose folder (symlinks resolved)
+  is really inside those. The new copy is written beside it, read back and
+  checked (its version, and the `.plugin` header), then renamed over the old
+  one, so a cut-off write never leaves a broken copy. The plugin's own code
+  makes sure the file it replaces is an older ps5-theme build. Nothing in the
+  system partitions is ever written.
 
 **What it doesn't cover:** the check and the write are two steps on a path.
 Another program on the console that swapped a folder inside
@@ -259,11 +270,11 @@ Only one copy of the plugin runs at a time: each copy holds a lock file for
 as long as it runs, and the kernel releases it when the process ends.
 
 - Every 10 seconds the running copy looks in etaHEN's plugin folders,
-  `/data/ps5-theme/update/` and PS5 Payload Manager's payload folders for a
-  newer copy of itself (and empties `/data/ps5-theme/update/` of copies that
-  aren't newer than itself, once nothing has written to them for a minute: it
-  is only a drop box, while the copies in the other folders are the installed
-  ones and stay): a `.plugin` file
+  `/data/ps5-theme/update/` and PS5 Payload Manager's payload folders
+  (`/data/pldmgr/payloads/` and the folders up to two levels down, such as
+  `local/<name>/`, where newer versions of Payload Manager keep imported
+  payloads; symlinked folders aren't followed) for a newer copy of itself: a
+  `.plugin` file
   (checked by its header: `etaHEN_PLUGIN`, the title ID `THEM00001`, the
   version, then an ELF) or a plain `.elf` (checked by the marker
   `PS5THEME-VERSION:<version>:THEM00001` every build carries).
@@ -289,6 +300,20 @@ as long as it runs, and the kernel releases it when the process ends.
   happens to get the same ID is never mistaken for it; the thread name is a
   fallback. Copies before 1.50 end on that signal, which also leaves their
   overlays in place.
+- Once it runs, the new copy brings the installed copies up to date (since
+  1.62): every ps5-theme build in etaHEN's plugin folders or Payload
+  Manager's payload folders that is older than itself is replaced with its
+  own program (with the `.plugin` header in etaHEN's folder, the plain
+  program elsewhere). Without this, an update through the update folder would
+  last only until the next start, when etaHEN or Payload Manager starts the
+  old copy again. It is the one write outside the plugin's own folders (see
+  [Never writing the system](#never-writing-the-system)). Payload Manager's
+  `meta.json` and anything that isn't a ps5-theme build are left alone.
+- Only once every installed copy is up to date does it empty
+  `/data/ps5-theme/update/` of copies that aren't newer than itself, and only
+  those nothing has written to for a minute. That folder is only a drop box;
+  if an installed copy can't be replaced, the copy there stays, so the
+  update isn't lost.
 
 **Why:** after rest mode etaHEN's Toolbox is often unavailable, and that was
 the only way to restart a plugin without restarting the console.

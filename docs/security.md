@@ -37,7 +37,10 @@ console with those rights. So that code gets the most testing.
 - Every write goes through the write guard and stays inside
   `/data/ps5-theme/` and the tile's folder (see
   [Never writing the system](how-it-works.md#never-writing-the-system), including what it
-  doesn't cover).
+  doesn't cover). The one exception is the plugin bringing its own older
+  installed copies in etaHEN's and PS5 Payload Manager's folders up to date
+  after an update; that write is limited to those files and checked the
+  same way.
 - Themes are read-only overlays held in memory, so a restart always brings
   back the stock console.
 - Only media can be replaced, never code, and each file is checked against

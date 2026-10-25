@@ -1068,7 +1068,7 @@ def t_recovers_after_hard_kill():
 
 def plugin_file(version, binary=ASAN):
     """A ps5-theme .plugin as etaHEN loads it: the header, then the ELF."""
-    return b"etaHEN_PLUGIN\0THEM00001\0" + version.encode() + b"\0" + open(binary, "rb").read()
+    return b"etaHEN_PLUGIN\0THEM00001\0" + version.encode() + b"\0" + plain_elf(version, binary)   # as make_plugin.py makes it
 
 
 def plain_elf(version, binary=ASAN):
@@ -1136,9 +1136,12 @@ def take_over(path, data, version, boot=False):
 
 
 def t_update_from_payload_manager():
-    """A newer ps5-theme.elf among PS5 Payload Manager's payloads takes over too."""
+    """A newer ps5-theme.elf among PS5 Payload Manager's payloads takes over too: where
+    newer versions keep them, payloads/local/<name>/ beside Payload Manager's meta.json."""
     carried = log_text().count("carrying on with")
-    folder = "/data/pldmgr/payloads/ps5-theme"
+    folder = "/data/pldmgr/payloads/local/ps5-theme"
+    meta = b'{"schema": 2, "kind": "local", "filename": "ps5-theme.elf", "origin": "usb"}'
+    write(f"{folder}/meta.json", meta)
     write("/data/pldmgr/payloads/other/tool.elf", b"\x7fELF" + b"\0" * 200)   # someone else's payload
     try:
         got = take_over(f"{folder}/ps5-theme.elf", plain_elf("9.97"), "9.97")
@@ -1146,6 +1149,7 @@ def t_update_from_payload_manager():
         assert status()["applied"] == "night"
         assert f"update: found ps5-theme 9.97 in {folder}/ps5-theme.elf" in log_text()
         assert log_text().count("carrying on with") == carried + 1
+        assert open(f"{folder}/meta.json", "rb").read() == meta, "Payload Manager's own file changed"
         assert len(mounts_on(HOME)) == 1 and crc_file(f"{HOME}/bg.png") == zlib.crc32(S["bg"])
     finally:
         shutil.rmtree("/data/pldmgr", ignore_errors=True)
@@ -1155,8 +1159,31 @@ def t_update_from_plain_elf():
     """Without etaHEN: a newer ps5-theme.elf in the plugin's own update folder takes over."""
     unmounted, carried = log_text().count("unmounted " + HOME), log_text().count("carrying on with")
     data, dropped = plain_elf("9.98"), f"{BASE}/update/ps5-theme.elf"
+    # Installed copies of an older version, where the console starts it from, and other people's payloads.
+    eta, pm = "/data/etaHEN/plugins/ps5-theme.plugin", "/data/pldmgr/payloads/ps5-theme/ps5-theme.elf"
+    local, meta = "/data/pldmgr/payloads/local/ps5-theme/ps5-theme.elf", b'{"schema": 2, "filename": "ps5-theme.elf"}' 
+    others = {"/data/etaHEN/plugins/other.plugin": b"etaHEN_PLUGIN\0OTHR00001\0" + b"1.00\0" + b"\x7fELF" + b"\0" * 300,
+              "/data/pldmgr/payloads/other/tool.elf": b"\x7fELF" + b"\0" * 200}
+    write(eta, plugin_file("9.90"))
+    write(pm, plain_elf("9.90"))                                   # older Payload Manager: payloads/<name>/
+    write(local, plain_elf("9.90"))                                # newer: payloads/local/<name>/, with its meta.json
+    write(os.path.dirname(local) + "/meta.json", meta)
+    for path, body in others.items():
+        write(path, body)
     try:
         got = take_over(dropped, data, "9.98")
+        # The new copy puts itself in place of the older installed copies, so a restart runs it too...
+        end = time.time() + 30
+        while open(eta, "rb").read() != plugin_file("9.98") or open(pm, "rb").read() != data or open(local, "rb").read() != data:
+            assert time.time() < end, "the installed copies were not brought up to the new version"
+            time.sleep(0.5)
+        for path, body in others.items():
+            assert open(path, "rb").read() == body, f"{path} isn't ps5-theme's and was changed"
+        text = log_text()
+        for path in (eta, pm, local):
+            assert f"update: {path} is now 9.98, so the console starts this version from there too" in text, path
+        assert open(os.path.dirname(local) + "/meta.json", "rb").read() == meta, "Payload Manager's own file changed"
+        assert not [f for f in os.listdir("/data/etaHEN/plugins") if f.endswith(".ps5theme-new")], "a half-written copy was left"
         # The update folder is a drop box: once the new copy runs, the file that brought it goes
         # (when nothing has written to it for a minute; here it is made older).
         old = time.time() - 120
@@ -1169,6 +1196,8 @@ def t_update_from_plain_elf():
     finally:
         if os.path.exists(dropped):
             os.unlink(dropped)
+        shutil.rmtree("/data/etaHEN", ignore_errors=True)
+        shutil.rmtree("/data/pldmgr", ignore_errors=True)
     assert got == data, "the loader did not get the whole program"
     assert status()["applied"] == "night"
     assert len(mounts_on(HOME)) == 1 and crc_file(f"{HOME}/bg.png") == zlib.crc32(S["bg"])
@@ -1191,7 +1220,7 @@ def t_update_hands_over():
     unmounted, carried = log_text().count("unmounted " + HOME), log_text().count("carrying on with")
     try:
         got = take_over("/data/etaHEN/plugins/ps5-theme.plugin", plugin_file("9.99"), "9.99")
-        assert got == open(ASAN, "rb").read(), "the loader did not get the plugin's program"
+        assert got == plain_elf("9.99"), "the loader did not get the plugin's program"
         s = status()
         assert s["applied"] == "night", s
         assert len(mounts_on(HOME)) == 1 and crc_file(f"{HOME}/bg.png") == zlib.crc32(S["bg"])
@@ -1424,10 +1453,35 @@ def t_update_at_boot():
     wait_applied("night")
     reboot_console()
     start = len(log_text())
+    # An installed copy the update can't replace: something other than a file where its new copy
+    # would be written first, which the write guard refuses. And a Payload Manager folder that is a
+    # link out of it: never looked into, so never written.
+    pm = "/data/pldmgr/payloads/ps5-theme/ps5-theme.elf"
+    write(pm, plain_elf("9.90"))
+    os.makedirs(pm + ".ps5theme-new")
+    os.makedirs("/tmp/away", exist_ok=True)
+    write("/tmp/away/ps5-theme.elf", plain_elf("9.90"))
+    os.symlink("/tmp/away", "/data/pldmgr/payloads/away")
+    dropped = f"{BASE}/update/ps5-theme.elf"
     try:
-        take_over(f"{BASE}/update/ps5-theme.elf", plain_elf("9.96"), "9.96", boot=True)
+        take_over(dropped, plain_elf("9.96"), "9.96", boot=True)
+        # The guard refuses it, so the update folder keeps the copy that brings 9.96 back after a restart.
+        old = time.time() - 120
+        os.utime(dropped, (old, old))
+        end = time.time() + 30
+        while "the update folder keeps its copy" not in log_text()[start:]:
+            assert time.time() < end, "the copy that couldn't be replaced went unnoticed"
+            time.sleep(0.5)
+        time.sleep(12)
+        assert os.path.exists(dropped), "the update folder was emptied while an installed copy is older"
+        assert open(pm, "rb").read() == plain_elf("9.90"), "the copy that couldn't be replaced changed"
+        assert f"write guard: refused replace {pm}.ps5theme-new" in log_text()[start:]
+        assert open("/tmp/away/ps5-theme.elf", "rb").read() == plain_elf("9.90"), "a file outside the payload folders was written"
     finally:
-        os.unlink(f"{BASE}/update/ps5-theme.elf")
+        if os.path.exists(dropped):
+            os.unlink(dropped)
+        shutil.rmtree("/data/pldmgr", ignore_errors=True)
+        shutil.rmtree("/tmp/away", ignore_errors=True)
     s = wait_applied("night")
     assert S["plugin"].alive() and len(mounts_on(HOME)) == 1, s
     assert crc_file(f"{HOME}/bg.png") == zlib.crc32(S["bg"])

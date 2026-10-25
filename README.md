@@ -119,8 +119,10 @@ matters after rest mode, when etaHEN's Toolbox is often gone. An open manager
 page reloads itself with the new version. (This works from 1.23 on: to get
 1.23 itself from an older version, restart the console once.) A newer
 `ps5-theme.elf` or `.plugin` in `/data/ps5-theme/update/` works the same way,
-with or without etaHEN; once the new version runs, the file there is removed
-(since 1.62).
+with or without etaHEN. Once the new version runs, it also takes the place of
+the older copies installed in etaHEN's plugin folder and PS5 Payload
+Manager's payload folders, so the next start runs the new version too, and
+then the file in the update folder is removed (since 1.62).
 
 **If the manager can't be reached:** start ps5-theme again (from the Toolbox
 or PS5 Payload Manager). The new copy takes over from the running one even
@@ -149,11 +151,14 @@ release has both files, which contain the same program:
   manager. It then does everything it does under etaHEN: the web manager,
   the Themes tile, and putting the selected theme back.
 - **Start it after every jailbreak:** add it to the manager's autoload list.
-- **Update it:** replace that `ps5-theme.elf` with the newer one (or put the
-  newer one in `/data/ps5-theme/update/`). Within about 10 seconds the
-  running copy finds it, starts it through the ELF loader and hands over,
-  keeping your theme on the screen. Every build carries its version inside
-  the program, which is how a plain `.elf` is recognised.
+- **Update it:** put the newer `ps5-theme.elf` in `/data/ps5-theme/update/`
+  (or replace the installed one). Within about 10 seconds the running copy
+  finds it, starts it through the ELF loader and hands over, keeping your
+  theme on the screen. The new version then takes the place of the copy
+  Payload Manager starts (`/data/pldmgr/payloads/local/ps5-theme/` on newer
+  versions of Payload Manager), so autoload starts the new version next
+  time. Every build carries its version inside the program, which is how a
+  plain `.elf` is recognised.
 
 **Keeping both as a backup:** you can set up `ps5-theme.elf` in Payload
 Manager and `ps5-theme.plugin` with auto-start in etaHEN at the same time.

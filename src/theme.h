@@ -41,6 +41,8 @@ int  fs_open_write(const char *path);
 int  fs_mkdirs(const char *path);
 int  fs_rename(const char *from, const char *to);
 int  fs_unlink(const char *path);
+/* Replace an installed copy of ps5-theme (etaHEN's or Payload Manager's folders), checked first. */
+int  fs_replace_payload(const char *path, const void *data, size_t len, int (*check)(const char *tmp));
 int  fs_rmdir(const char *path);
 int  fs_symlink(const char *target, const char *path);
 int  fs_link(const char *existing, const char *path);

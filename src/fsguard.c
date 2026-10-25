@@ -115,6 +115,64 @@ fs_write_allowed(const char *path) {
 }
 
 
+/* The one write outside the plugin's own folders: replacing an installed copy
+   of ps5-theme in etaHEN's plugin folder or PS5 Payload Manager's payload
+   folders with a newer one, so the next start runs that too. Only an existing
+   regular file named .plugin or .elf directly in etaHEN's folder, or at most
+   two folders deep in Payload Manager's, whose folder is really there (no
+   symlink out). The new copy is written beside it, checked by `check`, then
+   renamed over it, so a cut-off write never leaves a broken copy. The caller
+   makes sure the file is an older ps5-theme build. */
+static int deny(const char *op, const char *path);
+static const char *const payload_roots[] = { "/data/etaHEN/plugins", "/data/etahen/plugins", "/data/pldmgr/payloads" };
+
+int
+fs_replace_payload(const char *path, const void *data, size_t len, int (*check)(const char *tmp)) {
+  char tmp[PATH_MAX], parent[PATH_MAX], parent_real[PATH_MAX], root_real[PATH_MAX];
+  const char *root = NULL;
+  struct stat st;
+
+  size_t n = path ? strlen(path) : 0;
+  if(!n || !lexical_ok(path)) return deny("replace", path ? path : "(none)");
+  int named = (n > 7 && !strcmp(path + n - 7, ".plugin")) || (n > 4 && !strcmp(path + n - 4, ".elf"));
+  for(size_t i = 0; i < sizeof(payload_roots) / sizeof(*payload_roots) && !root; i++) {
+    if(within(path, payload_roots[i]) && strcmp(path, payload_roots[i])) root = payload_roots[i];
+  }
+  int depth = 0;
+  if(root) for(const char *p = path + strlen(root) + 1; *p; p++) depth += *p == '/';
+  int deep_ok = root && depth <= (strstr(root, "pldmgr") ? 2 : 0);   /* Payload Manager: payloads/local/<name>/ */
+  snprintf(parent, sizeof(parent), "%s", path);
+  *strrchr(parent, '/') = 0;
+  if(!named || !deep_ok || lstat(path, &st) || !S_ISREG(st.st_mode) ||
+     !realpath(parent, parent_real) || !realpath(root, root_real) || !within(parent_real, root_real) ||
+     snprintf(tmp, sizeof(tmp), "%s.ps5theme-new", path) >= (int)sizeof(tmp)) {
+    return deny("replace", path);
+  }
+  struct stat old;
+  if(!lstat(tmp, &old) && (!S_ISREG(old.st_mode) || unlink(tmp))) return deny("replace", tmp);   /* our own leftover only */
+  int fd = open(tmp, O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW, st.st_mode & 0777);
+  if(fd < 0) return -1;
+  const uint8_t *p = data;
+  size_t left = len;
+  int ok = 1;
+  while(ok && left) {
+    ssize_t w = write(fd, p, left);
+    if(w < 0 && errno == EINTR) continue;
+    if(w <= 0) ok = 0;
+    else { p += w; left -= (size_t)w; }
+  }
+  if(fsync(fd)) ok = 0;
+  if(close(fd)) ok = 0;
+  if(!ok || (check && !check(tmp)) || rename(tmp, path)) {
+    unlink(tmp);
+    return -1;
+  }
+  int dir = open(parent, O_RDONLY);
+  if(dir >= 0) { fsync(dir); close(dir); }
+  return 0;
+}
+
+
 /* For reads that must stay inside a directory, e.g. serving theme files. */
 int
 fs_read_within(const char *path, const char *root) {

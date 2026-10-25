@@ -211,6 +211,30 @@ find_bytes(const uint8_t *hay, size_t n, const char *needle, size_t m) {
 }
 
 
+/* The version in the marker of a ps5-theme program in memory (an ELF), or -1. */
+static int
+marker_version(const uint8_t *buf, size_t n) {
+  int version = -1;
+  if(n <= 64 || memcmp(buf, "\x7f" "ELF", 4)) return -1;
+  /* The prefix also appears on its own (it is what this code searches
+     for): only "<prefix>x.xx:<title ID>" counts. */
+  size_t from = 0;
+  while(version < 0 && from < n) {
+    const uint8_t *m = find_bytes(buf + from, n - from, MARKER, sizeof(MARKER) - 1);
+    if(!m) break;
+    size_t at = (size_t)(m - buf) + sizeof(MARKER) - 1;
+    from = at;
+    if(at + 5 + sizeof(TITLE_ID) <= n && buf[at + 4] == ':' && !memcmp(buf + at + 5, TITLE_ID, sizeof(TITLE_ID))) {
+      char v[5];
+      memcpy(v, buf + at, 4);
+      v[4] = 0;
+      version = version_value(v);
+    }
+  }
+  return version;
+}
+
+
 /* The version in a plain .elf of ps5-theme (its marker), or -1. Files are
    remembered by size and time, so each is read once. */
 static int
@@ -226,24 +250,8 @@ elf_file_version(const char *path, const struct stat *st) {
   uint8_t *buf = NULL;
   int fd = -1;
   if(S_ISREG(st->st_mode) && st->st_size > 64 && (uint64_t)st->st_size <= PLUGIN_MAX_BYTES &&
-     (buf = malloc(st->st_size)) && (fd = open(path, O_RDONLY)) >= 0 &&
-     read(fd, buf, st->st_size) == st->st_size && !memcmp(buf, "\x7f" "ELF", 4)) {
-    /* The prefix also appears on its own (it is what this code searches
-       for): only "<prefix>x.xx:<title ID>" counts. */
-    size_t from = 0;
-    while(version < 0 && from < (size_t)st->st_size) {
-      const uint8_t *m = find_bytes(buf + from, st->st_size - from, MARKER, sizeof(MARKER) - 1);
-      if(!m) break;
-      size_t at = (size_t)(m - buf) + sizeof(MARKER) - 1;
-      from = at;
-      if(at + 5 + sizeof(TITLE_ID) <= (size_t)st->st_size && buf[at + 4] == ':' &&
-         !memcmp(buf + at + 5, TITLE_ID, sizeof(TITLE_ID))) {
-        char v[5];
-        memcpy(v, buf + at, 4);
-        v[4] = 0;
-        version = version_value(v);
-      }
-    }
+     (buf = malloc(st->st_size)) && (fd = open(path, O_RDONLY)) >= 0 && read(fd, buf, st->st_size) == st->st_size) {
+    version = marker_version(buf, (size_t)st->st_size);
   }
   if(fd >= 0) close(fd);
   free(buf);
@@ -308,6 +316,35 @@ done:
 }
 
 
+/* PS5 Payload Manager keeps each payload in a folder of its own: under payloads/ in older versions, and
+   under payloads/local/ (installed from a USB drive or the console) and payloads/repo/ (downloaded) in
+   newer ones, so two levels deep. Folders that are links are not followed. */
+static void
+each_pm_folder(void (*fn)(const char *dir, void *ctx), void *ctx) {
+  fn(PLDMGR_PAYLOADS, ctx);
+  DIR *top = opendir(PLDMGR_PAYLOADS);
+  if(!top) return;
+  struct dirent *e;
+  while((e = readdir(top))) {
+    char sub[PATH_MAX];
+    if(e->d_name[0] == '.' || snprintf(sub, sizeof(sub), "%s/%s", PLDMGR_PAYLOADS, e->d_name) >= (int)sizeof(sub) ||
+       !fs_is_dir(sub)) continue;
+    fn(sub, ctx);
+    DIR *mid = opendir(sub);
+    if(!mid) continue;
+    struct dirent *f;
+    while((f = readdir(mid))) {
+      char deep[PATH_MAX];
+      if(f->d_name[0] == '.' || snprintf(deep, sizeof(deep), "%s/%s", sub, f->d_name) >= (int)sizeof(deep) ||
+         !fs_is_dir(deep)) continue;
+      fn(deep, ctx);
+    }
+    closedir(mid);
+  }
+  closedir(top);
+}
+
+
 /* The newest copy of ps5-theme found so far. */
 typedef struct candidate {
   char path[PATH_MAX];
@@ -351,6 +388,163 @@ consider_dir(const char *dirpath, candidate_t *best) {
 }
 
 
+/* ---- the installed copies ----
+   A copy of ps5-theme brings the installed copies up to its version once
+   each time it starts (at boot, or after taking over in an update): the ones
+   in etaHEN's plugin folders and PS5 Payload Manager's payload folders, which
+   the console starts it from. Otherwise a restart would start the older copy
+   again, and with the update folder emptied nothing would bring this one
+   back. Only once per start, so a copy put back on purpose afterwards (going
+   back to an older version) is left alone. */
+
+static const char *const installed_dirs[] = { "/data/etaHEN/plugins", "/data/etahen/plugins" };
+
+typedef void (*build_fn)(const char *path, int version, int plugin, void *ctx);
+
+/* Each ps5-theme build (.plugin or .elf) directly in `dirpath`. */
+static void
+each_build_in(const char *dirpath, build_fn fn, void *ctx) {
+  DIR *dir = opendir(dirpath);
+  if(!dir) return;
+  struct dirent *e;
+  while((e = readdir(dir))) {
+    size_t len = strlen(e->d_name);
+    char path[PATH_MAX];
+    struct stat st;
+    off_t size = 0;
+    int plugin = len > 7 && !strcmp(e->d_name + len - 7, ".plugin");
+    int elf = len > 4 && !strcmp(e->d_name + len - 4, ".elf");
+    if((!plugin && !elf) || snprintf(path, sizeof(path), "%s/%s", dirpath, e->d_name) >= (int)sizeof(path) ||
+       lstat(path, &st) || !S_ISREG(st.st_mode)) continue;
+    int v = plugin ? plugin_file_version(path, &size) : elf_file_version(path, &st);
+    if(v > 0) fn(path, v, plugin, ctx);
+  }
+  closedir(dir);
+}
+
+
+/* The installed copies: etaHEN's plugin folders, and Payload Manager's payload folders (see each_pm_folder). */
+typedef struct { build_fn fn; void *ctx; } walk_t;
+
+static void
+builds_in_pm_dir(const char *dir, void *ctx) {
+  walk_t *w = ctx;
+  each_build_in(dir, w->fn, w->ctx);
+}
+
+
+static void
+each_installed_build(build_fn fn, void *ctx) {
+  for(size_t i = 0; i < sizeof(installed_dirs) / sizeof(*installed_dirs); i++) each_build_in(installed_dirs[i], fn, ctx);
+  walk_t w = { fn, ctx };
+  each_pm_folder(builds_in_pm_dir, &w);
+}
+
+
+#define MAX_INSTALLED 16
+typedef struct { int mine, count, plugin[MAX_INSTALLED]; char path[MAX_INSTALLED][PATH_MAX]; } copies_t;
+
+static void
+note_older(const char *path, int version, int plugin, void *ctx) {
+  copies_t *c = ctx;
+  if(version < c->mine && c->count < MAX_INSTALLED) {
+    snprintf(c->path[c->count], PATH_MAX, "%s", path);
+    c->plugin[c->count++] = plugin;
+  }
+}
+
+
+static void
+note_same(const char *path, int version, int plugin, void *ctx) {
+  copies_t *c = ctx;
+  if(version == c->mine && !c->count) {
+    snprintf(c->path[0], PATH_MAX, "%s", path);
+    c->plugin[c->count++] = plugin;
+  }
+}
+
+
+/* The program of a ps5-theme file from `skip` on (after a .plugin's header), only if its marker is this version. */
+static uint8_t *
+read_program(const char *path, off_t skip, size_t *len) {
+  struct stat st;
+  uint8_t *buf = NULL;
+  int fd = open(path, O_RDONLY);
+  int ok = fd >= 0 && !fstat(fd, &st) && st.st_size > skip + 64 && (uint64_t)st.st_size <= PLUGIN_MAX_BYTES &&
+           (buf = malloc(st.st_size)) && read(fd, buf, st.st_size) == st.st_size &&
+           marker_version(buf + skip, (size_t)(st.st_size - skip)) == my_version();
+  if(fd >= 0) close(fd);
+  if(!ok) { free(buf); return NULL; }
+  memmove(buf, buf + skip, (size_t)(st.st_size - skip));
+  *len = (size_t)(st.st_size - skip);
+  return buf;
+}
+
+
+/* What a replacement must be before it is put in place: this version, header and program both. */
+static int
+plugin_copy_ok(const char *tmp) {
+  off_t size;
+  size_t len;
+  uint8_t *prog = plugin_file_version(tmp, &size) == my_version() ? read_program(tmp, HEADER_BYTES, &len) : NULL;
+  free(prog);
+  return prog != NULL;
+}
+
+
+static int
+elf_copy_ok(const char *tmp) {
+  size_t len;
+  uint8_t *prog = read_program(tmp, 0, &len);
+  free(prog);
+  return prog != NULL;
+}
+
+
+/* 1 when no installed copy is older than this one, after putting this version in place of any that is. */
+static int
+refresh_installed(void) {
+  static copies_t older, same;
+  int mine = my_version();
+  older.mine = same.mine = mine;
+  older.count = same.count = 0;
+  each_installed_build(note_older, &older);
+  if(!older.count) return 1;
+  /* This version's program: from a copy of it here (the update folder first). */
+  each_build_in(UPDATE_DIR, note_same, &same);
+  if(!same.count) each_installed_build(note_same, &same);
+  size_t len = 0;
+  uint8_t *prog = same.count ? read_program(same.path[0], same.plugin[0] ? HEADER_BYTES : 0, &len) : NULL;
+  if(!prog) {
+    log_msg("update: %d installed cop(ies) older than %d.%02d, and no copy of %d.%02d here to put in their place",
+            older.count, mine / 100, mine % 100, mine / 100, mine % 100);
+    return 0;
+  }
+  uint8_t *plugin = malloc(HEADER_BYTES + len);
+  if(plugin) {
+    memset(plugin, 0, HEADER_BYTES);
+    memcpy(plugin, "etaHEN_PLUGIN", 14);                       /* with its terminating zero, as etaHEN reads it */
+    memcpy(plugin + 14, TITLE_ID, sizeof(TITLE_ID));
+    snprintf((char *)plugin + 24, 5, "%d.%02d", mine / 100, mine % 100);
+    memcpy(plugin + HEADER_BYTES, prog, len);
+  }
+  int all = 1;
+  for(int i = 0; i < older.count; i++) {
+    const char *path = older.path[i];
+    int ok = older.plugin[i] ? plugin && !fs_replace_payload(path, plugin, HEADER_BYTES + len, plugin_copy_ok)
+                             : !fs_replace_payload(path, prog, len, elf_copy_ok);
+    if(ok) log_msg("update: %s is now %d.%02d, so the console starts this version from there too", path, mine / 100, mine % 100);
+    else {
+      log_err("update: could not put %d.%02d in place of %s; the update folder keeps its copy", mine / 100, mine % 100, path);
+      all = 0;
+    }
+  }
+  free(plugin);
+  free(prog);
+  return all;
+}
+
+
 /* UPDATE_DIR is only a drop box: a copy of ps5-theme there that isn't newer
    than this one has done its job (this copy came from it, or it is older), so
    it goes, once nothing has written to it for TIDY_SECONDS (not one still
@@ -384,28 +578,28 @@ tidy_update_dir(void) {
 }
 
 
+static void
+consider_pm_dir(const char *dir, void *ctx) { consider_dir(dir, ctx); }
+
+
 /* A newer copy of ps5-theme where people keep payloads: etaHEN's plugin
-   folders, UPDATE_DIR, and PS5 Payload Manager's payload folders (one level
-   of subfolders). Start the newest; 1 if it was started. */
+   folders, UPDATE_DIR, and PS5 Payload Manager's payload folders (two levels,
+   see each_pm_folder). Start the newest; 1 if it was started. */
 int
 update_check(void) {
-  static const char *const dirs[] = { "/data/etaHEN/plugins", "/data/etahen/plugins", UPDATE_DIR, PLDMGR_PAYLOADS };
-  tidy_update_dir();
+  static const char *const dirs[] = { "/data/etaHEN/plugins", "/data/etahen/plugins", UPDATE_DIR };
+  static int tries = 5, installed_current;
+  if(tries > 0) {
+    installed_current = refresh_installed();
+    tries = installed_current ? 0 : tries - 1;
+  }
+  if(installed_current) tidy_update_dir();     /* its copy may still be what brings this version back after a restart */
   static char tried[PATH_MAX];
   static time_t tried_at, tried_mtime;
   candidate_t best = { .version = my_version() };
 
   for(size_t d = 0; d < sizeof(dirs) / sizeof(*dirs); d++) consider_dir(dirs[d], &best);
-  DIR *pm = opendir(PLDMGR_PAYLOADS);
-  if(pm) {
-    struct dirent *e;
-    while((e = readdir(pm))) {
-      char sub[PATH_MAX];
-      if(e->d_name[0] == '.' || snprintf(sub, sizeof(sub), "%s/%s", PLDMGR_PAYLOADS, e->d_name) >= (int)sizeof(sub)) continue;
-      if(fs_is_dir(sub)) consider_dir(sub, &best);
-    }
-    closedir(pm);
-  }
+  each_pm_folder(consider_pm_dir, &best);
   char *best_path = best.path;
   int best_version = best.version;
   off_t best_size = best.size, best_offset = best.offset;

@@ -70,8 +70,12 @@ container (GitHub Actions runs them on every push: see
   the program sent to a stand-in for the ELF loader, the hand-over, keeping
   the overlays, a copy that isn't newer stepping aside, the hand-over at boot
   (the old copy steps aside before putting the theme back), and no hand-over
-  to a copy that has gone; the update folder emptied of the copy once it
-  runs, and nothing else in it touched;
+  to a copy that has gone; older copies installed in etaHEN's folder and in
+  both of Payload Manager's layouts (`payloads/<name>/` and
+  `payloads/local/<name>/`) replaced by the running version, with
+  Payload Manager's `meta.json` unchanged; a copy the write guard refuses
+  left as it was, and the update folder's copy kept for it; then the update
+  folder emptied of the copy, and nothing else in it touched;
 - Save and Discard, preview pictures and duplicates; Discard applying the
   theme again only when the console shows other files than the ones it puts
   back;
