@@ -7,7 +7,7 @@ tests/host/run.sh
 ```
 
 Builds the real plugin sources for Linux with AddressSanitizer and UBSan and
-runs 57 end-to-end tests against a fake console tree in a privileged
+runs 58 end-to-end tests against a fake console tree in a privileged
 container (GitHub Actions runs them on every push: see
 [Building](building.md#continuous-integration)). They cover:
 
@@ -70,8 +70,11 @@ container (GitHub Actions runs them on every push: see
   the program sent to a stand-in for the ELF loader, the hand-over, keeping
   the overlays, a copy that isn't newer stepping aside, the hand-over at boot
   (the old copy steps aside before putting the theme back), and no hand-over
-  to a copy that has gone;
-- Save and Discard, preview pictures and duplicates;
+  to a copy that has gone; the update folder emptied of the copy once it
+  runs, and nothing else in it touched;
+- Save and Discard, preview pictures and duplicates; Discard applying the
+  theme again only when the console shows other files than the ones it puts
+  back;
 - home music made by the browser's encoder, and damaged or wrong-format
   ATRAC9 files;
 - home music playlists: songs kept in numbered slots (`music.wav`,

@@ -260,7 +260,10 @@ as long as it runs, and the kernel releases it when the process ends.
 
 - Every 10 seconds the running copy looks in etaHEN's plugin folders,
   `/data/ps5-theme/update/` and PS5 Payload Manager's payload folders for a
-  newer copy of itself: a `.plugin` file
+  newer copy of itself (and empties `/data/ps5-theme/update/` of copies that
+  aren't newer than itself, once nothing has written to them for a minute: it
+  is only a drop box, while the copies in the other folders are the installed
+  ones and stay): a `.plugin` file
   (checked by its header: `etaHEN_PLUGIN`, the title ID `THEM00001`, the
   version, then an ELF) or a plain `.elf` (checked by the marker
   `PS5THEME-VERSION:<version>:THEM00001` every build carries).

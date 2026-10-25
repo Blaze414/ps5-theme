@@ -351,12 +351,46 @@ consider_dir(const char *dirpath, candidate_t *best) {
 }
 
 
+/* UPDATE_DIR is only a drop box: a copy of ps5-theme there that isn't newer
+   than this one has done its job (this copy came from it, or it is older), so
+   it goes, once nothing has written to it for TIDY_SECONDS (not one still
+   being copied in). Anything that isn't a ps5-theme build stays, and so do
+   the copies in etaHEN's and PS5 Payload Manager's folders: those are the
+   installed ones. */
+#define TIDY_SECONDS 60
+
+static void
+tidy_update_dir(void) {
+  DIR *dir = opendir(UPDATE_DIR);
+  if(!dir) return;
+  int mine = my_version();
+  time_t now = time(NULL);
+  struct dirent *e;
+  while((e = readdir(dir))) {
+    size_t len = strlen(e->d_name);
+    char path[PATH_MAX];
+    struct stat st;
+    off_t size = 0;
+    int plugin = len > 7 && !strcmp(e->d_name + len - 7, ".plugin");
+    int elf = len > 4 && !strcmp(e->d_name + len - 4, ".elf");
+    if(!plugin && !elf) continue;
+    if(snprintf(path, sizeof(path), "%s/%s", UPDATE_DIR, e->d_name) >= (int)sizeof(path) || lstat(path, &st) ||
+       !S_ISREG(st.st_mode) || now - st.st_mtime < TIDY_SECONDS) continue;
+    int v = plugin ? plugin_file_version(path, &size) : elf_file_version(path, &st);
+    if(v <= 0 || v > mine) continue;
+    if(!fs_unlink(path)) log_msg("update: removed %s from the update folder (%d.%02d, not newer than this copy)", e->d_name, v / 100, v % 100);
+  }
+  closedir(dir);
+}
+
+
 /* A newer copy of ps5-theme where people keep payloads: etaHEN's plugin
    folders, UPDATE_DIR, and PS5 Payload Manager's payload folders (one level
    of subfolders). Start the newest; 1 if it was started. */
 int
 update_check(void) {
   static const char *const dirs[] = { "/data/etaHEN/plugins", "/data/etahen/plugins", UPDATE_DIR, PLDMGR_PAYLOADS };
+  tidy_update_dir();
   static char tried[PATH_MAX];
   static time_t tried_at, tried_mtime;
   candidate_t best = { .version = my_version() };

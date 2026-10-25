@@ -1334,12 +1334,15 @@ async function loadChoices(id) {
   state.fit = state.choices.fit || "cover";
 }
 
-/* Change the open theme's choices: sent at once, and saved or discarded with the theme like any change. */
+/* Change the open theme's choices: sent at once, and saved or discarded with the theme like any change.
+   The Save bar shows at once (the plugin marks the theme changed as it keeps them); only a failure asks
+   the console how things stand. */
 function setChoice(change) {
-  const id = state.editId;
+  const id = state.editId, t = themeById(id);
   if (state.choicesId !== id) return Promise.resolve();
   change(state.choices);
-  return putChoices(id, state.choices).then(() => refreshStatus(), e => toast(`This choice could not be kept: ${e.message}`, "err"));
+  if (t && !t.unsaved) { t.unsaved = true; syncEditorHead(); }
+  return putChoices(id, state.choices).catch(e => { toast(`This choice could not be kept: ${e.message}`, "err"); return refreshStatus(); });
 }
 const pieceChoice = (c, path) => ((c.pieces = c.pieces || {})[path] = c.pieces[path] || {});
 const songName = slot => (state.choices.songs || {})[slot] || "";

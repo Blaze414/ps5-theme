@@ -1154,11 +1154,21 @@ def t_update_from_payload_manager():
 def t_update_from_plain_elf():
     """Without etaHEN: a newer ps5-theme.elf in the plugin's own update folder takes over."""
     unmounted, carried = log_text().count("unmounted " + HOME), log_text().count("carrying on with")
-    data = plain_elf("9.98")
+    data, dropped = plain_elf("9.98"), f"{BASE}/update/ps5-theme.elf"
     try:
-        got = take_over(f"{BASE}/update/ps5-theme.elf", data, "9.98")
+        got = take_over(dropped, data, "9.98")
+        # The update folder is a drop box: once the new copy runs, the file that brought it goes
+        # (when nothing has written to it for a minute; here it is made older).
+        old = time.time() - 120
+        os.utime(dropped, (old, old))
+        end = time.time() + 30
+        while os.path.exists(dropped):
+            assert time.time() < end, "the update folder still holds the copy that is running"
+            time.sleep(0.5)
+        assert "update: removed ps5-theme.elf from the update folder (9.98, not newer than this copy)" in log_text()
     finally:
-        os.unlink(f"{BASE}/update/ps5-theme.elf")
+        if os.path.exists(dropped):
+            os.unlink(dropped)
     assert got == data, "the loader did not get the whole program"
     assert status()["applied"] == "night"
     assert len(mounts_on(HOME)) == 1 and crc_file(f"{HOME}/bg.png") == zlib.crc32(S["bg"])
@@ -1168,8 +1178,11 @@ def t_update_from_plain_elf():
     assert text.count("unmounted " + HOME) == unmounted, "the overlays were taken down"
     # Other .elf files there are not mistaken for an update.
     write(f"{BASE}/update/other.elf", b"\x7fELF" + b"\0" * 100)
+    old = time.time() - 120
+    os.utime(f"{BASE}/update/other.elf", (old, old))
     time.sleep(12)
     assert "found ps5-theme" not in log_text()[len(text):]
+    assert os.path.exists(f"{BASE}/update/other.elf"), "a file that isn't ps5-theme was removed"   # only ps5-theme's own go
     os.unlink(f"{BASE}/update/other.elf")
 
 
@@ -1836,6 +1849,50 @@ def t_settings_and_duplicate():
     assert call("DELETE", "/api/themes", {"id": "night-copy"})[0] == 200
 
 
+def t_discard_applies_only_when_needed():
+    """Discard applies the selected theme again only when the files it puts back
+    aren't the ones the console shows: not after a change to its choices, nor
+    after a file change that was never applied; after an applied change, it does."""
+    def discard():
+        code, r = call("POST", "/api/theme/discard", {"id": "redo"})
+        assert code == 200, (code, r)
+        return r["reapplied"]
+    before = status()["active"]
+    first, second = png(480, 270, (10, 120, 60)), png(480, 270, (120, 10, 60))
+    try:
+        assert call("POST", "/api/themes", {"id": "redo", "name": "Redo"})[0] == 200
+        assert put_file("redo", f"{HOME}/bg.png", first)[0] == 200
+        assert call("POST", "/api/theme/save", {"id": "redo"})[0] == 200
+        apply_and_wait("redo")
+        done = len(applies())
+        # Only its choices changed: nothing on the console to change.
+        choice = b'{"v":1,"fit":"contain"}'
+        assert call("PUT", "/api/theme/choices", {"id": "redo", "crc": f"{zlib.crc32(choice):08x}"}, choice)[0] == 200
+        assert discard() is False
+        assert "theme redo: changes discarded; the console already shows these files" in log_text()
+        # A file changed but never applied: the console still shows the saved one.
+        assert put_file("redo", f"{HOME}/bg.png", second)[0] == 200
+        assert discard() is False
+        time.sleep(1.5)
+        assert len(applies()) == done and crc_file(f"{HOME}/bg.png") == zlib.crc32(first)
+        # A file changed and applied: Discard puts the saved one back on the console.
+        assert put_file("redo", f"{HOME}/bg.png", second)[0] == 200
+        apply_and_wait("redo")
+        assert crc_file(f"{HOME}/bg.png") == zlib.crc32(second)
+        assert discard() is True
+        end = time.time() + 30
+        while crc_file(f"{HOME}/bg.png") != zlib.crc32(first):
+            assert time.time() < end, "the saved background did not come back"
+            time.sleep(0.2)
+    finally:
+        if before and before != "none":
+            apply_and_wait(before)
+        else:
+            call("POST", "/api/apply", {"id": "none"})
+            wait_applied("")
+        call("DELETE", "/api/themes", {"id": "redo"})
+
+
 def t_preview_pictures():
     """A theme's library picture: a complete JPEG kept beside the theme, never in what is applied."""
     pic, other = jpeg_header(1280, 720), jpeg_header(640, 480)
@@ -1905,7 +1962,7 @@ def t_save_and_discard():
     assert call("POST", "/api/theme/settings", {"id": "night", "name": "Changed"})[0] == 200
 
     code, r = call("POST", "/api/theme/discard", {"id": "night"})
-    assert code == 200 and r["reapplied"] is applied, (code, r)
+    assert code == 200 and (applied or r["reapplied"] is False), (code, r)   # when it applies: t_discard_applies_only_when_needed
     t = night()
     assert t["unsaved"] is False and t["name"] == name and files() == before, t
     assert open(f"{theme}/files{HOME}/bg.png", "rb").read() == bg
@@ -3288,7 +3345,7 @@ TESTS = [t_startup, t_ui_and_icon_served, t_mutations_need_token, t_create_theme
          t_stock_mirror_and_linked_staging, t_stage_folders_reused_without_links,
          t_firmware_mismatch_is_refused, t_delete_rules, t_concurrent_requests_during_apply,
          t_restore_stock_cleans_up, t_overlays_reach_system_views, t_crash_loop_takes_theme_down, t_busy_overlay_is_never_forced, t_recovers_after_hard_kill, t_update_from_payload_manager, t_update_from_plain_elf, t_update_hands_over, t_update_at_boot, t_web_comes_back_after_rest_mode, t_takeover_when_web_is_down, t_stop_tool_keeps_the_theme, t_failed_write_closes_its_file, t_survives_malformed_and_abusive_requests,
-         t_slow_clients_do_not_block_others, t_log_rotates, t_media_policy, t_music, t_music_playlist, t_theme_choices, t_settings_and_duplicate, t_preview_pictures, t_save_and_discard, t_cut_off_uploads_are_not_theme_files,
+         t_slow_clients_do_not_block_others, t_log_rotates, t_media_policy, t_music, t_music_playlist, t_theme_choices, t_settings_and_duplicate, t_preview_pictures, t_save_and_discard, t_discard_applies_only_when_needed, t_cut_off_uploads_are_not_theme_files,
          t_home_background_textures, t_interface_pictures, t_title_pictures, t_fonts, t_bc7_keeps_transparency, t_page_writes_the_consoles_zstd_frames, t_page_builds_playlists, t_page_bleeds_colour_into_clear_pixels, t_page_places_textures_against_their_edge, t_texture_sources, t_appearance_textures, t_shellui_exit_releases_sandbox, t_shellui_exits_during_apply, t_title_where, t_watch_files, t_home_music_at9, t_long_mount_paths_use_parent_folder, t_system_is_byte_identical_afterwards, t_crash_is_reported_and_recovered,
          t_privilege_failure_exits_cleanly]
 

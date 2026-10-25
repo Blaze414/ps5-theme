@@ -343,8 +343,10 @@ Your first change to a theme brings up this bar at the bottom of the page.
 
 - **Save** keeps the changes.
 - **Discard** asks once ("Discard all changes?"), then puts the theme back as
-  it was at the last save. If the theme is applied, the console is updated to
-  match.
+  it was at the last save. If the theme is applied and the console shows
+  something else (you applied the changes), it is applied again to match;
+  after changes the console never showed, such as a switch, a placement or a
+  song name, it isn't (since 1.62).
 
 Unsaved changes are kept if you leave the page or close the browser. The
 library card says "unsaved changes", and a reminder appears when you leave.

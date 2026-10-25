@@ -1749,12 +1749,16 @@ api_discard_theme(request_t *req) {
     rc = -1;
   }
   if(!rc) fs_rm_rf_under(SNAP_DIR, trash);
+  /* The console needs the theme again only if the files put back aren't the ones it shows:
+     not after a change to choices, music settings or pictures it doesn't use, or one never applied. */
+  int unchanged = !rc && applied_files_unchanged(id);
   themes_unlock();
   if(rc) return respond_error(req->fd, 500, "could not discard the changes");
 
   read_active(active, sizeof(active));
-  int again = !strcmp(active, id) && !write_active(id);
-  log_msg("theme %s: changes discarded%s", id, again ? ", applying it again" : "");
+  int selected = !strcmp(active, id);
+  int again = selected && !unchanged && !write_active(id);
+  log_msg("theme %s: changes discarded%s", id, again ? ", applying it again" : selected ? "; the console already shows these files" : "");
   strbuf_t sb = {0};
   sb_printf(&sb, "{\"ok\":true,\"reapplied\":%s}", again ? "true" : "false");
   respond_json(req->fd, 200, &sb);

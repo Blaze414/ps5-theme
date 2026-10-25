@@ -90,6 +90,6 @@ On the console:
 | `/data/ps5-theme/stage/` | Stage folders behind the live overlays, and the previous theme's |
 | `/data/ps5-theme/live` | The applied theme's folders, for a new copy to carry on with |
 | `/data/ps5-theme/spare` | The previous theme's folders, kept for switching back |
-| `/data/ps5-theme/update/` | Drop a newer `ps5-theme.elf` or `.plugin` here to update |
+| `/data/ps5-theme/update/` | Drop a newer `ps5-theme.elf` or `.plugin` here to update; it is removed once that version runs |
 | `/data/ps5-theme/logs/` | Log and crash reports |
 | `/data/ps5-theme/dump/` | The asset listing and mount table, for reference |

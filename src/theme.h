@@ -224,6 +224,10 @@ int  apply_progress(char *text, size_t size);   /* percent, or -1 when idle */
 void last_result(char *out, size_t size);
 void themes_lock(void);
 void themes_unlock(void);
+/* The files a theme had when it was last applied (call with themes_lock held). */
+void applied_files_record(const char *name);
+void applied_files_forget(void);
+int  applied_files_unchanged(const char *name);
 void read_music_settings(const char *id, music_settings_t *m);
 int  music_loop_valid(const char *loop);
 int  music_order_valid(const char *order);

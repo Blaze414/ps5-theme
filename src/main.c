@@ -1819,6 +1819,79 @@ plan_jobs(job_t *jobs, int *failed, int quiet) {
 }
 
 
+/* ---- what the console shows ----
+   A fingerprint of the files a theme had when it was last applied: each
+   file's path under files/ and its identity (device, inode, size, change
+   time). Theme files are only ever replaced, never changed in place, and the
+   copy Discard puts back is made of hard links, so the files as last applied
+   and the same files put back by Discard have the same fingerprint, and the
+   theme needs no apply then. Read and written with themes_lock held. */
+static char applied_files_name[128];
+static uint64_t applied_files_print;
+
+static void
+fingerprint_walk(char *path, size_t len, size_t root, uint64_t *sum, uint64_t *count) {
+  DIR *d = opendir(path);
+  if(!d) return;
+  struct dirent *e;
+  while((e = readdir(d))) {
+    size_t n = strlen(e->d_name);
+    struct stat st;
+    if(!strcmp(e->d_name, ".") || !strcmp(e->d_name, "..") || (n > 5 && !strcmp(e->d_name + n - 5, ".part"))) continue;
+    if(len + 1 + n >= PATH_MAX) { *count += 1ull << 40; continue; }   /* can't be told: never the same */
+    path[len] = '/';
+    memcpy(path + len + 1, e->d_name, n + 1);
+    if(!lstat(path, &st)) {
+      if(S_ISDIR(st.st_mode)) fingerprint_walk(path, len + 1 + n, root, sum, count);
+      else {
+        uint64_t h = 1469598103934665603ull;
+        for(const char *p = path + root; *p; p++) h = (h ^ (unsigned char)*p) * 1099511628211ull;
+        uint64_t id[5] = { (uint64_t)st.st_dev, (uint64_t)st.st_ino, (uint64_t)st.st_size,
+                           (uint64_t)st.st_mtim.tv_sec, (uint64_t)st.st_mtim.tv_nsec };
+        for(int i = 0; i < 5; i++) h = (h ^ id[i]) * 1099511628211ull;
+        *sum += h * 0x9e3779b97f4a7c15ull + (h >> 29);   /* a sum: the order files are listed in doesn't matter */
+        *count += 1;
+      }
+    }
+    path[len] = 0;
+  }
+  closedir(d);
+}
+
+
+static uint64_t
+files_fingerprint(const char *name) {
+  char *path = malloc(PATH_MAX);
+  uint64_t sum = 0, count = 0;
+  if(!path) return 0;
+  int len = snprintf(path, PATH_MAX, "%s/%s/files", THEMES_DIR, name);
+  if(len > 0 && len < PATH_MAX) fingerprint_walk(path, (size_t)len, (size_t)len, &sum, &count);
+  free(path);
+  return (sum ^ (count * 0xff51afd7ed558ccdull)) | 1;   /* never 0, which stands for "not known" */
+}
+
+
+void
+applied_files_record(const char *name) {
+  snprintf(applied_files_name, sizeof(applied_files_name), "%s", name);
+  applied_files_print = files_fingerprint(name);
+}
+
+
+void
+applied_files_forget(void) {
+  applied_files_name[0] = 0;
+  applied_files_print = 0;
+}
+
+
+/* Whether `name`'s files are exactly the ones the console shows (applied last, and not changed since). */
+int
+applied_files_unchanged(const char *name) {
+  return applied_files_print && !strcmp(applied_files_name, name) && files_fingerprint(name) == applied_files_print;
+}
+
+
 static int
 apply_theme(const char *name) {
   char path[PATH_MAX], files_root[PATH_MAX], fw[16], want_fw[64], title[128];
@@ -2353,7 +2426,12 @@ watch_views(int reset) {
   if(added) {
     log_msg("theme %s: %d new view(s) covered", live_theme, added);
     dump_mount_table();
-    last_count = plat_mount_count();   /* our own mounts changed the count */
+    /* Look once more on the next round rather than taking the count now: our own
+       mounts changed it, but so may a view the system made while these were being
+       covered (a sandbox's views come one after another), which taking the count
+       would hide until the next full look, up to WATCH_FULL_SECONDS later. Our own
+       mounts are skipped on that look. */
+    last_count = -1;
   }
   crumb(CRUMB_MAIN, "idle");
   return 0;
@@ -2573,6 +2651,8 @@ main(void) {
         else notify("ps5-theme: applying '%s'...", title);
         themes_lock();
         int rc = apply_theme(active);
+        if(!rc) applied_files_record(active);
+        else applied_files_forget();
         themes_unlock();
         pthread_mutex_lock(&state_lock);
         if(!rc) snprintf(applied, sizeof(applied), "%s", active);
@@ -2584,6 +2664,9 @@ main(void) {
         int nprev = load_prev_stages(prev, 64);
         forget_live(1);
         revert_keep_spares(prev, nprev);
+        themes_lock();
+        applied_files_forget();
+        themes_unlock();
         if(taken_down[0]) {
           set_result("%s", taken_down);
           taken_down[0] = 0;

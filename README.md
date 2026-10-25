@@ -119,7 +119,8 @@ matters after rest mode, when etaHEN's Toolbox is often gone. An open manager
 page reloads itself with the new version. (This works from 1.23 on: to get
 1.23 itself from an older version, restart the console once.) A newer
 `ps5-theme.elf` or `.plugin` in `/data/ps5-theme/update/` works the same way,
-with or without etaHEN.
+with or without etaHEN; once the new version runs, the file there is removed
+(since 1.62).
 
 **If the manager can't be reached:** start ps5-theme again (from the Toolbox
 or PS5 Payload Manager). The new copy takes over from the running one even
