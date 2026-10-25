@@ -161,6 +161,8 @@ The music the home screen plays. Add any audio file the browser can play
   use;
 - **Loudness**, relative to the console's own music, from -12 to +12 dB.
 
+![A playlist of three songs in the home music section](screenshots/home-music-playlist.png)
+
 The note at the bottom explains something the console does by itself: the
 home screen keeps its place in the music. After a game it carries on where it
 stopped, and when you apply a theme the new music carries on from about where

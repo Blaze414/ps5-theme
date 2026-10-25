@@ -75,8 +75,10 @@ everything else stays as the console's.
 
 A theme can play several songs instead of one (version 1.61 and later): they
 play one after another, each its own part, then start again from the first,
-or the last one keeps repeating. The console still plays one home music file; the manager puts the
-songs together into it.
+or the last one keeps repeating. The console still plays one home music file;
+the manager puts the songs together into it.
+
+![A playlist of three songs in the home music section](screenshots/home-music-playlist.png)
 
 1. **Add the first song** as in [Step by step](#step-by-step), and press
    **Use this**.
@@ -96,6 +98,9 @@ songs together into it.
    last song*. With the second, the last song's editor also has the part that
    repeats (at first, all of its part), like *Music part once, then the loop
    part repeats* for one song.
+
+   ![The last song's editor: its part, and the part that then repeats](screenshots/playlist-song.png)
+
 7. **Play** plays the whole playlist as the console will loop it; **Hear
    where it repeats** plays the seconds around the jump back.
 8. **Save**, then **Apply to console**, and hear it as in step 7 of [Step by
