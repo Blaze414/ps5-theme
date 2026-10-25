@@ -217,6 +217,20 @@ music_order_valid(const char *order) {
 }
 
 
+int
+music_end_mode_valid(const char *mode) {
+  return !strcmp(mode, "loop-all") || !strcmp(mode, "loop-last");
+}
+
+
+/* A playlist track's source file: slot 1 is music.wav, the rest music<slot>.wav. */
+void
+music_source_file(int slot, char *out, size_t size) {
+  if(slot <= 1) snprintf(out, size, "%s", MUSIC_FILE);
+  else snprintf(out, size, "music%d.wav", slot);
+}
+
+
 static int
 ini_int(const char *path, const char *key, int def, int lo, int hi) {
   char v[16];
@@ -251,13 +265,46 @@ read_music_settings(const char *id, music_settings_t *m) {
   if(read_ini_value(path, "music_loop", m->loop, sizeof(m->loop)) || !music_loop_valid(m->loop)) {
     snprintf(m->loop, sizeof(m->loop), "crossfade");
   }
+
+  /* Playlist: each slot's part, the play order, and the between/end settings.
+     A single-song theme (no music_sequence) reads as one track, slot 1. */
+  for(int s = 1; s <= MUSIC_MAX_TRACKS; s++) {
+    char ks[24], ke[24];
+    if(s == 1) { snprintf(ks, sizeof(ks), "music_start"); snprintf(ke, sizeof(ke), "music_end"); }
+    else { snprintf(ks, sizeof(ks), "music%d_start", s); snprintf(ke, sizeof(ke), "music%d_end", s); }
+    int st = ini_int(path, ks, 0, 0, MUSIC_MAX_MS);
+    int en = ini_int(path, ke, 0, 0, MUSIC_MAX_MS);
+    if(en && en <= st) en = 0;
+    m->track_start_ms[s - 1] = st;
+    m->track_end_ms[s - 1] = en;
+  }
+  m->track_start_ms[0] = m->start_ms;      /* slot 1's part is the single-song part */
+  m->track_end_ms[0] = m->end_ms;
+  m->tracks = 0;
+  char seq[128];
+  if(!read_ini_value(path, "music_sequence", seq, sizeof(seq))) {
+    for(char *p = seq; *p && m->tracks < MUSIC_MAX_TRACKS; ) {
+      while(*p == ',' || *p == ' ') p++;
+      if(!*p) break;
+      int n = atoi(p);
+      if(n >= 1 && n <= MUSIC_MAX_TRACKS) m->seq[m->tracks++] = n;
+      while(*p && *p != ',') p++;
+    }
+  }
+  if(m->tracks < 1) { m->tracks = 1; m->seq[0] = 1; }
+  if(read_ini_value(path, "music_between", m->between, sizeof(m->between)) || !music_loop_valid(m->between)) {
+    snprintf(m->between, sizeof(m->between), "%s", m->loop);
+  }
+  if(read_ini_value(path, "music_end_mode", m->end_mode, sizeof(m->end_mode)) || !music_end_mode_valid(m->end_mode)) {
+    snprintf(m->end_mode, sizeof(m->end_mode), "loop-all");
+  }
 }
 
 
 /* Rewrite theme.ini atomically. name/fw/music NULL keep the current value. */
 int
 write_theme_ini(const char *id, const char *name, const char *fw, const music_settings_t *music) {
-  char path[PATH_MAX], cur_name[128], cur_fw[64], ini[512];
+  char path[PATH_MAX], cur_name[128], cur_fw[64], ini[1024];
   music_settings_t m;
 
   snprintf(path, sizeof(path), "%s/%s/theme.ini", THEMES_DIR, id);
@@ -270,6 +317,25 @@ write_theme_ini(const char *id, const char *name, const char *fw, const music_se
                    "music_loop_start=%d\nmusic_loop_end=%d\nmusic_order=%s\nmusic_loop=%s\nmusic_blend=%d\n",
                    name ? name : cur_name, fw ? fw : cur_fw, m.gain, m.start_ms, m.end_ms, m.play_from_ms,
                    m.loop_start_ms, m.loop_end_ms, m.order, m.loop, m.blend_ms);
+  if(n < 0 || n >= (int)sizeof(ini)) return -1;
+  int tracks = m.tracks >= 1 && m.tracks <= MUSIC_MAX_TRACKS ? m.tracks : 1;
+  n += snprintf(ini + n, sizeof(ini) - n, "music_tracks=%d\nmusic_between=%s\nmusic_end_mode=%s\nmusic_sequence=",
+                tracks, m.between[0] ? m.between : "crossfade", m.end_mode[0] ? m.end_mode : "loop-all");
+  if(n < 0 || n >= (int)sizeof(ini)) return -1;
+  for(int i = 0; i < tracks; i++) {
+    int s = i < MUSIC_MAX_TRACKS ? m.seq[i] : 1;
+    n += snprintf(ini + n, sizeof(ini) - n, "%s%d", i ? "," : "", s);
+    if(n < 0 || n >= (int)sizeof(ini)) return -1;
+  }
+  n += snprintf(ini + n, sizeof(ini) - n, "\n");
+  if(n < 0 || n >= (int)sizeof(ini)) return -1;
+  for(int i = 0; i < tracks; i++) {                 /* each added slot's part (slot 1 uses music_start/end above) */
+    int s = i < MUSIC_MAX_TRACKS ? m.seq[i] : 0;
+    if(s <= 1 || s > MUSIC_MAX_TRACKS) continue;
+    n += snprintf(ini + n, sizeof(ini) - n, "music%d_start=%d\nmusic%d_end=%d\n",
+                  s, m.track_start_ms[s - 1], s, m.track_end_ms[s - 1]);
+    if(n < 0 || n >= (int)sizeof(ini)) return -1;
+  }
   return fs_write_file(path, ini, n);
 }
 

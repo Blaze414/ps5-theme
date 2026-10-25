@@ -8,6 +8,7 @@ A theme is a folder, or a `.zip` of one:
 my-theme/
   theme.ini
   music.wav          optional: the song, 48 kHz 16-bit stereo PCM
+  music2.wav         optional: a playlist's other songs, music2.wav to music8.wav, the same format
   preview.jpg        optional: library picture made from the background
   picture.jpg        optional: library picture you chose (shown first)
   files/
@@ -33,6 +34,14 @@ music_loop_end=55000
 music_order=loop-first
 music_loop=crossfade
 music_blend=1000
+music_tracks=3
+music_between=crossfade
+music_end_mode=loop-all
+music_sequence=1,3,2
+music3_start=12000
+music3_end=80000
+music2_start=0
+music2_end=95000
 ```
 
 - `fw`: `any`, or a comma-separated list of exact versions such as
@@ -47,6 +56,18 @@ music_blend=1000
   or `music-first`.
 - `music_loop`: how the joints sound: `crossfade`, `fade` or `cut`.
 - `music_blend`: the length of the crossfade or fades, in ms.
+- `music_tracks`, `music_sequence`: a playlist's number of songs and the order
+  they play in, as the songs' file numbers (1 is `music.wav`, 2 is
+  `music2.wav`, and so on, up to 8). Without them the theme has one song,
+  `music.wav`.
+- `music<N>_start`, `music<N>_end`: the part of `music<N>.wav` that plays,
+  in ms; song 1's is `music_start` and `music_end`.
+- `music_between`: how a playlist's songs join: `crossfade` (they overlap by
+  `music_blend`), `fade` or `cut`; also where the playlist starts again.
+- `music_end_mode`: `loop-all` (the playlist starts again from its first
+  song) or `loop-last` (the last song keeps repeating `music_loop_start` to
+  `music_loop_end`, or its whole part).
+- In a playlist, `music_order` and `music_play_from` are not used.
 
 On the console:
 

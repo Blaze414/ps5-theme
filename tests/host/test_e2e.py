@@ -530,7 +530,7 @@ S = {}  # shared state between ordered tests
 
 def t_startup():
     s = status()
-    assert s["fw"] == "13.42" and s["version"] == "1.60" and s["themes"] == [], s
+    assert s["fw"] == "13.42" and s["version"] == "1.61" and s["themes"] == [], s
     listing = open(f"{BASE}/dump/assets-v2-13.42.txt").read()
     assert f"{VSH}/bg_hub_default.dds.zst" in listing
     assert f"{HOME}/bg.png" in listing and "/mnt/rnps/apps/NPXS40099/a.png" in listing
@@ -540,7 +540,7 @@ def t_startup():
     assert open("/tmp/tile-registered").read().strip() == "THEM00001"
     assert "starting" in log_text()
     notes = open("/tmp/notifications.txt").read()
-    assert "ps5-theme 1.60 starting" in notes and "ps5-theme ready" in notes, notes
+    assert "ps5-theme 1.61 starting" in notes and "ps5-theme ready" in notes, notes
 
 
 def t_ui_and_icon_served():
@@ -1692,6 +1692,78 @@ def t_music():
     assert call("DELETE", "/api/themes", {"id": "tunes"})[0] == 200
 
 
+def t_music_playlist():
+    """A playlist: songs in slots (music.wav, music2.wav ...), the order they
+    play in, each song's part, how they join and how the playlist ends. The
+    page puts them together into the one home music file; the plugin keeps
+    the songs and the settings. A theme.ini from before playlists reads as
+    one song."""
+    themes = lambda: {t["id"]: t for t in status()["themes"]}
+    assert call("POST", "/api/themes", {"id": "mix", "name": "Mix"})[0] == 200
+    one, two, three = wav(48000, 2, 2, 20000), wav(48000, 2, 3, 15000), wav(48000, 2, 1, 10000)
+    for slot, data in ((None, one), ("2", two), ("5", three)):
+        params = {"id": "mix", "crc": f"{zlib.crc32(data):08x}", **({"slot": slot} if slot else {})}
+        code, r = call("PUT", "/api/theme/music", params, data)
+        assert code == 200, (slot, code, r)
+    assert os.path.isfile(f"{BASE}/themes/mix/music2.wav") and os.path.isfile(f"{BASE}/themes/mix/music5.wav")
+    assert call("GET", "/api/theme/music", {"id": "mix", "slot": "2"})[1] == two
+    assert call("GET", "/api/theme/music", {"id": "mix", "slot": "1"})[1] == one
+    assert call("GET", "/api/theme/music", {"id": "mix"})[1] == one                # no slot: music.wav, as before
+    for bad in ("0", "9", "x", "-1"):
+        assert call("GET", "/api/theme/music", {"id": "mix", "slot": bad})[0] == 400, bad
+        assert call("PUT", "/api/theme/music", {"id": "mix", "slot": bad, "crc": f"{zlib.crc32(b'x'):08x}"}, b"x")[0] == 400, bad   # refused before the body is read
+        assert call("DELETE", "/api/theme/music", {"id": "mix", "slot": bad})[0] == 400, bad
+    code, r = call("PUT", "/api/theme/music", {"id": "mix", "slot": "3", "crc": f"{zlib.crc32(b'not audio'):08x}"}, b"not audio")
+    assert code == 422 and "valid WAV" in r["error"], r                               # every slot is checked like music.wav
+    # One song reads as a playlist of one.
+    t = themes()["mix"]
+    assert (t["musicTracks"], t["musicSequence"], t["musicStarts"], t["musicEnds"], t["musicBetween"], t["musicEndMode"]) == \
+        (1, [1], [0], [0], "crossfade", "loop-all"), t
+    # The order, each song's part, the joins, and the last song repeating a part of itself.
+    assert call("POST", "/api/theme/settings", {"id": "mix", "sequence": "5,1,2", "start5": "100", "end5": "900",
+                                                 "start2": "0", "end2": "2500", "end": "1500", "between": "fade",
+                                                 "end_mode": "loop-last", "loop_start": "500", "loop_end": "2500"})[0] == 200
+    t = themes()["mix"]
+    assert (t["musicTracks"], t["musicSequence"], t["musicStarts"], t["musicEnds"]) == (3, [5, 1, 2], [100, 0, 0], [900, 1500, 2500]), t
+    assert (t["musicBetween"], t["musicEndMode"], t["musicLoopStart"], t["musicLoopEnd"]) == ("fade", "loop-last", 500, 2500), t
+    ini = open(f"{BASE}/themes/mix/theme.ini").read()
+    assert "music_tracks=3\nmusic_between=fade\nmusic_end_mode=loop-last\nmusic_sequence=5,1,2\n" in ini, ini
+    assert "music5_start=100\nmusic5_end=900\n" in ini and "music2_start=0\nmusic2_end=2500\n" in ini, ini
+    # Other changes keep the playlist: theme.ini is written whole each time.
+    assert call("POST", "/api/theme/settings", {"id": "mix", "gain": "3", "name": "Mix 2"})[0] == 200
+    t = themes()["mix"]
+    assert (t["name"], t["gain"], t["musicSequence"], t["musicEnds"], t["musicEndMode"]) == ("Mix 2", 3, [5, 1, 2], [900, 1500, 2500], "loop-last"), t
+    # Wrong values are refused and change nothing.
+    for bad in ({"sequence": "1,9"}, {"sequence": "0"}, {"sequence": ","}, {"sequence": "x"}, {"tracks": "9"}, {"tracks": "0"},
+                {"between": "wobble"}, {"end_mode": "shuffle"}, {"start2": "3000", "end2": "1000"}, {"end3": "-5"}, {"start4": "x"}):
+        assert call("POST", "/api/theme/settings", {"id": "mix", **bad})[0] == 400, bad
+    t = themes()["mix"]
+    assert (t["musicSequence"], t["musicStarts"], t["musicEnds"]) == ([5, 1, 2], [100, 0, 0], [900, 1500, 2500]), t
+    # A count without an order plays songs 1 to n.
+    assert call("POST", "/api/theme/settings", {"id": "mix", "tracks": "2"})[0] == 200
+    assert themes()["mix"]["musicSequence"] == [1, 2]
+    assert call("POST", "/api/theme/settings", {"id": "mix", "sequence": "5,1,2", "start5": "100", "end5": "900"})[0] == 200
+    # A duplicate keeps the songs and the playlist.
+    assert call("POST", "/api/themes/duplicate", {"id": "mix", "new_id": "mix-copy", "name": "Mix copy"})[0] == 200
+    c = themes()["mix-copy"]
+    assert (c["musicSequence"], c["musicEnds"], c["musicBetween"]) == ([5, 1, 2], [900, 1500, 2500], "fade"), c
+    assert call("GET", "/api/theme/music", {"id": "mix-copy", "slot": "5"})[1] == three
+    assert call("DELETE", "/api/themes", {"id": "mix-copy"})[0] == 200
+    # Removing a song: its file goes, then the order without it; its part leaves theme.ini.
+    assert call("DELETE", "/api/theme/music", {"id": "mix", "slot": "5"})[0] == 200
+    assert not os.path.exists(f"{BASE}/themes/mix/music5.wav")
+    assert call("DELETE", "/api/theme/music", {"id": "mix", "slot": "5"})[0] == 404
+    assert call("POST", "/api/theme/settings", {"id": "mix", "sequence": "1,2"})[0] == 200
+    ini = open(f"{BASE}/themes/mix/theme.ini").read()
+    assert "music5_" not in ini and "music_sequence=1,2\n" in ini and "music2_end=2500\n" in ini, ini
+    # A theme.ini from before playlists reads as one song.
+    with open(f"{BASE}/themes/mix/theme.ini", "w") as f:
+        f.write("name=Old\nfw=13.42\nmusic_gain=0\nmusic_start=200\nmusic_end=0\n")
+    t = themes()["mix"]
+    assert (t["musicTracks"], t["musicSequence"], t["musicStarts"], t["musicEnds"], t["musicEndMode"]) == (1, [1], [200], [0], "loop-all"), t
+    assert call("DELETE", "/api/themes", {"id": "mix"})[0] == 200
+
+
 def t_settings_and_duplicate():
     assert call("POST", "/api/theme/settings", {"id": "night", "name": "Night Sky\nfw=any"})[0] == 200
     ini = open(f"{BASE}/themes/night/theme.ini").read()
@@ -2430,6 +2502,78 @@ console.log("bleed ok");
 """
 
 
+PLAYLIST_JS = r"""
+const fs = require("fs");
+const html = fs.readFileSync(process.argv[2], "utf8");
+const block = html.slice(html.indexOf("/* playlist:begin */"), html.indexOf("/* playlist:end */"));
+const { buildPlaylist } = new Function(block + ";return { buildPlaylist };")();
+const rate = 1000, L = 0.1;
+const ok = (cond, what) => { if (!cond) throw new Error(what); };
+const near = (a, b, what, e = 1e-4) => ok(Math.abs(a - b) < e, `${what}: ${a} is not ${b}`);
+// Songs of a constant level, told apart by sign (left, right): A (+,+), B (-,-), C (+,-).
+const song = (secs, l, r) => [new Float32Array(secs * rate).fill(l), new Float32Array(secs * rate).fill(r)];
+const A = song(3, 0.5, 0.5), B = song(4, -0.05, -0.05), C = song(1, 0.3, -0.3);
+const copies = [A, B, C].map(s => s.map(c => c.slice()));
+const tracks = () => [{ chans: A, start: 0, end: 2 }, { chans: B, start: 1, end: 3 }, { chans: C, start: 0, end: 0 }];
+
+// A straight cut: the parts end to end, each at the same loudness; the whole repeats.
+let r = buildPlaylist(tracks(), rate, { join: "cut", blend: 0, endMode: "loop-all" });
+ok(r.total === 5000 && r.intro === 0 && r.starts.join() === "0,2000,4000", `cut layout ${r.total} ${r.intro} ${r.starts}`);
+near(r.chans[0][0], L, "A left"); near(r.chans[0][1999], L, "A end");
+near(r.chans[0][2000], -L, "B left"); near(r.chans[1][3999], -L, "B right");
+near(r.chans[0][4000], L, "C left"); near(r.chans[1][4999], -L, "C right");
+[A, B, C].forEach((s, i) => ok(s.every((c, ch) => c.every((v, j) => v === copies[i][ch][j])), `song ${i} was changed`));
+
+// A crossfade overlaps the songs (equal power) and the end crossfades into the start.
+r = buildPlaylist(tracks(), rate, { join: "crossfade", blend: 0.3, endMode: "loop-all" });
+ok(r.total === 4400 && r.intro === 300 && r.starts.join() === "0,1700,3400", `crossfade layout ${r.total} ${r.intro} ${r.starts}`);
+near(r.chans[0][1699], L, "A before the overlap"); near(r.chans[0][2000], -L, "B after the overlap");
+const ang = 150.5 / 300 * Math.PI / 2;
+near(r.chans[0][1850], L * Math.cos(ang) - L * Math.sin(ang), "middle of the A-B crossfade");
+near(r.chans[1][4100], -L * Math.cos(0.5 / 300 * Math.PI / 2) + L * Math.sin(0.5 / 300 * Math.PI / 2), "loop crossfade begins as C");
+near(r.chans[1][4399], -L * Math.cos(299.5 / 300 * Math.PI / 2) + L * Math.sin(299.5 / 300 * Math.PI / 2), "loop crossfade ends as A");
+near(r.chans[1][300], L, "where the repeat lands is A");
+
+// A fade dips each joint and the loop; nothing overlaps.
+r = buildPlaylist(tracks(), rate, { join: "fade", blend: 1, endMode: "loop-all" });
+ok(r.total === 5000 && r.intro === 0, `fade layout ${r.total} ${r.intro}`);
+ok(Math.abs(r.chans[0][1999]) < 0.002 && Math.abs(r.chans[0][2000]) < 0.002, "fade joint dips");
+ok(Math.abs(r.chans[0][0]) < 0.002 && Math.abs(r.chans[0][4999]) < 0.002, "fade loop dips");
+near(r.chans[0][1000], L * (999.5 / 333 >= 1 ? 1 : 0), "fade only near the joints");
+
+// The last song plays its part once, then repeats its loop part (as "music part once"): the repeat lands at the loop start.
+const R = [new Float32Array(4000).map((_, i) => 0.01 + i / 4000), null]; R[1] = R[0].slice();
+r = buildPlaylist([{ chans: A, start: 0, end: 2 }, { chans: R, start: 0, end: 4, loopStart: 1, loopEnd: 3 }], rate,
+                  { join: "cut", blend: 0.3, endMode: "loop-last" });
+ok(r.total === 8000 && r.intro === 6000, `loop-last layout ${r.total} ${r.intro}`);
+near(r.chans[0][r.intro], r.chans[0][2000 + 1000], "lands where the loop part starts");
+// A loop part that ends with the part: one pass, then the jump back.
+r = buildPlaylist([{ chans: A, start: 0, end: 2 }, { chans: R, start: 0, end: 4, loopStart: 1, loopEnd: 4 }], rate,
+                  { join: "cut", blend: 0.3, endMode: "loop-last" });
+ok(r.total === 6000 && r.intro === 3000, `loop-last tail ${r.total} ${r.intro}`);
+
+// With no loop part the last song repeats whole, and a crossfade into it never reaches where it lands.
+const D = song(2, -0.2, -0.2);
+r = buildPlaylist([{ chans: A, start: 0, end: 2 }, { chans: D, start: 0, end: 2 }], rate, { join: "crossfade", blend: 0.3, endMode: "loop-last" });
+ok(r.starts.join() === "0,1700" && r.intro === 2000, `loop-last whole ${r.starts} ${r.intro}`);
+near(r.chans[0][r.intro], r.chans[0][r.intro + 100], "the landing is the last song alone");
+ok(r.chans[0][r.intro] < -0.09 && r.chans[0][1850] > r.chans[0][r.intro], "the crossfade mixes only before the landing");
+near(r.chans[0][1699], L, "A before the crossfade");
+console.log("playlist ok");
+"""
+
+
+def t_page_builds_playlists():
+    """The page puts a playlist together: each song's part at the same
+    loudness, joined by an overlapping crossfade, a fade or a cut; at the end
+    it starts again (the end crossfading into the start) or the last song
+    repeats, and a crossfade never reaches where that repeat lands. The songs
+    it was given are left as they were."""
+    write("/tmp/playlist.js", PLAYLIST_JS.encode())
+    out = subprocess.run(["node", "/tmp/playlist.js", WEB_PAGE], capture_output=True, text=True)
+    assert out.returncode == 0 and "playlist ok" in out.stdout, out.stdout + out.stderr
+
+
 def t_page_writes_the_consoles_zstd_frames():
     """The page wraps a texture in a zstd frame headed like the system file's
     (descriptor, window, size field, content checksum): its bytes equal the
@@ -2653,7 +2797,7 @@ def t_appearance_textures():
     # A remembered check result is made by a version and a revision of the rules: results of other rules are
     # not trusted (the same version can ship twice while a feature is built).
     remembered = open(f"{BASE}/checked").read().splitlines()
-    assert remembered and all(re.match(r"1\.60r\d+\t", l) for l in remembered), remembered[:2]
+    assert remembered and all(re.match(r"1\.61r\d+\t", l) for l in remembered), remembered[:2]
     assert put_file("appear", f"{HOME}/bg.png", S["bg"])[0] == 200
 
     shell = "/mnt/sandbox/NPXS40087_000"
@@ -3087,8 +3231,8 @@ TESTS = [t_startup, t_ui_and_icon_served, t_mutations_need_token, t_create_theme
          t_stock_mirror_and_linked_staging, t_stage_folders_reused_without_links,
          t_firmware_mismatch_is_refused, t_delete_rules, t_concurrent_requests_during_apply,
          t_restore_stock_cleans_up, t_overlays_reach_system_views, t_crash_loop_takes_theme_down, t_busy_overlay_is_never_forced, t_recovers_after_hard_kill, t_update_from_payload_manager, t_update_from_plain_elf, t_update_hands_over, t_update_at_boot, t_web_comes_back_after_rest_mode, t_takeover_when_web_is_down, t_stop_tool_keeps_the_theme, t_failed_write_closes_its_file, t_survives_malformed_and_abusive_requests,
-         t_slow_clients_do_not_block_others, t_log_rotates, t_media_policy, t_music, t_settings_and_duplicate, t_preview_pictures, t_save_and_discard, t_cut_off_uploads_are_not_theme_files,
-         t_home_background_textures, t_interface_pictures, t_title_pictures, t_fonts, t_bc7_keeps_transparency, t_page_writes_the_consoles_zstd_frames, t_page_bleeds_colour_into_clear_pixels, t_page_places_textures_against_their_edge, t_texture_sources, t_appearance_textures, t_shellui_exit_releases_sandbox, t_shellui_exits_during_apply, t_title_where, t_watch_files, t_home_music_at9, t_long_mount_paths_use_parent_folder, t_system_is_byte_identical_afterwards, t_crash_is_reported_and_recovered,
+         t_slow_clients_do_not_block_others, t_log_rotates, t_media_policy, t_music, t_music_playlist, t_settings_and_duplicate, t_preview_pictures, t_save_and_discard, t_cut_off_uploads_are_not_theme_files,
+         t_home_background_textures, t_interface_pictures, t_title_pictures, t_fonts, t_bc7_keeps_transparency, t_page_writes_the_consoles_zstd_frames, t_page_builds_playlists, t_page_bleeds_colour_into_clear_pixels, t_page_places_textures_against_their_edge, t_texture_sources, t_appearance_textures, t_shellui_exit_releases_sandbox, t_shellui_exits_during_apply, t_title_where, t_watch_files, t_home_music_at9, t_long_mount_paths_use_parent_folder, t_system_is_byte_identical_afterwards, t_crash_is_reported_and_recovered,
          t_privilege_failure_exits_cleanly]
 
 

@@ -199,3 +199,6 @@ After any failure the console was restarted before the next test.
 | 1.59 | A theme that said "applied partly … 1 skipped, 107 of 27 folders" (cut off mid-sentence) after a Discard: an upload's temporary file had come back with it | With the fix: "applied: 67 files verified on the console", every hint in full; the temporary file is left out |
 | 1.60 | An apply with the library open; the update from 1.59 | **Works**: one progress display (the banner); 1.59 handed over by itself, and the next apply removed the cut-off upload's file |
 | 1.60 | A sound of the user's on `sfx_warmboot.at9` (about 10 seconds), applied, then rest mode and waking | **Works**: the theme's sound played as the console woke |
+| 1.61 | The plugin keeping a playlist's songs (`music2.wav` …) and their settings, with a one-song theme applied | **Works**: the one song as home music, as before |
+| 1.61 | A home music playlist made in the editor (songs added, each its own part), applied, then a game's music and back to the home screen | **Works** |
+| 1.61 | The editor's Preview of a theme (home screen and Control Center drawn from its files) | **Works** |

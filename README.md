@@ -16,7 +16,7 @@ the plugin stops, and the plugin puts your theme back each time etaHEN starts.
 
 ![The theme library](docs/screenshots/library.png)
 
-Version 1.60. Developed and tested on a PS5 with firmware 13.42, both with
+Version 1.61. Developed and tested on a PS5 with firmware 13.42, both with
 etaHEN 2.5B (unified build) and on its own from PS5 Payload Manager.
 
 > **About the screenshots.** They were taken from the author's own console.
@@ -67,7 +67,8 @@ etaHEN 2.5B (unified build) and on its own from PS5 Payload Manager.
   for the home screen only (see [Fonts](docs/fonts.md)).
 - **Home music editor.** Pick the part of a song to use, an optional loop
   part, the order they play in, how the joints sound and the loudness, then
-  hear it before you apply it.
+  hear it before you apply it. Or make a [playlist](docs/home-music.md#playlists)
+  of up to 8 songs that play one after another.
 - **Wake-up sound.** Replace the sound the console plays as it wakes from
   rest mode (see [The wake-up sound](docs/home-music.md#the-wake-up-sound)).
 - **Preview pictures.** Each theme's card shows its background, or any
@@ -192,7 +193,7 @@ else stays stock.
 | Page | What's in it |
 |---|---|
 | [Backgrounds](docs/backgrounds.md) | Changing the home screen's backgrounds: a step-by-step guide, where each background is used, what it needs, and how they are made |
-| [Home music](docs/home-music.md) | Giving the home screen your own music: a step-by-step guide to the music editor, when you hear it, what it needs, and how it is made; and your own [wake-up sound](docs/home-music.md#the-wake-up-sound) |
+| [Home music](docs/home-music.md) | Giving the home screen your own music (one song or a playlist): a step-by-step guide to the music editor, when you hear it, what it needs, and how it is made; and your own [wake-up sound](docs/home-music.md#the-wake-up-sound) |
 | [Changing game and app icons](docs/games-and-apps.md) | Installed games' and apps' icons, backgrounds and logos; the console's own tiles; interface icons |
 | [Appearance themes](docs/appearance-themes.md) | The Control Center's panels and the home screen artwork of the PlayStation 1 to 4 themes: a step-by-step guide, what it needs, how it depends on the anniversary assets, and how they are made and stored |
 | [Fonts](docs/fonts.md) | Replacing the console's text fonts, and which ones the home screen uses |

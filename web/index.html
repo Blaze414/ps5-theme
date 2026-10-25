@@ -305,6 +305,13 @@ audio { height: 36px; max-width: 100%; }
 .legend .key.start { background: var(--ok); width: 4px; height: 14px; margin-right: -4px; }
 
 .trim-fields { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); }
+/* Home music playlist: the songs in order, and how much of the console's length they use. */
+.pl-songs .row-item .file { white-space: normal; }
+.pl-songs .row-item .acts .btn.ghost { min-width: 36px; }
+.pl-foot { display: flex; gap: 14px; align-items: center; flex-wrap: wrap; }
+.pl-meter { flex: 1; min-width: 220px; display: grid; gap: 6px; font-size: .8125rem; color: var(--muted); }
+.pl-meter .progress { margin-top: 0; }
+.pl-meter.full .progress i { background: var(--warn); }
 .trim-actions { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
 .trim-actions .spacer { flex: 1; }
 
@@ -384,6 +391,57 @@ details[open] > :not(summary) { animation: in .2s var(--ease); }
 
 @media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }
 .visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+
+/* Live theme preview: a read-only, stylized mockup of the home screen. The
+   stage is a container, so its parts size in cqh/cqw and scale with it. */
+.pv-overlay { position: fixed; inset: 0; z-index: 55; display: grid; place-items: center; padding: 24px;
+  background: rgba(4, 7, 14, .74); -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px); animation: in .2s var(--ease); }
+.pv-dialog { width: min(1100px, 94vw); max-height: 92vh; display: flex; flex-direction: column; gap: 14px; }
+.pv-bar { display: flex; align-items: center; gap: 10px; }
+.pv-bar h2 { font-size: 1.125rem; font-weight: 500; margin: 0; }
+.pv-bar .spacer { flex: 1; }
+.pv-stage { position: relative; width: 100%; aspect-ratio: 16 / 9; border-radius: var(--radius-lg); overflow: hidden;
+  background: radial-gradient(120% 120% at 72% -12%, #2a4f8f, #0b1222 60%); box-shadow: 0 30px 80px rgba(0, 0, 0, .6);
+  container-type: size; --pv-accent: #1f7cf0; --pv-accent-ink: #fff; --pv-text: #fff; --pv-panel: #171a22; }
+.pv-stage img.pv-bg { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+.pv-scrim { position: absolute; inset: 0; pointer-events: none;
+  background: linear-gradient(180deg, rgba(0, 0, 0, .34) 0, rgba(0, 0, 0, 0) 22%, rgba(0, 0, 0, 0) 60%, rgba(0, 0, 0, .58) 100%); }
+.pv-top { position: absolute; top: 4.5cqh; left: 5cqw; right: 5cqw; display: flex; align-items: center; justify-content: flex-end; gap: 2.6cqw; }
+.pv-glyphs { display: flex; align-items: center; gap: 2cqw; }
+.pv-glyph { width: 3.4cqh; height: 3.4cqh; border-radius: 50%; background: color-mix(in srgb, var(--pv-text) 78%, transparent); }
+.pv-glyph.pv-avatar { background: var(--pv-accent); }
+.pv-clock { color: var(--pv-text); font-size: 3.6cqh; font-weight: 500; letter-spacing: .03em; font-variant-numeric: tabular-nums; text-shadow: 0 1px 6px rgba(0, 0, 0, .4); }
+.pv-tiles { position: absolute; left: 5cqw; right: 5cqw; top: 25cqh; display: flex; align-items: flex-start; gap: 2.6cqw; }
+.pv-tile { width: 17cqh; height: 17cqh; border-radius: 1.8cqh; overflow: hidden; flex: none; display: grid; place-items: center;
+  background: color-mix(in srgb, var(--pv-panel) 82%, #0b1222); box-shadow: 0 1cqh 3cqh rgba(0, 0, 0, .4); }
+.pv-tile img { width: 100%; height: 100%; object-fit: cover; }
+.pv-tile.pv-ph span { color: color-mix(in srgb, var(--pv-text) 55%, transparent); font-size: 7cqh; line-height: 1; }
+.pv-tile.pv-focus { width: 22cqh; height: 22cqh; margin-top: -2.5cqh; box-shadow: 0 0 0 .5cqh #fff, 0 2cqh 5cqh rgba(0, 0, 0, .6); }
+.pv-cap { position: absolute; left: 5cqw; top: 54cqh; max-width: 72cqw; }
+.pv-cap .pv-name { color: var(--pv-text); font-size: 6.5cqh; font-weight: 600; margin: 0 0 1.6cqh; text-shadow: 0 .3cqh 1.2cqh rgba(0, 0, 0, .5); }
+.pv-cap .pv-actions { display: flex; align-items: center; gap: 1.8cqw; }
+.pv-play { background: var(--pv-accent); color: var(--pv-accent-ink); border-radius: 6cqh; padding: 1.5cqh 4cqw; font-size: 3.6cqh; font-weight: 600; }
+.pv-chip { width: 7cqh; height: 7cqh; border-radius: 50%; background: color-mix(in srgb, var(--pv-text) 18%, transparent); box-shadow: inset 0 0 0 .3cqh color-mix(in srgb, var(--pv-text) 38%, transparent); }
+.pv-stage .pv-busy { position: absolute; inset: 0; display: grid; place-items: center; color: var(--faint); font-size: .9rem; }
+.pv-note { color: var(--muted); font-size: .85rem; margin: 0; }
+.pv-toolbar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.pv-tabs { display: flex; gap: 6px; }
+.pv-looklbl { margin-left: auto; display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: .85rem; }
+.pv-looklbl select { padding: 6px 10px; border-radius: 10px; background: var(--surface); border: 0; }
+/* Home: the Appearance theme's artwork hanging from the top. */
+.pv-art { position: absolute; top: 0; left: 0; width: 100%; height: auto; z-index: 1; pointer-events: none; }
+/* Control Center view. */
+.pv-ccbd { position: absolute; inset: 0; }
+.pv-cc-bar { position: absolute; left: 0; right: 0; bottom: 0; height: 24cqh; background: linear-gradient(0deg, color-mix(in srgb, var(--pv-panel) 66%, transparent), transparent); }
+.pv-cc-bottom { position: absolute; left: 0; right: 0; bottom: 0; width: 100%; height: 36cqh; object-fit: cover; object-position: center bottom; }
+.pv-cc-top { position: absolute; top: 0; right: 0; width: 36cqw; height: auto; }
+.pv-cc-card { position: absolute; left: 5cqw; top: 28cqh; width: 25cqw; height: 32cqh; border-radius: 2.4cqh;
+  box-shadow: inset 0 0 0 .2cqh color-mix(in srgb, var(--pv-text) 16%, transparent), 0 1cqh 3cqh rgba(0, 0, 0, .35); }
+.pv-cc-clock { position: absolute; top: 4.5cqh; right: 5cqw; color: var(--pv-text); font-size: 3.6cqh; font-weight: 500; font-variant-numeric: tabular-nums; text-shadow: 0 1px 6px rgba(0, 0, 0, .5); }
+.pv-cc-icons { position: absolute; left: 0; right: 0; bottom: 11cqh; display: flex; justify-content: center; align-items: center; gap: 3.4cqw; }
+.pv-cc-ic { width: 5.4cqh; height: 5.4cqh; border-radius: 50%; background: color-mix(in srgb, var(--pv-text) 78%, transparent); }
+.pv-cc-ic.pv-ccf { background: var(--pv-accent); box-shadow: 0 0 0 .5cqh #fff; }
+.pv-cc-label { position: absolute; left: 0; right: 0; bottom: 3.5cqh; text-align: center; color: var(--pv-text); font-size: 2.8cqh; opacity: .82; text-shadow: 0 1px 6px rgba(0, 0, 0, .5); }
 </style>
 </head>
 <body>
@@ -767,6 +825,7 @@ async function discardTheme(id, btn) {
   discardArmed = 0;
   let r;
   try { r = await api("POST", "/api/theme/discard", { id }); } catch (e) { return toast(e.message, "err"); }
+  songCacheDrop(id);        /* the songs may be the saved ones again */
   stamp = Date.now();
   await refreshStatus();
   toast(r.reapplied ? "Changes discarded. The console is being updated to match." : "Changes discarded.", "ok");
@@ -3413,8 +3472,14 @@ function restReminder() {
   toast("Back to the console's own artwork in this theme. Apply the theme, then put the console in rest mode and wake it to see the change.", "ok", 7000);
 }
 
+/* Every song of the theme goes (a playlist's too), and the home music is the console's again. */
 async function removeMusic() {
-  await api("DELETE", "/api/theme/music", { id: state.editId }).catch(() => {});
+  const id = state.editId, extra = themeTracks(themeById(id)).map(x => x.slot).filter(s => s !== 1);
+  for (const slot of extra) await api("DELETE", "/api/theme/music", { id, slot }).catch(() => {});
+  await api("DELETE", "/api/theme/music", { id }).catch(() => {});
+  if (extra.length) await api("POST", "/api/theme/settings", { id, sequence: "1", tracks: 1, loop_start: -1, loop_end: -1, order: "music" }).catch(() => {});
+  for (const slot of [1, ...extra]) localSet(trackNameKey(id, slot), null);
+  songCacheDrop(id);
   await resetAssets([{ path: HOME_MUSIC }]);
 }
 
@@ -3643,6 +3708,304 @@ async function chooseCover() {
   } finally { URL.revokeObjectURL(url); }
 }
 
+/* ================================================================ live preview
+
+   A read-only mockup of the home screen and the Control Center with the
+   theme's background, its colours (per Appearance theme, with your edits), the
+   Appearance artwork, a changed font and the changed icons. It reads from the
+   console with the same GETs the editor uses, builds nothing on the console,
+   and uploads nothing. */
+
+const pvHex = n => "#" + ((n >>> 0) & 0xffffff).toString(16).padStart(6, "0");
+const pvInk = rgb => lum(rgb) > 150 ? "#08121f" : "#ffffff";
+const pvRgba = (n, a) => { const v = n >>> 0; return `rgba(${(v >> 16) & 255},${(v >> 8) & 255},${v & 255},${a})`; };
+const PV_FALLBACK = { accent: 0x1f7cf0, text: 0xffffff, panel: 0x171a22, backdrop: 0x0d1018, card: 0x1b1e28 };
+/* Each look's Appearance theme and its colour palette. */
+const LOOK_NAMES = { default: "Default look", ps: "PlayStation", ps2: "PlayStation 2", ps3: "PlayStation 3", ps4: "PlayStation 4" };
+const LOOK_PAL = { default: "color_default", ps: "color_ps1", ps2: "color_ps2", ps3: "color_ps3", ps4: "color_ps4" };
+
+/* The colours one look paints with: accent (buttons), text, a panel fill, the
+   Control Center backdrop and card. A look's own palette, with the theme's
+   edits to it; falls back to the default look's palette, then to neutral. */
+async function previewColorsForLook(look) {
+  const path = rcoPaths()[0];
+  if (!path) return PV_FALLBACK;
+  try {
+    const r = await rcoStock(path);
+    if (!r) return PV_FALLBACK;
+    const pals = rcoColors(r);
+    let i = pals.findIndex(p => p.id === (LOOK_PAL[look] || "color_default"));
+    if (i < 0) i = pals.findIndex(p => p.id === "color_default");
+    if (i < 0) return PV_FALLBACK;
+    const changes = state.files.has(path) ? await rcoChanges(path) : new Map();
+    const mine = changes.get(`${pals[i].f.el}\t${pals[i].f.attr}`);
+    const eff = new Map(mine ? [...new TextDecoder().decode(mine).matchAll(COLOR_PAIR)].map(m => [m[2], Number(m[3])]) : pals[i].values);
+    const sets = colorEditSets(pals, i), stockOf = new Map(pals[i].values);
+    const named = (n, fb) => eff.has(n) ? rgbOf(eff.get(n)) : fb;
+    const picked = (set, fb) => {
+      if (!set) return fb;
+      const name = set.names.find(n => rgbOf(stockOf.get(n)) === set.base) || set.names[0];
+      return eff.has(name) ? rgbOf(eff.get(name)) : fb;
+    };
+    return {
+      accent: picked(sets.accent, named("focus.fill.enabled", PV_FALLBACK.accent)),
+      text: named("text.primary.enabled", picked(sets.text, PV_FALLBACK.text)),
+      panel: named("menu.fill.enabled", named("dialog.fill.enabled", PV_FALLBACK.panel)),
+      backdrop: named("base-mat.overlay.enabled", PV_FALLBACK.backdrop),
+      card: named("radio-button.overlay.fill.enabled", PV_FALLBACK.card),
+    };
+  } catch (e) { return PV_FALLBACK; }
+}
+
+/* The theme's home background as an object URL, fitted as the theme is, or null. */
+async function previewBackground(id) {
+  let files;
+  try { ({ files } = await api("GET", "/api/theme/files", { id })); } catch (e) { return null; }
+  const path = backgroundFile(files.map(f => f.path));
+  if (!path) return null;
+  try {
+    const res = await fetch(`/api/theme/file?${q({ id, path })}&v=${stamp}`);
+    if (!res.ok) return null;
+    let src, w, h;
+    if (/\.dds(\.zst)?$/i.test(path)) {
+      let bytes = new Uint8Array(await res.arrayBuffer());
+      if (/\.zst$/i.test(path)) bytes = unzstdStored(bytes);
+      src = await ddsCanvas(bytes); w = src.width; h = src.height;
+    } else {
+      const url = URL.createObjectURL(await res.blob());
+      try { [src, w, h] = await previewSource(url, /\.(mp4|webm|m4v)$/i.test(path)); }
+      finally { URL.revokeObjectURL(url); }
+    }
+    return URL.createObjectURL(await previewJpeg(src, w, h, state.fit));
+  } catch (e) { return null; }
+}
+
+/* A changed Appearance piece (its texture decoded, with transparency), or null. */
+async function previewAppearancePiece(id, look, which) {
+  if (look === "default") return null;
+  const name = which === "homeui" ? `homeui_${look}.dds` : `control_center_${look}_${which}.dds`;
+  const path = `/system/vsh_asset/${name}`;
+  if (!state.files.has(path)) return null;
+  try {
+    const res = await fetch(`/api/theme/file?${q({ id, path })}&v=${stamp}`);
+    if (!res.ok) return null;
+    let bytes = new Uint8Array(await res.arrayBuffer());
+    if (bytes[0] === 0x28 && bytes[1] === 0xb5 && bytes[2] === 0x2f && bytes[3] === 0xfd) bytes = unzstdStored(bytes);
+    const c = await ddsCanvas(bytes, true);
+    return await new Promise(r => c.toBlob(b => r(b ? URL.createObjectURL(b) : null), "image/png"));
+  } catch (e) { return null; }
+}
+
+/* A changed file that shows as an icon on the home screen. */
+const previewIconLike = path => isTitlePicture(path) || !!tileTitle(path) || (ICON_RE.test(path) && !BG_RE.test(path));
+
+/* Up to `max` of the theme's changed icon files, as object URLs, app icons first. */
+async function previewFileIcons(id, max) {
+  const rank = p => isTitlePicture(p) ? 0 : tileTitle(p) ? 1 : 2;
+  const paths = [...state.files].filter(previewIconLike).sort((a, b) => rank(a) - rank(b));
+  const out = [];
+  for (const path of paths) {
+    if (out.length >= max) break;
+    try {
+      const res = await fetch(`/api/theme/file?${q({ id, path })}&v=${stamp}`);
+      if (!res.ok) continue;
+      if (/\.dds(\.zst)?$/i.test(path)) {
+        let bytes = new Uint8Array(await res.arrayBuffer());
+        if (/\.zst$/i.test(path)) bytes = unzstdStored(bytes);
+        const c = await ddsCanvas(bytes, true);
+        out.push(await new Promise(r => c.toBlob(b => r(b ? URL.createObjectURL(b) : null), "image/png")));
+      } else {
+        out.push(URL.createObjectURL(await res.blob()));
+      }
+    } catch (e) { /* skip one that can't be read */ }
+  }
+  return out.filter(Boolean);
+}
+
+/* Up to `max` of the theme's changed interface (.rco) pictures, as object URLs. */
+async function previewRcoIcons(id, max) {
+  const path = rcoPaths()[0];
+  if (!path || !state.files.has(path)) return [];
+  try {
+    const changes = await rcoChanges(path);
+    if (!changes.size) return [];
+    const r = await rcoStock(path);
+    if (!r) return [];
+    const out = [];
+    for (const pic of rcoPictures(r)) {
+      if (out.length >= max) break;
+      const v = pic.files.find(f => changes.has(`${f.el}\t${f.attr}`));
+      if (!v) continue;
+      const d = changes.get(`${v.el}\t${v.attr}`), kind = pictureKind(d);
+      if (kind === "svg") out.push(URL.createObjectURL(new Blob([d], { type: "image/svg+xml" })));
+      else if (kind === "png") out.push(URL.createObjectURL(new Blob([d], { type: "image/png" })));
+    }
+    return out;
+  } catch (e) { return []; }
+}
+
+/* The theme's changed interface font, loaded as a FontFace; its family, or null. */
+let pvFont = null;
+async function previewFont(id) {
+  const fonts = [...state.files].filter(p => /\.otf$/i.test(p) && (FONT_LATIN.test(baseName(p)) || FONT_HOME.test(baseName(p))));
+  fonts.sort((a, b) => (FONT_LATIN.test(baseName(a)) ? 0 : 1) - (FONT_LATIN.test(baseName(b)) ? 0 : 1));
+  if (!fonts.length) return null;
+  try {
+    const res = await fetch(`/api/theme/file?${q({ id, path: fonts[0] })}&v=${stamp}`);
+    if (!res.ok) return null;
+    const ff = new FontFace("pvtheme", await res.arrayBuffer());
+    await ff.load();
+    document.fonts.add(ff);
+    pvFont = ff;
+    return "pvtheme";
+  } catch (e) { return null; }
+}
+
+let pvUrls = [], pvData = null, pvLooksArt = new Set();
+let pvState = { look: "default", view: "home" };
+function previewRevoke() { for (const u of pvUrls) URL.revokeObjectURL(u); pvUrls = []; }
+function previewDropFont() { if (pvFont) { try { document.fonts.delete(pvFont); } catch (e) { /* gone */ } pvFont = null; } }
+function previewClose() {
+  const ov = $("#pv-overlay");
+  if (ov) ov.remove();
+  document.removeEventListener("keydown", previewKey);
+  previewRevoke();
+  previewDropFont();
+  pvData = null;
+}
+function previewKey(e) { if (e.key === "Escape") previewClose(); }
+
+/* Fetch the shared pieces once (background, icons, font) into pvData. */
+async function previewGather(id) {
+  previewRevoke();
+  previewDropFont();
+  pvData = { id, bg: null, tiles: [], fontFam: null, art: {}, cc: {}, colors: {} };
+  const [bg, fileIcons, rcoIcons, fontFam] = await Promise.all([
+    previewBackground(id), previewFileIcons(id, 6), previewRcoIcons(id, 6), previewFont(id),
+  ]);
+  if (!$("#pv-overlay") || state.editId !== id) {
+    [bg, ...fileIcons, ...rcoIcons].filter(Boolean).forEach(u => URL.revokeObjectURL(u));
+    previewDropFont();
+    return false;
+  }
+  pvData.bg = bg;
+  pvData.tiles = [...fileIcons, ...rcoIcons].slice(0, 6);
+  pvData.fontFam = fontFam;
+  pvUrls.push(...[bg, ...fileIcons, ...rcoIcons].filter(Boolean));
+  return true;
+}
+async function pvArtFor(look) {
+  if (look in pvData.art) return pvData.art[look];
+  const u = await previewAppearancePiece(pvData.id, look, "homeui");
+  pvData.art[look] = u; if (u) pvUrls.push(u);
+  return u;
+}
+async function pvCcFor(look, which) {
+  const k = look + "/" + which;
+  if (k in pvData.cc) return pvData.cc[k];
+  const u = await previewAppearancePiece(pvData.id, look, which);
+  pvData.cc[k] = u; if (u) pvUrls.push(u);
+  return u;
+}
+async function pvColorsFor(look) {
+  if (pvData.colors[look]) return pvData.colors[look];
+  const c = await previewColorsForLook(look);
+  pvData.colors[look] = c;
+  return c;
+}
+
+function previewToolbar() {
+  const opts = Object.keys(LOOK_NAMES).map(l =>
+    `<option value="${l}" ${pvState.look === l ? "selected" : ""}>${esc(LOOK_NAMES[l])}${pvLooksArt.has(l) ? " ✦" : ""}</option>`).join("");
+  return `<div class="pv-tabs">
+      <button class="btn sm ${pvState.view === "home" ? "primary" : "ghost"}" data-act="pv-view" data-view="home">Home</button>
+      <button class="btn sm ${pvState.view === "cc" ? "primary" : "ghost"}" data-act="pv-view" data-view="cc">Control Center</button></div>
+    <label class="pv-looklbl">Appearance theme <select id="pv-look" style="width:auto">${opts}</select></label>`;
+}
+
+async function openPreview() {
+  const t = themeById(state.editId);
+  if (!t) return;
+  previewClose();
+  pvLooksArt = new Set([...state.files].map(p => (APPEARANCE_RE.exec(p) || [])[2]).filter(Boolean));
+  const firstArt = ["ps", "ps2", "ps3", "ps4"].find(l => pvLooksArt.has(l));
+  pvState = { look: firstArt || "default", view: "home" };
+  const ov = document.createElement("div");
+  ov.id = "pv-overlay";
+  ov.className = "pv-overlay";
+  ov.innerHTML = `<div class="pv-dialog" role="dialog" aria-modal="true" aria-label="Preview of ${esc(t.name)}">
+      <div class="pv-bar"><h2>Preview — ${esc(t.name)}</h2><span class="spacer"></span>
+        <button class="btn ghost sm" data-act="pv-refresh">Refresh</button>
+        <button class="btn sm" data-act="pv-close">Close</button></div>
+      <div class="pv-toolbar" id="pv-toolbar"></div>
+      <div class="pv-stage" id="pv-stage"><div class="pv-busy">Building the preview…</div></div>
+      <p class="pv-note">A stylized home screen and Control Center with this theme's background, colours, Appearance artwork, font and changed icons — not the console's exact layout. The real look shows on the console after you apply and use rest mode. Nothing here is sent to the console.</p>
+    </div>`;
+  document.body.append(ov);
+  ov.addEventListener("click", e => { if (e.target === ov) previewClose(); });
+  document.addEventListener("keydown", previewKey);
+  await previewRender(state.editId);
+}
+
+async function previewHomeHtml(look, colors) {
+  const art = await pvArtFor(look);
+  const t = themeById(pvData.id) || { name: "" };
+  const clock = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  const items = (pvData.tiles.length ? pvData.tiles : [null, null, null, null, null]).slice(0, 6);
+  const tileEls = items.map((u, i) => {
+    const focus = i === 0 ? " pv-focus" : "";
+    return u ? `<div class="pv-tile${focus}"><img alt="" src="${u}"></div>`
+             : `<div class="pv-tile pv-ph${focus}"><span>▢</span></div>`;
+  });
+  return `
+    ${pvData.bg ? `<img class="pv-bg" alt="" src="${pvData.bg}">` : ""}
+    <div class="pv-scrim"></div>
+    ${art ? `<img class="pv-art" alt="" src="${art}">` : ""}
+    <div class="pv-top">
+      <div class="pv-glyphs"><span class="pv-glyph"></span><span class="pv-glyph"></span><span class="pv-glyph"></span><span class="pv-glyph pv-avatar"></span></div>
+      <span class="pv-clock">${esc(clock)}</span></div>
+    <div class="pv-tiles">${tileEls.join("")}</div>
+    <div class="pv-cap"><h3 class="pv-name">${esc(t.name)}</h3>
+      <div class="pv-actions"><span class="pv-play">▶ Play</span><span class="pv-chip"></span><span class="pv-chip"></span></div></div>`;
+}
+
+async function previewCcHtml(look, colors) {
+  const [bottom, top] = await Promise.all([pvCcFor(look, "bottom"), pvCcFor(look, "top")]);
+  const clock = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  const icons = Array.from({ length: 7 }, (_, i) => `<span class="pv-cc-ic${i === 2 ? " pv-ccf" : ""}"></span>`).join("");
+  return `
+    ${pvData.bg ? `<img class="pv-bg" alt="" src="${pvData.bg}">` : ""}
+    <div class="pv-ccbd" style="background:${pvRgba(colors.backdrop, .64)}"></div>
+    <div class="pv-cc-bar"></div>
+    ${top ? `<img class="pv-cc-top" alt="" src="${top}">` : ""}
+    ${bottom ? `<img class="pv-cc-bottom" alt="" src="${bottom}">` : ""}
+    <div class="pv-cc-card" style="background:${pvRgba(colors.card, .9)}"></div>
+    <div class="pv-cc-clock">${esc(clock)}</div>
+    <div class="pv-cc-icons">${icons}</div>
+    <div class="pv-cc-label">Control Center · ${esc(LOOK_NAMES[look])}</div>`;
+}
+
+async function previewRender(id) {
+  let stage = $("#pv-stage");
+  if (!stage) return;
+  if (!pvData || pvData.id !== id) {
+    stage.innerHTML = `<div class="pv-busy">Building the preview…</div>`;
+    if (!await previewGather(id)) return;
+  }
+  const colors = await pvColorsFor(pvState.look);
+  stage = $("#pv-stage");
+  if (!stage || !$("#pv-overlay") || state.editId !== id) return;
+  const tb = $("#pv-toolbar"); if (tb) tb.innerHTML = previewToolbar();
+  stage.style.setProperty("--pv-accent", pvHex(colors.accent));
+  stage.style.setProperty("--pv-accent-ink", pvInk(colors.accent));
+  stage.style.setProperty("--pv-text", pvHex(colors.text));
+  stage.style.setProperty("--pv-panel", pvHex(colors.panel));
+  stage.style.fontFamily = pvData.fontFam ? `"${pvData.fontFam}", "SST", system-ui, sans-serif` : `"SST", system-ui, sans-serif`;
+  const html = pvState.view === "cc" ? await previewCcHtml(pvState.look, colors) : await previewHomeHtml(pvState.look, colors);
+  stage = $("#pv-stage");
+  if (stage && $("#pv-overlay") && state.editId === id) stage.innerHTML = html;
+}
+
 /* ================================================================ editor (theme builder) */
 
 async function renderEditor() {
@@ -3668,6 +4031,7 @@ async function renderEditor() {
       <select id="theme-select" aria-label="Theme" style="width:auto">${themes.map(x =>
         `<option value="${esc(x.id)}" ${x.id === t.id ? "selected" : ""}>${esc(x.name)}</option>`).join("")}</select>
       <span class="spacer"></span>
+      <button class="btn ghost" data-act="preview" data-id="${esc(t.id)}">Preview</button>
       <button class="btn ghost" data-act="export" data-id="${esc(t.id)}" id="edit-export" ${t.files || t.music ? "" : "disabled"}>Export</button>
       <button class="btn primary" data-act="apply" data-id="${esc(t.id)}" id="edit-apply" ${t.compatible && (t.files || t.music) ? "" : "disabled"}>${on ? "Re-apply to console" : "Apply to console"}</button>
     </div>
@@ -3706,7 +4070,8 @@ function renderAspect(asp) {
   let summary;
   if (asp.mode === "music") {
     const t = themeById(state.editId);
-    summary = state.files.has(HOME_MUSIC) ? `${t.music ? fmtTime(t.music) + " · " : ""}${gainLabel(t.gain || 0)}`
+    const length = isPlaylist(t) ? `Playlist of ${plural(themeTracks(t).length, "song")}, ${fmtTime(playlistSeconds(t))}` : t.music ? fmtTime(t.music) : "";
+    summary = state.files.has(HOME_MUSIC) ? `${length ? length + " · " : ""}${gainLabel(t.gain || 0)}`
       : t.music ? "Not converted to home music yet" : "No music yet";
   } else {
     const total = aspectAssets(asp).length;
@@ -3870,6 +4235,7 @@ function musicBody() {
     return `<p class="note">This firmware has no home music file (bgm_home.at9) to replace.</p>`;
   }
   if (state.trim && state.trim.id === t.id) return trimBody();
+  if (isPlaylist(t)) return playlistBody(t);
   const converted = state.files.has(HOME_MUSIC);
   if (!t.music && !converted) {
     return dropZone(aspectById("music"), "Drop a music file here",
@@ -3885,7 +4251,8 @@ function musicBody() {
       <div class="acts">
         ${t.music && !converted ? `<button class="btn sm primary" data-act="convert-music">Convert</button>` : ""}
         <button class="btn sm primary" data-act="convert-music" id="home-music-fix" hidden>Encode again</button>
-        ${t.music ? `<button class="btn sm" data-act="choose-part">Choose part</button>` : ""}
+        ${t.music ? `<button class="btn sm" data-act="choose-part">Choose part</button>
+          <button class="btn sm" data-act="song-add">Add song</button>${help(`Make a playlist: the songs play one after another, each its own part, then start again (or the last one keeps repeating). Up to ${MUSIC_MAX_TRACKS} songs, within the console's limit of about twice its own music's length.`)}` : ""}
         <button class="btn sm" data-act="attach-aspect" data-aspect="music">Replace</button>
         <button class="btn sm ghost danger" data-act="remove-music">Remove</button>
       </div></div>
@@ -3937,6 +4304,7 @@ function parseClock(text) {
   return m ? (+(m[1] || 0)) * 60 + +m[2] : NaN;
 }
 
+/* playlist:begin */
 /* The order things play in: segments [from, to] of the song (seconds), and
    where the repeating starts (in segment `seg`, at song time `at`). The home
    screen starts at the beginning of the first segment. */
@@ -4032,12 +4400,105 @@ function buildHomeMusic(chans, rate, part) {
   return { chans: out, intro, source, joint: segs.length > 1 ? offsets[1] : -1 };
 }
 
+/* What the home screen plays for a playlist: each song's part in turn, every
+   song first brought to the same loudness (the encoder then matches the whole
+   to the console's music), joined as `pl.join` says: an overlapping crossfade,
+   a fade out and in, or a straight cut. At the end it starts again from the
+   first song ("loop-all", joined the same way), or the last song repeats its
+   loop part ("loop-last", like a single song's "music part once, then the
+   loop part repeats"; with no loop part its whole part repeats). `tracks`:
+   [{ chans, start, end, loopStart, loopEnd }] in seconds of each song's audio,
+   in play order (end 0 = to the end); `pl`: { join, blend (seconds), endMode }.
+   `intro` is where the repeating starts in the result, in samples. */
+const PLAYLIST_LEVEL = 0.1;   /* RMS each song is brought to before they are joined */
+function buildPlaylist(tracks, rate, pl) {
+  const keepLast = pl.endMode === "loop-last";
+  const parts = tracks.map((t, k) => {
+    const n = t.chans[0].length, at = v => Math.max(0, Math.min(n, Math.round(v * rate)));
+    let y, intro = -1;
+    if (keepLast && k === tracks.length - 1) {
+      const end = t.end > 0 ? t.end : n / rate;
+      const loop = t.loopStart !== null && t.loopStart !== undefined && t.loopEnd > t.loopStart;
+      const built = buildHomeMusic(t.chans, rate, {
+        start: t.start, end, order: "music-first", loop: pl.join, blend: pl.blend,
+        loopStart: loop ? t.loopStart : t.start, loopEnd: loop ? t.loopEnd : end,
+      });
+      y = built.chans;
+      intro = built.intro;
+    } else {
+      const a = Math.min(at(t.start), n - 1), b = t.end > 0 ? Math.max(a + 1, at(t.end)) : n;
+      y = t.chans.slice(0, 2).map(c => c.slice(a, b));
+    }
+    let sum = 0, count = 0;
+    for (const c of y) for (let i = 0; i < c.length; i++) { sum += c[i] * c[i]; count++; }
+    const rms = Math.sqrt(sum / Math.max(count, 1)), g = rms > 1e-6 ? PLAYLIST_LEVEL / rms : 1;
+    if (g !== 1) for (const c of y) for (let i = 0; i < c.length; i++) c[i] *= g;
+    return { y, intro, len: y[0].length };
+  });
+  const c = pl.join === "cut" ? 0
+    : Math.max(0, Math.min(Math.round(pl.blend * rate), Math.floor(Math.min(...parts.map(p => p.len)) / 3)));
+  // A crossfade overlaps the songs; never as far as where a repeating last song lands.
+  const overlap = k => pl.join !== "crossfade" || k === 0 ? 0 : parts[k].intro >= 0 ? Math.min(c, parts[k].intro) : c;
+  const starts = [];
+  let total = 0;
+  parts.forEach((p, k) => { total -= overlap(k); starts.push(total); total += p.len; });
+  const out = [new Float32Array(total), new Float32Array(total)];
+  parts.forEach((p, k) => {
+    const o = starts[k], ov = overlap(k);
+    for (let ch = 0; ch < 2; ch++) {
+      const y = out[ch], s = p.y[ch];
+      for (let i = 0; i < ov; i++) {
+        const ang = (i + 0.5) / ov * Math.PI / 2;
+        y[o + i] = y[o + i] * Math.cos(ang) + s[i] * Math.sin(ang);
+      }
+      y.set(ov ? s.subarray(ov) : s, o + ov);
+    }
+    if (k > 0 && pl.join === "fade" && c > 0) {
+      const f = p.intro >= 0 ? Math.min(c, p.intro) : c;
+      for (let ch = 0; ch < 2; ch++) {
+        for (let i = 0; i < c; i++) out[ch][o - 1 - i] *= (i + 0.5) / c;
+        for (let i = 0; i < f; i++) out[ch][o + i] *= (i + 0.5) / f;
+      }
+    }
+  });
+  let intro = 0;
+  if (keepLast) intro = starts[parts.length - 1] + parts[parts.length - 1].intro;
+  else if (pl.join === "crossfade" && c > 0) {
+    // The end crossfades into the first song's opening; it plays on from just after it.
+    for (let ch = 0; ch < 2; ch++) {
+      const y = out[ch], head = y.slice(0, c);
+      for (let i = 0; i < c; i++) {
+        const ang = (i + 0.5) / c * Math.PI / 2;
+        y[total - c + i] = y[total - c + i] * Math.cos(ang) + head[i] * Math.sin(ang);
+      }
+    }
+    intro = c;
+  } else if (pl.join === "fade" && c > 0) {
+    for (let ch = 0; ch < 2; ch++) for (let i = 0; i < c; i++) {
+      out[ch][total - 1 - i] *= (i + 0.5) / c;
+      out[ch][i] *= (i + 0.5) / c;
+    }
+  }
+  return { chans: out, intro, starts, total };
+}
+/* playlist:end */
+
 /* Open the part editor. `chans` is the music at `rate`; `fresh` means it has
-   not been saved to the theme yet. */
-async function openTrim(id, chans, rate, part, fresh) {
+   not been saved to the theme yet. `track` makes it a playlist song's part:
+   { slot, pos, adding, name }; its length is what the other songs leave. */
+async function openTrim(id, chans, rate, part, fresh, track = null) {
   const stock = await stockAt9(HOME_MUSIC);
   const duration = chans[0].length / rate;
-  const max = at9MaxSamples(stock) / stock.file.config.rate;      /* the whole result, which can be longer than the song */
+  let max = at9MaxSamples(stock) / stock.file.config.rate;        /* the whole result, which can be longer than the song */
+  if (track) {
+    const t = themeById(id), tracks = themeTracks(t), pl = themePlaylist(t), n = track.adding ? tracks.length + 1 : tracks.length;
+    track.others = tracks.reduce((s, tr, k) => k === track.pos ? s : s + trackSeconds(tr, songDuration(t, tr.slot), pl, k === n - 1), 0);
+    track.total = max;
+    track.last = track.pos === n - 1;
+    track.loopLast = track.last && pl.endMode === "loop-last";
+    max -= track.others;
+    if (max < MIN_PART) throw new Error(`The other songs already fill the console's ${fmtClock(track.total)}. Shorten one of them first.`);
+  }
   const peaks = new Float32Array(2048);
   const per = chans[0].length / (peaks.length / 2);
   for (let b = 0; b < peaks.length / 2; b++) {
@@ -4055,9 +4516,14 @@ async function openTrim(id, chans, rate, part, fresh) {
     id, chans, rate, duration, max, peaks, fresh, start: part.start, end, order: hasLoop ? part.order : "music",
     playFrom: part.playFrom !== null && part.playFrom !== undefined ? part.playFrom : part.start,
     loopStart: hasLoop ? part.loopStart : 0, loopEnd: hasLoop ? (part.loopEnd > 0 ? Math.min(part.loopEnd, duration) : duration) : 0,
-    loop: part.loop, blend: part.blend,
+    loop: part.loop, blend: part.blend, track,
   };
-  if (!hasLoop) defaultLoop(state.trim);
+  if (track) {
+    /* the last song, when the playlist ends by repeating it: its part once, then what repeats (at first, all of it) */
+    state.trim.order = track.loopLast ? "music-first" : "music";
+    state.trim.playFrom = state.trim.start;
+    if (track.loopLast && !hasLoop) { state.trim.loopStart = state.trim.start; state.trim.loopEnd = end; }
+  } else if (!hasLoop) defaultLoop(state.trim);
   clampTrim("end");
   setAspectFlag(aspectById("music"), true);
   renderAspect(aspectById("music"));
@@ -4077,41 +4543,48 @@ function defaultLoop(t) {
 }
 
 function trimBody() {
-  const t = state.trim, loopOn = t.order !== "music";
+  const t = state.trim, loopOn = t.order !== "music", tr = t.track;
   const choice = LOOP_CHOICES.findIndex(([l, ms]) => l === t.loop && (l === "cut" || ms === Math.round(t.blend * 1000)));
   const handle = (id, label, v, loop) => `<button class="handle${loop ? " loop" : ""}" id="${id}" role="slider" aria-label="${label}"
       aria-valuemin="0" aria-valuemax="${t.duration.toFixed(1)}" aria-valuenow="${v.toFixed(1)}" aria-valuetext="${fmtClock(v)}" ${loop && !loopOn ? "hidden" : ""}></button>`;
   const field = (id, label, v) => `<label class="field">${label}<input type="text" id="${id}" value="${fmtClock(v)}" inputmode="decimal" autocomplete="off"></label>`;
+  /* A playlist song has a part (and, when the playlist ends by repeating it, what repeats); the order and the joints are the playlist's. */
+  const words = tr ? { part: "Part", starts: "Part starts", ends: "Part ends", loop: "Repeats", lstarts: "Repeats from", lends: "Repeats to" }
+                   : { part: "Music part", starts: "Music part starts", ends: "Music part ends", loop: "Loop part", lstarts: "Loop part starts", lends: "Loop part ends" };
+  const note = !tr ? "Choose the music part, and if you like a loop part and the order they play in."
+    : tr.loopLast ? "Choose the part of this song that plays, and the part that then repeats until you leave the home screen."
+    : "Choose the part of this song that plays in the playlist.";
   return `<div class="trim">
-      <p class="note">Choose the music part, and if you like a loop part and the order they play in. Drag the handles, move a selected handle with the arrow keys, or type the times.</p>
+      ${tr ? `<h3 class="sub-head" style="margin-top:0">${esc(tr.name || trackLabel(t.id, tr.slot, tr.pos))}${tr.adding ? ` <span class="tag">New song</span>` : ""}</h3>` : ""}
+      <p class="note">${note} Drag the handles, move a selected handle with the arrow keys, or type the times.</p>
       <div class="wave" id="wave"><canvas id="wave-canvas"></canvas>
-        ${handle("trim-start", "Music part start", t.start)}${handle("trim-end", "Music part end", t.end)}
-        ${handle("trim-lstart", "Loop part start", t.loopStart, true)}${handle("trim-lend", "Loop part end", t.loopEnd, true)}
+        ${handle("trim-start", `${words.part} start`, t.start)}${handle("trim-end", `${words.part} end`, t.end)}
+        ${handle("trim-lstart", words.lstarts, t.loopStart, true)}${handle("trim-lend", words.lends, t.loopEnd, true)}
         <button class="handle from" id="trim-from" role="slider" aria-label="Begins at" aria-valuemin="0"
-          aria-valuemax="${t.duration.toFixed(1)}" aria-valuenow="${t.playFrom.toFixed(1)}" aria-valuetext="${fmtClock(t.playFrom)}" ${loopOn ? "hidden" : ""}></button>
+          aria-valuemax="${t.duration.toFixed(1)}" aria-valuenow="${t.playFrom.toFixed(1)}" aria-valuetext="${fmtClock(t.playFrom)}" ${loopOn || tr ? "hidden" : ""}></button>
         <div class="start-flag" id="trim-flag" ${loopOn ? "" : "hidden"}></div>
         <div class="playhead" id="trim-playhead" hidden></div></div>
-      <div class="legend"><span class="key start"></span>Begins here<span class="key music"></span>Music part${loopOn ? `<span class="key loop"></span>Loop part` : ""}</div>
-      <div class="trim-fields">${field("trim-start-time", "Music part starts", t.start)}${field("trim-end-time", "Music part ends", t.end)}
-        ${loopOn ? "" : field("trim-from-time", "Begins at", t.playFrom)}</div>
-      <div class="trim-fields">
+      <div class="legend"><span class="key start"></span>Begins here<span class="key music"></span>${words.part}${loopOn ? `<span class="key loop"></span>${words.loop}` : ""}</div>
+      <div class="trim-fields">${field("trim-start-time", words.starts, t.start)}${field("trim-end-time", words.ends, t.end)}
+        ${loopOn || tr ? "" : field("trim-from-time", "Begins at", t.playFrom)}</div>
+      ${tr ? "" : `<div class="trim-fields">
         <label class="field">Play order
           <select id="trim-order">${ORDERS.map(([v, label]) => `<option value="${v}" ${v === t.order ? "selected" : ""}>${label}</option>`).join("")}</select></label>
-      </div>
-      ${loopOn ? `<div class="trim-fields">${field("trim-lstart-time", "Loop part starts", t.loopStart)}${field("trim-lend-time", "Loop part ends", t.loopEnd)}</div>` : ""}
-      <div class="trim-fields">
+      </div>`}
+      ${loopOn ? `<div class="trim-fields">${field("trim-lstart-time", words.lstarts, t.loopStart)}${field("trim-lend-time", words.lends, t.loopEnd)}</div>` : ""}
+      ${tr ? "" : `<div class="trim-fields">
         <label class="field">How the joints sound
           <select id="trim-loop">${LOOP_CHOICES.map(([, , label], i) => `<option value="${i}" ${i === (choice < 0 ? 1 : choice) ? "selected" : ""}>${label}</option>`).join("")}</select></label>
-      </div>
+      </div>`}
       <p class="note" id="trim-summary"></p>
-      <p class="note">${esc(MUSIC_PLACE_NOTE)}</p>
+      ${tr ? "" : `<p class="note">${esc(MUSIC_PLACE_NOTE)}</p>`}
       <div class="trim-actions">
         <button class="btn sm" data-act="trim-play" id="trim-play">Play</button>
-        <button class="btn sm" data-act="trim-seam">Hear where it loops</button>
+        ${!tr || tr.loopLast ? `<button class="btn sm" data-act="trim-seam">Hear where it loops</button>` : ""}
         <button class="btn sm" data-act="trim-joint" id="trim-joint" ${playPlan(trimPart(t)).segs.length > 1 ? "" : "hidden"}>Hear the change of part</button>
         <span class="spacer"></span>
         <button class="btn sm ghost" data-act="trim-cancel">Cancel</button>
-        <button class="btn sm primary" data-act="trim-save">Use this</button>
+        <button class="btn sm primary" data-act="trim-save">${tr && tr.adding ? "Add to the playlist" : "Use this"}</button>
       </div>
     </div>`;
 }
@@ -4162,6 +4635,10 @@ function clampTrim(moved) {
     keepFrom();
     if (t.order !== "music") range("loopStart", "loopEnd", moved === "lstart");
     moved = pass ? (moved === "end" ? "lend" : "end") : moved;
+  }
+  if (t.track && t.order !== "music") {   /* a playlist's last song repeats within its own part */
+    t.loopStart = Math.max(t.start, Math.min(t.loopStart, t.end - min));
+    t.loopEnd = Math.max(t.loopStart + min, Math.min(t.loopEnd, t.end));
   }
 }
 
@@ -4216,8 +4693,17 @@ function drawTrim() {
     if (field && document.activeElement !== field) field.value = fmtClock(v);
   }
   const total = trimLength(t);
-  const limit = total > t.max * 0.8 || t.duration > t.max ? ` In all ${fmtClock(total)}; the console allows up to ${fmtClock(t.max)}.` : "";
-  $("#trim-summary").textContent = describePlan(trimPart(t), t.duration) + limit;
+  if (t.track) {
+    const tr = t.track, then = tr.loopLast ? "" : tr.last ? " Then the playlist starts again." : " Then the next song plays.";
+    const whole = tr.loopLast && Math.abs(t.loopStart - t.start) < 0.05 && Math.abs(t.loopEnd - t.end) < 0.05;
+    const what = !tr.loopLast ? `Plays ${span([t.start, t.end], t.duration)}.`
+      : whole ? `Plays ${span([t.start, t.end], t.duration)}, then keeps repeating it.` : describePlan(trimPart(t), t.duration);
+    $("#trim-summary").textContent = `${what}${then}` +
+      ` The playlist in all: ${fmtClock(tr.others + total)} of up to ${fmtClock(tr.total)}.`;
+  } else {
+    const limit = total > t.max * 0.8 || t.duration > t.max ? ` In all ${fmtClock(total)}; the console allows up to ${fmtClock(t.max)}.` : "";
+    $("#trim-summary").textContent = describePlan(trimPart(t), t.duration) + limit;
+  }
   const joint = $("#trim-joint");
   if (joint) joint.hidden = playPlan(trimPart(t)).segs.length < 2;
 }
@@ -4245,7 +4731,7 @@ function setupTrim() {
       // Nearest edge. The lower band of the waveform belongs to the loop part,
       // and with "repeat the music part" the upper band to the start point.
       const y = (e.clientY - r.top) / r.height;
-      const lane = t.order !== "music" && y > 0.6 ? ["lstart", "lend"] : t.order === "music" && y < 0.3 ? ["from"] : ["start", "end"];
+      const lane = t.order !== "music" && y > 0.6 ? ["lstart", "lend"] : t.order === "music" && !t.track && y < 0.3 ? ["from"] : ["start", "end"];
       dragging = lane.reduce((a, b) => (Math.abs(v - t[EDGE_KEY[a]]) <= Math.abs(v - t[EDGE_KEY[b]]) ? a : b));
     }
     $(HANDLES[dragging]).classList.add("active");
@@ -4276,9 +4762,10 @@ function stopPreview() {
   try { preview.src.stop(); } catch (e) { /* already stopped */ }
   preview.ctx.close();
   preview = null;
-  const head = $("#trim-playhead"), play = $("#trim-play");
+  const head = $("#trim-playhead"), play = $("#trim-play"), plPlay = $("#pl-play");
   if (head) head.hidden = true;
   if (play) play.textContent = "Play";
+  if (plPlay) plPlay.textContent = "Play";
 }
 
 /* `around`: "loop" plays the seconds around the jump back, "joint" those
@@ -4320,6 +4807,7 @@ function playPreview(around) {
 }
 
 async function saveTrim() {
+  if (state.trim.track) return saveSongPart();
   const t = state.trim;
   stopPreview();
   const part = trimPart(t);
@@ -4329,6 +4817,8 @@ async function saveTrim() {
     if (t.fresh) {
       p.set("Sending the music to the console…", 0, 0.2);
       await uploadVerified("/api/theme/music", { id: t.id }, pcmWav(t.chans, t.rate));
+      localSet(trackNameKey(t.id, 1), t.name || null);
+      songCacheDrop(t.id, 1);
     }
     await api("POST", "/api/theme/settings", {
       id: t.id, start: Math.round(part.start * 1000), end: toEnd(part.end),
@@ -4410,6 +4900,7 @@ async function attachMusic(file) {
     const long = chans[0].length > keep;
     if (long) chans = trimWithFade(chans, keep, MUSIC_RATE);
     await openTrim(id, chans, MUSIC_RATE, { start: 0, end: 0, loop: "crossfade", blend: 2 }, true);
+    state.trim.name = songTitle(file);   /* shown if the song becomes the first of a playlist */
     p.done(long ? `Only the first ${fmtTime(keep / MUSIC_RATE)} of the song can be kept. Choose the part to use.`
       : "Choose the part of the song to use.", "");
     const handle = $("#trim-start");
@@ -4442,6 +4933,415 @@ async function reencodeMusic(id, gain) {
     await refreshStatus();
     p.done(`Home music encoded and verified (${fmtTime(r.seconds)}). Apply the theme to hear it.`, "ok");
   } catch (e) { p.done(e.message, "err"); }
+}
+
+/* ---- Home music: a playlist of songs ----
+
+   A theme can keep up to MUSIC_MAX_TRACKS songs (slot 1 is music.wav, the
+   others music2.wav …, as the plugin stores them). They play one after
+   another, then start again, or the last one keeps repeating. The plugin
+   keeps the songs, their order and parts; this page puts them together into
+   the one home music file, as it does a single song. Slot 1 holds a song
+   whenever the theme has music, so what looks for music.wav still finds it. */
+
+const MUSIC_MAX_TRACKS = 8;
+const SONG_PRE = 5;                  /* seconds kept before a song's part: crossfades reach back into it */
+const toMs = v => Math.round(v * 1000);
+
+/* The theme's songs in play order: [{ slot, start, end }] in seconds (end 0 = to the end of the song). */
+function themeTracks(t) {
+  if (!t) return [{ slot: 1, start: 0, end: 0 }];
+  const seq = t.musicSequence && t.musicSequence.length ? t.musicSequence : [1];
+  return seq.map((slot, i) => ({
+    slot,
+    start: ((t.musicStarts || [])[i] ?? (slot === 1 ? t.musicStart || 0 : 0)) / 1000,
+    end: ((t.musicEnds || [])[i] ?? (slot === 1 ? t.musicEnd || 0 : 0)) / 1000,
+  }));
+}
+const isPlaylist = t => !!t && themeTracks(t).length > 1;
+
+/* How the songs join and how the playlist ends, with the last song's repeating part (seconds), if it has one. */
+function themePlaylist(t) {
+  const loop = t.musicLoopStart >= 0 && t.musicLoopEnd > t.musicLoopStart;
+  return {
+    join: t.musicBetween || t.musicLoop || "crossfade",
+    blend: (t.musicBlend == null ? 2000 : t.musicBlend) / 1000,
+    endMode: t.musicEndMode === "loop-last" ? "loop-last" : "loop-all",
+    loopStart: loop ? t.musicLoopStart / 1000 : null, loopEnd: loop ? t.musicLoopEnd / 1000 : null,
+  };
+}
+
+/* Songs read from the console, kept while the page stays open: "id|slot" ->
+   { chans, rate, from, to, duration } (seconds), only the part the playlist
+   plays and a little before it. */
+const songCache = new Map();
+function songCacheDrop(id, slot) {
+  for (const k of [...songCache.keys()]) if (slot === undefined ? k.startsWith(`${id}|`) : k === `${id}|${slot}`) songCache.delete(k);
+}
+function songDuration(t, slot) {
+  const c = songCache.get(`${t.id}|${slot}`);
+  return c ? c.duration : slot === 1 ? t.music || 0 : 0;
+}
+function keepSong(id, slot, chans, rate, from, to) {
+  const a = Math.max(0, Math.floor(from * rate)), b = Math.max(a + 1, Math.min(chans[0].length, Math.ceil(to * rate)));
+  songCache.set(`${id}|${slot}`, { chans: chans.slice(0, 2).map(c => c.slice(a, b)), rate, from: a / rate, to: b / rate, duration: chans[0].length / rate });
+}
+
+/* How long a song plays in the playlist, in seconds (`dur`: the song's length, for an end of 0). */
+function trackSeconds(tr, dur, pl, last) {
+  const end = tr.end > 0 ? tr.end : dur;
+  let len = Math.max(0, end - tr.start);
+  if (last && pl.endMode === "loop-last" && pl.loopStart !== null && Math.abs(pl.loopEnd - end) > 1e-3) len += pl.loopEnd - pl.loopStart;
+  return len;
+}
+function playlistSeconds(t) {
+  const tracks = themeTracks(t), pl = themePlaylist(t);
+  return tracks.reduce((n, tr, i) => n + trackSeconds(tr, songDuration(t, tr.slot), pl, i === tracks.length - 1), 0);
+}
+
+const trackNameKey = (id, slot) => `track-name:${id}:${slot}`;
+const songTitle = file => file.name.replace(/\.[^.]+$/, "").slice(0, 80);
+/* A song's name as attached in this browser, or its place in the playlist. */
+function trackLabel(id, slot, pos) { return localGet(trackNameKey(id, slot)) || `Song ${pos + 1}`; }
+
+function freeSlot(t) {
+  const used = new Set(themeTracks(t).map(x => x.slot));
+  for (let s = 2; s <= MUSIC_MAX_TRACKS; s++) if (!used.has(s)) return s;
+  return 0;
+}
+
+/* A song from the console, decoded whole. */
+async function fetchSong(id, slot, onProgress) {
+  const res = await fetch(`/api/theme/music?${q({ id, slot })}`);
+  if (!res.ok) throw new Error("a song could not be read from the console");
+  const bytes = await readBytes(res, onProgress);
+  const { chans, rate } = wavChannels(bytes.byteOffset === 0 && bytes.buffer.byteLength === bytes.length ? bytes.buffer : bytes.slice().buffer);
+  return { chans: chans.length === 1 ? [chans[0], chans[0]] : chans, rate };
+}
+
+/* The part of a song the playlist plays: kept from before, or read from the console. */
+async function songPart(id, tr, onProgress) {
+  const key = `${id}|${tr.slot}`, from = Math.max(0, tr.start - SONG_PRE);
+  let c = songCache.get(key);
+  if (!c || c.from > from + 1e-3 || c.to < (tr.end > 0 ? Math.min(tr.end, c.duration) : c.duration) - 1e-3) {
+    const s = await fetchSong(id, tr.slot, onProgress);
+    const dur = s.chans[0].length / s.rate;
+    keepSong(id, tr.slot, s.chans, s.rate, from, tr.end > 0 ? Math.min(tr.end, dur) : dur);
+    c = songCache.get(key);
+  }
+  return c;
+}
+
+/* The playlist put together (buildPlaylist), its songs read first; the progress fills up to `upTo`. */
+async function playlistAudio(id, p, upTo) {
+  const t = themeById(id), tracks = themeTracks(t), pl = themePlaylist(t), input = [];
+  let rate = MUSIC_RATE;
+  for (let i = 0; i < tracks.length; i++) {
+    const tr = tracks[i], last = i === tracks.length - 1, label = `Reading song ${i + 1} of ${tracks.length}…`;
+    if (p) p.set(label, i / tracks.length * upTo, (i + 1) / tracks.length * upTo);
+    const c = await songPart(id, tr, f => { if (p && f >= 0) p.set(label, (i + f) / tracks.length * upTo, (i + 1) / tracks.length * upTo); });
+    const end = tr.end > 0 ? Math.min(tr.end, c.duration) : c.duration;
+    input.push({
+      chans: c.chans, start: tr.start - c.from, end: end - c.from,
+      loopStart: last && pl.loopStart !== null ? pl.loopStart - c.from : null,
+      loopEnd: last && pl.loopEnd !== null ? pl.loopEnd - c.from : null,
+    });
+    rate = c.rate;
+  }
+  return { built: buildPlaylist(input, rate, pl), rate, count: tracks.length };
+}
+
+/* Draw a section again, keeping the focus on the same control (a list that moved under it keeps its place). */
+function renderKeepingFocus(asp) {
+  const f = document.activeElement, box = $(`#aspect-${asp.id}`);
+  const inside = f && box && box.contains(f), act = inside && f.dataset.act, pos = inside && f.dataset.pos, fid = inside && f.id;
+  renderAspect(asp);
+  if (!inside) return;
+  const again = fid ? document.getElementById(fid) : act ? $(`[data-act="${act}"]${pos !== undefined ? `[data-pos="${pos}"]` : ""}`, box) : null;
+  if (again && !again.disabled) again.focus();
+}
+
+/* Put the playlist together into the theme's home music and send it, one at a
+   time: a change made while it runs makes it again afterwards, as things are then. */
+let rebuilding = null, rebuildAgain = false;
+function rebuildPlaylist(id) {
+  if (rebuilding) { rebuildAgain = true; return rebuilding; }
+  rebuilding = (async () => {
+    try {
+      do { rebuildAgain = false; await rebuildPlaylistNow(id); } while (rebuildAgain && state.editId === id);
+    } finally { rebuilding = null; }
+  })();
+  return rebuilding;
+}
+async function rebuildPlaylistNow(id) {
+  const p = progressToast("Making the home music…");
+  try {
+    const a = await playlistAudio(id, p, 0.2);
+    const r = await convertHomeMusic(id, a.built, a.rate, (themeById(id) || {}).gain || 0, p);
+    stamp = Date.now();
+    await refreshStatus();
+    p.done(`Home music set and verified: ${plural(a.count, "song")}, ${fmtClock(r.seconds)}${r.trimmed ? ", cut to the console's limit" : ""}. Apply the theme to hear it.`, "ok");
+  } catch (e) {
+    await refreshStatus();
+    p.done(e.message, "err");
+  }
+  if (state.route === "edit" && state.editId === id && !state.trim) renderKeepingFocus(aspectById("music"));
+}
+
+/* The theme's home music made again from its songs: the playlist, or the one song. */
+function remakeHomeMusic(id) {
+  const t = themeById(id);
+  return isPlaylist(t) ? rebuildPlaylist(id) : reencodeMusic(id, (t && t.gain) || 0);
+}
+
+function playlistBody(t) {
+  const id = t.id, tracks = themeTracks(t), pl = themePlaylist(t), total = playlistSeconds(t);
+  if (!state.musicMax) {
+    stockAt9(HOME_MUSIC).then(s => {
+      state.musicMax = at9MaxSamples(s) / s.file.config.rate;
+      if (state.route === "edit" && state.editId === id && !state.trim) renderKeepingFocus(aspectById("music"));
+    }).catch(() => {});
+  }
+  const max = state.musicMax, converted = state.files.has(HOME_MUSIC);
+  if (converted) checkHomeMusic(id);
+  const choice = LOOP_CHOICES.findIndex(([l, ms]) => l === pl.join && (l === "cut" || ms === Math.round(pl.blend * 1000)));
+  const rows = tracks.map((tr, i) => {
+    const last = i === tracks.length - 1, dur = songDuration(t, tr.slot), end = tr.end > 0 ? tr.end : dur;
+    const name = trackLabel(id, tr.slot, i), len = trackSeconds(tr, dur, pl, last);
+    const part = end > tr.start ? `${fmtClock(tr.start)} to ${fmtClock(end)}` : `From ${fmtClock(tr.start)} to the end`;
+    const repeat = !last || pl.endMode !== "loop-last" ? ""
+      : pl.loopStart !== null && Math.abs(pl.loopEnd - end) > 1e-3 ? `, then repeats ${fmtClock(pl.loopStart)} to ${fmtClock(pl.loopEnd)}`
+      : pl.loopStart !== null && pl.loopStart > tr.start + 0.05 ? `, then repeats from ${fmtClock(pl.loopStart)}` : ", then repeats";
+    return `<div class="row-item replaced">
+        <div class="info"><div class="file">${i + 1}. ${esc(name)}</div>
+          <div class="dir">${esc(part + repeat)}${len ? ` · ${fmtTime(len)}` : ""}</div></div>
+        <div class="acts">
+          <button class="btn sm ghost" data-act="song-up" data-pos="${i}" aria-label="Play ${esc(name)} earlier" ${i === 0 ? "disabled" : ""}>↑</button>
+          <button class="btn sm ghost" data-act="song-down" data-pos="${i}" aria-label="Play ${esc(name)} later" ${last ? "disabled" : ""}>↓</button>
+          <button class="btn sm" data-act="song-part" data-pos="${i}">Choose part</button>
+          <button class="btn sm" data-act="song-replace" data-pos="${i}">Replace</button>
+          <button class="btn sm ghost danger" data-act="song-remove" data-pos="${i}">Remove</button>
+        </div></div>`;
+  }).join("");
+  return `<div class="row-item replaced">
+      <div class="info"><div class="file">Playlist · ${plural(tracks.length, "song")}${total ? ` · ${fmtTime(total)}` : ""}</div>
+        <div class="dir" id="home-music-status">${converted ? "Checking the home music file…" : "Not made into the home music yet."}</div></div>
+      <div class="acts">
+        <button class="btn sm primary" data-act="convert-music" id="home-music-fix" ${converted ? "hidden" : ""}>${converted ? "Encode again" : "Make the home music"}</button>
+        <button class="btn sm" data-act="pl-play" id="pl-play">Play</button>
+        <button class="btn sm" data-act="pl-seam">Hear where it repeats</button>
+        <button class="btn sm ghost danger" data-act="remove-music">Remove all</button>
+      </div></div>
+    <div class="rows pl-songs">${rows}</div>
+    <div class="pl-foot">
+      <button class="btn sm" data-act="song-add" ${tracks.length >= MUSIC_MAX_TRACKS ? "disabled" : ""}>Add song</button>
+      <div class="pl-meter${max && total > max * 0.95 ? " full" : ""}">
+        <div class="progress" role="progressbar" aria-label="Length of the playlist" aria-valuemin="0" aria-valuemax="${Math.round(max || 0)}" aria-valuenow="${Math.round(total)}"><i style="width:${max ? Math.min(100, total / max * 100).toFixed(1) : 0}%"></i></div>
+        <span>${max ? `${fmtTime(total)} of up to ${fmtTime(max)}` : "Reading the console's limit…"}${help("The console plays home music up to about twice as long as its own. Each song's part counts, and what a last song repeats; a crossfade between songs makes the whole a little shorter.")}</span>
+      </div></div>
+    <div class="trim-fields">
+      <label class="field">How the songs join
+        <select id="pl-join">${LOOP_CHOICES.map(([, , label], i) => `<option value="${i}" ${i === (choice < 0 ? 1 : choice) ? "selected" : ""}>${label}</option>`).join("")}</select></label>
+      <label class="field">At the end
+        <select id="pl-end">
+          <option value="loop-all" ${pl.endMode === "loop-all" ? "selected" : ""}>Start again from the first song</option>
+          <option value="loop-last" ${pl.endMode === "loop-last" ? "selected" : ""}>Keep repeating the last song</option>
+        </select></label>
+    </div>
+    <label class="field">Loudness <span id="gain-label">${esc(gainLabel(t.gain || 0))}</span>
+      <input type="range" min="-12" max="12" step="1" value="${t.gain || 0}" id="music-gain"></label>
+    <p class="note">Each song is brought to the same loudness first, so none is much louder than the others. Song names are remembered by this browser.${converted ? ` ${esc(MUSIC_HEAR_NOTE)} ${esc(MUSIC_PLACE_NOTE)}` : ""}</p>`;
+}
+
+/* Adding or replacing a song opens the part editor; nothing is saved until "Use this". */
+async function addSong() {
+  const id = state.editId, t = themeById(id), slot = freeSlot(t);
+  if (!slot) return toast(`A playlist holds up to ${MUSIC_MAX_TRACKS} songs.`, "err");
+  const file = await pickFile("audio/*");
+  if (file) await openSongEditor(id, file, { slot, pos: themeTracks(t).length, adding: true });
+}
+async function replaceSong(pos) {
+  const id = state.editId, tr = themeTracks(themeById(id))[pos];
+  if (!tr) return;
+  const file = await pickFile("audio/*");
+  if (file) await openSongEditor(id, file, { slot: tr.slot, pos });
+}
+async function openSongEditor(id, file, track) {
+  const p = progressToast("Reading music…");
+  try {
+    let chans = await decodeAudio(file, MUSIC_RATE, 2);
+    const keep = Math.floor(MUSIC_SOURCE_MAX_BYTES / 4), long = chans[0].length > keep;
+    if (long) chans = trimWithFade(chans, keep, MUSIC_RATE);
+    const pl = themePlaylist(themeById(id));
+    track.name = songTitle(file);
+    await openTrim(id, chans, MUSIC_RATE, { start: 0, end: 0, loop: pl.join, blend: pl.blend }, true, track);
+    p.done(long ? `Only the first ${fmtTime(keep / MUSIC_RATE)} of the song can be kept. Choose the part to use.`
+      : "Choose the part of the song to use.", "");
+    const handle = $("#trim-start");
+    if (handle) handle.focus();
+  } catch (e) { p.done(e.message, "err"); }
+}
+async function openSongPart(pos) {
+  const id = state.editId, t = themeById(id), tracks = themeTracks(t), tr = tracks[pos];
+  if (!tr) return;
+  const pl = themePlaylist(t), repeats = pos === tracks.length - 1 && pl.endMode === "loop-last" && pl.loopStart !== null;
+  const p = progressToast("Reading the song…");
+  try {
+    const s = await fetchSong(id, tr.slot, f => { if (f >= 0) p.set("Reading the song…", f); });
+    await openTrim(id, s.chans, s.rate, {
+      start: tr.start, end: tr.end, loop: pl.join, blend: pl.blend, order: "music",
+      loopStart: repeats ? pl.loopStart : null, loopEnd: repeats ? pl.loopEnd : null,
+    }, false, { slot: tr.slot, pos, name: localGet(trackNameKey(id, tr.slot)) || "" });
+    p.done("Choose the part of the song to use.", "");
+    const handle = $("#trim-start");
+    if (handle) handle.focus();
+  } catch (e) { p.done(e.message, "err"); }
+}
+
+async function saveSongPart() {
+  const t = state.trim, tr = t.track, id = t.id;
+  stopPreview();
+  const p = progressToast(tr.adding ? "Adding the song…" : "Saving the song's part…");
+  try {
+    const seq = themeTracks(themeById(id)).map(x => x.slot);
+    if (t.fresh) {
+      p.set("Sending the song to the console…", 0, 0.9);
+      await uploadVerified("/api/theme/music", { id, slot: tr.slot }, pcmWav(t.chans, t.rate));
+      localSet(trackNameKey(id, tr.slot), tr.name || null);
+    }
+    const params = tr.slot === 1 ? { start: toMs(t.start), end: toMs(t.end), play_from: -1 }
+                                 : { [`start${tr.slot}`]: toMs(t.start), [`end${tr.slot}`]: toMs(t.end) };
+    if (tr.adding) {
+      /* a new last song: nothing of the old last one's repeat carries over; one song becomes the first of a playlist */
+      const next = seq.concat(tr.slot);
+      Object.assign(params, { sequence: next.join(","), tracks: next.length, loop_start: -1, loop_end: -1 });
+      if (seq.length === 1) params.order = "music";
+    }
+    if (tr.loopLast) Object.assign(params, { loop_start: toMs(t.loopStart), loop_end: toMs(t.loopEnd) });
+    await api("POST", "/api/theme/settings", { id, ...params });
+    keepSong(id, tr.slot, t.chans, t.rate, Math.max(0, t.start - SONG_PRE), t.end);
+    state.trim = null;
+    await refreshStatus();
+    p.done("", "");
+  } catch (e) {
+    await refreshStatus();
+    p.done(e.message, "err");
+    renderAspect(aspectById("music"));
+    return;
+  }
+  renderAspect(aspectById("music"));
+  await rebuildPlaylist(id);
+}
+
+async function removeSong(pos) {
+  const id = state.editId, tracks = themeTracks(themeById(id)), gone = tracks[pos];
+  if (!gone || tracks.length < 2) return;
+  stopPreview();
+  const p = progressToast("Removing the song…");
+  try {
+    const rest = tracks.filter((_, k) => k !== pos), params = {};
+    if (gone.slot === 1) {
+      /* music.wav stays the theme's song: the next song moves into it */
+      const mover = rest[0];
+      p.set("Moving a song…", 0.05, 0.9);
+      const res = await fetch(`/api/theme/music?${q({ id, slot: mover.slot })}`);
+      if (!res.ok) throw new Error("a song could not be read from the console");
+      await uploadVerified("/api/theme/music", { id, slot: 1 }, new Blob([await res.arrayBuffer()]));
+      await api("DELETE", "/api/theme/music", { id, slot: mover.slot });
+      localSet(trackNameKey(id, 1), localGet(trackNameKey(id, mover.slot)));
+      localSet(trackNameKey(id, mover.slot), null);
+      const kept = songCache.get(`${id}|${mover.slot}`);
+      songCacheDrop(id, 1);
+      songCacheDrop(id, mover.slot);
+      if (kept) songCache.set(`${id}|1`, kept);
+      Object.assign(params, { start: toMs(mover.start), end: toMs(mover.end), play_from: -1 });
+      mover.slot = 1;
+    } else {
+      await api("DELETE", "/api/theme/music", { id, slot: gone.slot });
+      localSet(trackNameKey(id, gone.slot), null);
+      songCacheDrop(id, gone.slot);
+    }
+    const seq = rest.map(x => x.slot);
+    Object.assign(params, { sequence: seq.join(","), tracks: seq.length });
+    if (pos === tracks.length - 1 || seq.length === 1) Object.assign(params, { loop_start: -1, loop_end: -1, order: "music" });
+    await api("POST", "/api/theme/settings", { id, ...params });
+    await refreshStatus();
+    p.done("", "");
+  } catch (e) {
+    await refreshStatus();
+    p.done(e.message, "err");
+    renderAspect(aspectById("music"));
+    return;
+  }
+  renderAspect(aspectById("music"));
+  await remakeHomeMusic(id);
+}
+
+async function moveSong(pos, dir) {
+  const id = state.editId, tracks = themeTracks(themeById(id)), to = pos + dir;
+  if (to < 0 || to >= tracks.length) return;
+  stopPreview();
+  const seq = tracks.map(x => x.slot);
+  [seq[pos], seq[to]] = [seq[to], seq[pos]];
+  const params = { sequence: seq.join(","), tracks: seq.length };
+  if (seq[seq.length - 1] !== tracks[tracks.length - 1].slot) Object.assign(params, { loop_start: -1, loop_end: -1 });
+  try {
+    await api("POST", "/api/theme/settings", { id, ...params });
+    await refreshStatus();
+  } catch (e) { return toast(e.message, "err"); }
+  const box = $("#aspect-music");
+  renderAspect(aspectById("music"));
+  /* the focus follows the song */
+  const same = $(`[data-act="${dir < 0 ? "song-up" : "song-down"}"][data-pos="${to}"]`, box);
+  const other = $(`[data-act="${dir < 0 ? "song-down" : "song-up"}"][data-pos="${to}"]`, box);
+  if (same && !same.disabled) same.focus(); else if (other) other.focus();
+  await rebuildPlaylist(id);
+}
+
+async function setPlaylistJoin(i) {
+  const id = state.editId, [join, blend] = LOOP_CHOICES[i] || LOOP_CHOICES[1];
+  try {
+    await api("POST", "/api/theme/settings", { id, between: join, loop: join, blend });
+    await refreshStatus();
+  } catch (e) { return toast(e.message, "err"); }
+  await rebuildPlaylist(id);
+}
+async function setPlaylistEnd(mode) {
+  const id = state.editId;
+  try {
+    await api("POST", "/api/theme/settings", { id, end_mode: mode });
+    await refreshStatus();
+  } catch (e) { return toast(e.message, "err"); }
+  renderKeepingFocus(aspectById("music"));
+  await rebuildPlaylist(id);
+}
+
+/* Play the playlist as the console will loop it (`around`: only the seconds around where it repeats). */
+async function playPlaylist(around) {
+  stopPreview();
+  const Ctx = window.AudioContext || window.webkitAudioContext;
+  if (!Ctx) return toast("This browser cannot play audio previews.", "err");
+  const ctx = new Ctx();     /* made at the press, so the browser lets it play */
+  const id = state.editId, p = progressToast("Putting the playlist together…");
+  let a;
+  try { a = await playlistAudio(id, p, 1); p.done("", ""); }
+  catch (e) { ctx.close(); return p.done(e.message, "err"); }
+  if (state.editId !== id || state.trim || !$("#pl-play") || preview) { ctx.close(); return; }
+  if (ctx.state === "suspended") await ctx.resume().catch(() => {});
+  const [L, R] = a.built.chans, buf = ctx.createBuffer(2, L.length, a.rate);
+  buf.copyToChannel(L, 0);
+  buf.copyToChannel(R, 1);
+  const src = ctx.createBufferSource();
+  src.buffer = buf;
+  src.loop = true;
+  src.loopStart = a.built.intro / a.rate;
+  src.loopEnd = buf.duration;
+  src.connect(ctx.destination);
+  const offset = around ? Math.max(0, buf.duration - 5) : 0;
+  src.start(0, offset);
+  preview = { ctx, src, offset, began: ctx.currentTime, frame: 0, timer: around ? setTimeout(stopPreview, 10000) : 0 };
+  const play = $("#pl-play");
+  if (play && !around) play.textContent = "Stop";
 }
 
 function pickFile(accept) {
@@ -4558,8 +5458,10 @@ async function exportTheme(id) {
       `music_start=${t.musicStart || 0}\nmusic_end=${t.musicEnd || 0}\n` +
       `music_loop_start=${t.musicLoopStart == null ? -1 : t.musicLoopStart}\nmusic_loop_end=${t.musicLoopEnd == null ? -1 : t.musicLoopEnd}\n` +
       `music_order=${t.musicOrder || "music"}\nmusic_play_from=${t.musicPlayFrom == null ? -1 : t.musicPlayFrom}\n` +
-      `music_loop=${t.musicLoop || "crossfade"}\nmusic_blend=${t.musicBlend == null ? 2000 : t.musicBlend}\n`) }];
-    const total = files.length + (t.music ? 1 : 0);
+      `music_loop=${t.musicLoop || "crossfade"}\nmusic_blend=${t.musicBlend == null ? 2000 : t.musicBlend}\n` + playlistIni(t)) }];
+    /* a playlist's other songs, music2.wav … beside music.wav */
+    const songs = t.music ? themeTracks(t).filter(x => x.slot !== 1) : [];
+    const total = files.length + (t.music ? 1 : 0) + songs.length;
     for (let i = 0; i < files.length; i++) {
       const res = await fetch(`/api/theme/file?${q({ id, path: files[i].path })}`);
       if (!res.ok) throw new Error(`Could not read ${files[i].path}`);
@@ -4570,6 +5472,12 @@ async function exportTheme(id) {
       const res = await fetch(`/api/theme/music?${q({ id })}`);
       if (!res.ok) throw new Error("Could not read the music");
       out.push({ path: "music.wav", data: new Uint8Array(await res.arrayBuffer()) });
+    }
+    for (let i = 0; i < songs.length; i++) {
+      p.set(`Exporting ${t.name}: song ${i + 2} of ${songs.length + 1}…`, (files.length + 1 + i) / total, (files.length + 2 + i) / total);
+      const res = await fetch(`/api/theme/music?${q({ id, slot: songs[i].slot })}`);
+      if (!res.ok) throw new Error("Could not read a song of the playlist");
+      out.push({ path: `music${songs[i].slot}.wav`, data: new Uint8Array(await res.arrayBuffer()) });
     }
     for (const [kind, name] of PREVIEW_FILES) {
       const res = await fetch(`/api/theme/preview?${q({ id, kind })}`);
@@ -4586,8 +5494,15 @@ async function exportTheme(id) {
     setTimeout(() => URL.revokeObjectURL(a.href), 10000);
     const mb = (zip.size / 1048576).toFixed(zip.size < 10485760 ? 1 : 0);
     p.done(`Saved ${id}.zip: ${describeFiles(files.map(f => f.path)) || "no theme files"}` +
-      `${t.music ? ", the song" : ""}, ${mb} MB, verified.`, "ok");
+      `${songs.length ? `, ${plural(songs.length + 1, "song")}` : t.music ? ", the song" : ""}, ${mb} MB, verified.`, "ok");
   } catch (e) { p.done(e.message, "err"); }
+}
+
+/* theme.ini's playlist lines: the songs' order, each added song's part, how they join and how it ends. */
+function playlistIni(t) {
+  const tracks = themeTracks(t), pl = themePlaylist(t);
+  return `music_tracks=${tracks.length}\nmusic_between=${pl.join}\nmusic_end_mode=${pl.endMode}\nmusic_sequence=${tracks.map(x => x.slot).join(",")}\n` +
+    tracks.filter(x => x.slot !== 1).map(x => `music${x.slot}_start=${toMs(x.start)}\nmusic${x.slot}_end=${toMs(x.end)}\n`).join("");
 }
 
 /* "15 backgrounds, the home music and 2 other files", for export and import. */
@@ -4611,6 +5526,16 @@ async function importEntries(entries, fallbackName) {
   const meta = ini ? parseIni(await (await ini.blob()).text()) : {};
   const prefix = ini ? ini.path.slice(0, -"theme.ini".length) : "";
   const music = entries.find(e => e.path === prefix + "music.wav");
+  /* A playlist: its other songs (music2.wav …) and their order; only songs that are in the zip, and none without music.wav. */
+  const songs = [];
+  for (let s = 2; music && s <= MUSIC_MAX_TRACKS; s++) {
+    const e = entries.find(x => x.path === prefix + `music${s}.wav`);
+    if (e) songs.push({ slot: s, e });
+  }
+  const present = new Set(music ? [1, ...songs.map(x => x.slot)] : []);
+  const seq = [...new Set(String(meta.music_sequence || "1").split(",").map(Number).filter(s => present.has(s)))];
+  if (music && !seq.includes(1)) seq.unshift(1);
+  const playlist = seq.length > 1;
   const pictures = PREVIEW_FILES.map(([kind, name]) => [kind, entries.find(e => e.path === prefix + name)]).filter(([, e]) => e);
   /* Everything under the theme's files/ folder (the console decides what it
      accepts); without a theme.ini, anything under a themable folder. */
@@ -4633,13 +5558,23 @@ async function importEntries(entries, fallbackName) {
                               ["music_loop", "loop"], ["music_blend", "blend"]]) {
     if (meta[key] !== undefined && meta[key] !== "") settings[param] = meta[key];
   }
+  if (playlist) {
+    Object.assign(settings, { sequence: seq.join(","), tracks: seq.length });
+    if (meta.music_between) settings.between = meta.music_between;
+    if (meta.music_end_mode) settings.end_mode = meta.music_end_mode;
+    for (const s of seq) {
+      if (s === 1) continue;
+      for (const k of ["start", "end"]) if (meta[`music${s}_${k}`] !== undefined && meta[`music${s}_${k}`] !== "") settings[`${k}${s}`] = meta[`music${s}_${k}`];
+    }
+  }
   await api("POST", "/api/theme/settings", settings).catch(() => {});
   await refreshStatus();
   const p = progressToast(`Importing ${name}…`);
   let ok = 0, skipped = 0;
   const added = [], why = [];
-  const convert = music && !files.some(f => f.asset === HOME_MUSIC);   /* exported before 1.10 */
-  const total = files.length + (music ? 1 : 0) + (convert ? 1 : 0);
+  const convert = music && !files.some(f => f.asset === HOME_MUSIC);   /* exported before 1.10, or without its home music */
+  const extra = songs.filter(x => playlist && seq.includes(x.slot));
+  const total = files.length + (music ? 1 : 0) + extra.length + (convert ? 1 : 0);
   for (let i = 0; i < files.length; i++) {
     p.set(`Importing ${name}… ${i + 1}/${total}`, i / total, (i + 1) / total);
     try { await uploadVerified("/api/theme/file", { id, path: files[i].asset }, await files[i].blob()); ok++; added.push(files[i].asset); }
@@ -4652,7 +5587,7 @@ async function importEntries(entries, fallbackName) {
       p.set(`Importing ${name}: the music…`, files.length / total, (files.length + 1) / total);
       await uploadVerified("/api/theme/music", { id }, blob);
       ok++;
-      if (convert) {
+      if (convert && !playlist) {
         const { chans, rate } = wavChannels(await blob.arrayBuffer());
         const stereo = chans.length === 1 ? [chans[0], chans[0]] : chans;
         await convertHomeMusic(id, buildHomeMusic(stereo, rate, themePart(themeById(id) || {})), rate, gain, p);
@@ -4660,6 +5595,22 @@ async function importEntries(entries, fallbackName) {
         added.push(HOME_MUSIC);
       }
     } catch (e) { skipped++; why.push(`music: ${e.message}`); }
+  }
+  for (let i = 0; i < extra.length; i++) {
+    const done = files.length + 1 + i;
+    p.set(`Importing ${name}: song ${i + 2} of ${extra.length + 1}…`, done / total, (done + 1) / total);
+    try { await uploadVerified("/api/theme/music", { id, slot: extra[i].slot }, await extra[i].e.blob()); ok++; }
+    catch (e) { skipped++; why.push(`music${extra[i].slot}.wav: ${e.message}`); }
+  }
+  if (convert && playlist && music) {
+    try {
+      await refreshStatus();
+      const a = await playlistAudio(id, null, 0);
+      p.set(`Importing ${name}: making the home music…`, (total - 1) / total, 1);
+      await convertHomeMusic(id, a.built, a.rate, gain, p);
+      ok++;
+      added.push(HOME_MUSIC);
+    } catch (e) { skipped++; why.push(`home music: ${e.message}`); }
   }
   for (const [kind, e] of pictures) {
     try { await uploadVerified("/api/theme/preview", { id, kind }, await e.blob()); } catch (err) { /* optional */ }
@@ -4720,6 +5671,10 @@ document.addEventListener("click", async e => {
   const asp = el.dataset.aspect && aspectById(el.dataset.aspect);
   switch (el.dataset.act) {
     case "apply": return applyTheme(id);
+    case "preview": return openPreview();
+    case "pv-close": return previewClose();
+    case "pv-view": pvState.view = el.dataset.view; return previewRender(state.editId);
+    case "pv-refresh": pvData = null; return previewRender(state.editId);
     case "export": return exportTheme(id);
     case "duplicate": return duplicateTheme(id);
     case "save": return saveTheme(id);
@@ -4803,9 +5758,17 @@ document.addEventListener("click", async e => {
       toast("Home music is back to stock in this theme.", "ok");
       return renderAspect(aspectById("music"));
     case "convert-music":
-      await reencodeMusic(state.editId, themeById(state.editId).gain || 0);
+      await remakeHomeMusic(state.editId);
       return renderAspect(aspectById("music"));
     case "choose-part": return openThemePart(state.editId);
+    case "song-add": return addSong();
+    case "song-part": return openSongPart(+el.dataset.pos);
+    case "song-replace": return replaceSong(+el.dataset.pos);
+    case "song-remove": el.disabled = true; el.textContent = "Removing…"; return removeSong(+el.dataset.pos);
+    case "song-up": return moveSong(+el.dataset.pos, -1);
+    case "song-down": return moveSong(+el.dataset.pos, 1);
+    case "pl-play": return preview && !preview.timer ? stopPreview() : playPlaylist(false);
+    case "pl-seam": return playPlaylist(true);
     case "rco-number": return numberPictures(el.dataset.path, el.dataset.vector === "1");
     case "rco-retry": return rcoRetry();
     case "rco-reset": await resetAssets([{ path: el.dataset.path }]); return renderAspect(aspectById("interface"));
@@ -4975,6 +5938,9 @@ document.addEventListener("change", async e => {
   }
   if (e.target.dataset && e.target.dataset.pad) return placementChanged(e.target.dataset.pad, false);
   const t = e.target;
+  if (t.id === "pv-look") { pvState.look = t.value; return previewRender(state.editId); }
+  if (t.id === "pl-join") return setPlaylistJoin(+t.value);
+  if (t.id === "pl-end") return setPlaylistEnd(t.value);
   if (t.id === "theme-select") { location.hash = `#/edit/${encodeURIComponent(t.value)}`; return; }
   if (t.id === "keep-originals") {
     try {
@@ -5021,7 +5987,7 @@ document.addEventListener("change", async e => {
       const id = state.editId;
       await api("POST", "/api/theme/settings", { id, gain: t.value });
       await refreshStatus();
-      await reencodeMusic(id, +t.value);
+      await remakeHomeMusic(id);
       renderAspect(aspectById("music"));
     }
   } catch (err) { toast(err.message, "err"); }

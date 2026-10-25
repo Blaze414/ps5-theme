@@ -5,7 +5,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#define PLUGIN_VERSION "1.60"
+#define PLUGIN_VERSION "1.61"
 #define TITLE_ID       "THEM00001"
 #define WEB_PORT       8095
 
@@ -106,10 +106,11 @@ int         font_check_mem(const uint8_t *buf, size_t n, char *why, size_t len);
    browser encodes it. The theme also keeps the source as 48 kHz 16-bit
    stereo PCM, so the music can be encoded again at another loudness or for a
    console whose home music has a different format. */
-#define MUSIC_FILE      "music.wav"
+#define MUSIC_FILE      "music.wav"       /* track 1's source; added tracks are music2.wav, music3.wav, … */
 #define MUSIC_MAX_BYTES (128ull << 20)
 #define MUSIC_RATE      48000
 #define HOME_MUSIC      "/system_ex/vsh_asset/bgm_home.at9"
+#define MUSIC_MAX_TRACKS 8                 /* a playlist's songs; the console caps playback at ~2× its own track */
 
 /* Installed games' and apps' metadata, one folder per title: their icons and
    other pictures may be themed (only pictures: the rest is the system's).
@@ -138,15 +139,29 @@ int         font_check_mem(const uint8_t *buf, size_t n, char *why, size_t len);
      music        the music part repeats
      loop-first   the loop part once, then the music part repeats
      alternate    the loop part, then the music part, over and over
-     music-first  the music part once, then the loop part repeats */
+     music-first  the music part once, then the loop part repeats
+
+   A playlist (tracks >= 2) plays several source songs in sequence, each its
+   own part [start,end], joined by `between`; at the end it loops back to the
+   first (end_mode "loop-all") or repeats the last track's loop part
+   ("loop-last", using loop_start/loop_end on the last slot). The browser
+   assembles all of it into the one bgm_home.at9; the plugin only stores the
+   sources (music.wav, music2.wav, …) and these settings. Per-track parts are
+   kept per slot (track_start_ms[slot-1]); `seq` is the play order of slots. */
 typedef struct {
   int gain;                              /* dB */
-  int start_ms, end_ms;
+  int start_ms, end_ms;                  /* slot 1's part; also the single song when tracks == 1 */
   int play_from_ms;                      /* "music" order: where playback starts, -1 = the start */
-  int loop_start_ms, loop_end_ms;
+  int loop_start_ms, loop_end_ms;        /* single song's loop part, or the last track's for "loop-last" */
   char order[12];
-  char loop[12];                         /* "crossfade", "fade" or "cut" */
+  char loop[12];                         /* joint at the loop point: "crossfade", "fade" or "cut" */
   int blend_ms;                          /* length of the crossfade or fades */
+  int tracks;                            /* number of playlist tracks, 1 .. MUSIC_MAX_TRACKS */
+  int seq[MUSIC_MAX_TRACKS];             /* play order, as slot numbers (1-based) */
+  int track_start_ms[MUSIC_MAX_TRACKS];  /* each slot's part, indexed by slot - 1 (slot 1 mirrors start_ms) */
+  int track_end_ms[MUSIC_MAX_TRACKS];
+  char between[12];                      /* joint between songs: "crossfade", "fade" or "cut" */
+  char end_mode[12];                     /* "loop-all" or "loop-last" */
 } music_settings_t;
 int   music_wav_ok(const char *path, wav_info_t *info, char *why, size_t len);
 
@@ -212,6 +227,8 @@ void themes_unlock(void);
 void read_music_settings(const char *id, music_settings_t *m);
 int  music_loop_valid(const char *loop);
 int  music_order_valid(const char *order);
+int  music_end_mode_valid(const char *mode);
+void music_source_file(int slot, char *out, size_t size);   /* "music.wav" or "music<slot>.wav" */
 /* Where the system version of `asset` can be read. While a theme is applied
    the system path shows the theme's version, so every apply keeps a copy of
    each file it replaces under STOCK_DIR/<firmware>/. */

@@ -75,6 +75,13 @@ between themes.
   (a file `originals-off` in its folder) and goes with a copy of it.
 - **Export** and **Apply to console** act on the theme as it is now. They are
   available as soon as the theme has anything in it.
+- **Preview** shows a home screen and a Control Center drawn from the theme:
+  its background, its colours, the Appearance artwork and colours of the
+  Appearance theme you pick (those the theme has artwork for are marked ✦),
+  a changed font and up to six changed icons. It is drawn in the browser from
+  the theme's files, sends nothing to the console, and is not the console's
+  exact layout: the real look shows after you apply the theme and use rest
+  mode. **Refresh** draws it again after a change.
 
 ![The top of the edit page: name, firmware, how images are fitted, and Keep original pictures with what the originals take](screenshots/manager-originals.png)
 
@@ -146,6 +153,12 @@ The music the home screen plays. Add any audio file the browser can play
 - the music's length and whether it is "Encoded and verified";
 - a player for the song the theme keeps;
 - **Choose part**, **Replace** and **Remove**;
+- **Add song**, which makes it a [playlist](home-music.md#playlists): the
+  songs play one after another, each its own part. The section then lists
+  them, with **↑** and **↓** to change the order and **Choose part**,
+  **Replace** and **Remove** for each, how the songs join, what happens at
+  the end, **Play**, and a bar showing how much of the console's length they
+  use;
 - **Loudness**, relative to the console's own music, from -12 to +12 dB.
 
 The note at the bottom explains something the console does by itself: the

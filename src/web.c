@@ -496,6 +496,15 @@ api_status(request_t *req) {
                 "\"musicLoopStart\":%d,\"musicLoopEnd\":%d,\"musicOrder\":\"%s\",\"musicLoop\":\"%s\",\"musicBlend\":%d",
                 secs, ms.gain, ms.start_ms, ms.end_ms, ms.play_from_ms, ms.loop_start_ms, ms.loop_end_ms, ms.order,
                 ms.loop, ms.blend_ms);
+      /* Playlist: the order of source slots and each one's part, so the editor can rebuild the track list. */
+      sb_printf(&sb, ",\"musicTracks\":%d,\"musicBetween\":\"%s\",\"musicEndMode\":\"%s\",\"musicSequence\":[",
+                ms.tracks, ms.between, ms.end_mode);
+      for(int i = 0; i < ms.tracks; i++) sb_printf(&sb, "%s%d", i ? "," : "", ms.seq[i]);
+      SB_LIT(&sb, "],\"musicStarts\":[");
+      for(int i = 0; i < ms.tracks; i++) { int s = ms.seq[i]; sb_printf(&sb, "%s%d", i ? "," : "", s == 1 ? ms.start_ms : ms.track_start_ms[s - 1]); }
+      SB_LIT(&sb, "],\"musicEnds\":[");
+      for(int i = 0; i < ms.tracks; i++) { int s = ms.seq[i]; sb_printf(&sb, "%s%d", i ? "," : "", s == 1 ? ms.end_ms : ms.track_end_ms[s - 1]); }
+      SB_LIT(&sb, "]");
       char cover[PATH_MAX];
       long long cover_time;
       const char *cover_kind = shown_preview(e->d_name, cover, sizeof(cover), &cover_time);
@@ -1132,9 +1141,13 @@ api_put_file(request_t *req) {
 }
 
 
+static int int_param(const char *query, const char *key, int lo, int hi, int *out, int *present);
+
 static void
-music_path(const char *id, char *out, size_t size) {
-  snprintf(out, size, "%s/%s/%s", THEMES_DIR, id, MUSIC_FILE);
+music_path(const char *id, int slot, char *out, size_t size) {
+  char file[24];
+  music_source_file(slot, file, sizeof(file));
+  snprintf(out, size, "%s/%s/%s", THEMES_DIR, id, file);
 }
 
 
@@ -1144,14 +1157,16 @@ api_put_music(request_t *req) {
   uint32_t crc;
   uint64_t size = 0;
   wav_info_t wav;
+  int slot = 1, has_slot = 0;
 
   get_param(req->query, "id", id, sizeof(id));
   if(!theme_exists(id)) return respond_error(req->fd, 404, "no such theme");
+  if(int_param(req->query, "slot", 1, MUSIC_MAX_TRACKS, &slot, &has_slot)) return respond_error(req->fd, 400, "slot must be 1 to 8");
   if(req->content_length <= 0) return respond_error(req->fd, 400, "empty upload");
   if((uint64_t)req->content_length > MUSIC_MAX_BYTES) {
     return respond_error(req->fd, 413, "music is larger than 128 MB (about 11 minutes)");
   }
-  music_path(id, dst, sizeof(dst));
+  music_path(id, slot, dst, sizeof(dst));
   part_name(part, sizeof(part), dst);
   if(receive_upload(req, part, &crc, crc_hex)) return;
   if(!music_wav_ok(part, &wav, msg, sizeof(msg))) {
@@ -1164,7 +1179,7 @@ api_put_music(request_t *req) {
   strbuf_t sb = {0};
   sb_printf(&sb, "{\"ok\":true,\"seconds\":%u,\"size\":%llu,\"crc32\":\"%s\"}",
             secs, (unsigned long long)size, crc_hex);
-  log_msg("theme %s: music set (%u s, crc %s, verified)", id, secs, crc_hex);
+  log_msg("theme %s: music set (slot %d, %u s, crc %s, verified)", id, slot, secs, crc_hex);
   respond_json(req->fd, 200, &sb);
 }
 
@@ -1172,13 +1187,15 @@ api_put_music(request_t *req) {
 static void
 api_delete_music(request_t *req) {
   char id[128], path[PATH_MAX];
+  int slot = 1, has_slot = 0;
   get_param(req->query, "id", id, sizeof(id));
   if(!theme_exists(id)) return respond_error(req->fd, 404, "no such theme");
-  music_path(id, path, sizeof(path));
+  if(int_param(req->query, "slot", 1, MUSIC_MAX_TRACKS, &slot, &has_slot)) return respond_error(req->fd, 400, "slot must be 1 to 8");
+  music_path(id, slot, path, sizeof(path));
   themes_lock();
   int rc = access(path, F_OK) || keep_snapshot(id) || fs_unlink(path);
   themes_unlock();
-  if(rc) return respond_error(req->fd, 404, "this theme has no music");
+  if(rc) return respond_error(req->fd, 404, "this theme has no music in that slot");
   respond_ok(req->fd);
 }
 
@@ -1186,9 +1203,11 @@ api_delete_music(request_t *req) {
 static void
 api_get_music(request_t *req) {
   char id[128], path[PATH_MAX];
+  int slot = 1, has_slot = 0;
   get_param(req->query, "id", id, sizeof(id));
   if(!theme_exists(id)) return respond_error(req->fd, 404, "no such theme");
-  music_path(id, path, sizeof(path));
+  if(int_param(req->query, "slot", 1, MUSIC_MAX_TRACKS, &slot, &has_slot)) return respond_error(req->fd, 400, "slot must be 1 to 8");
+  music_path(id, slot, path, sizeof(path));
   respond_file(req, path);
 }
 
@@ -1508,8 +1527,9 @@ int_param(const char *query, const char *key, int lo, int hi, int *out, int *pre
    (crossfade, fade, cut), blend (ms). */
 static void
 api_theme_settings(request_t *req) {
-  char id[128], name[128], fw[64], loop[16], order[16];
+  char id[128], name[128], fw[64], loop[16], order[16], between[16], end_mode[16], seq[128];
   int has_gain, has_start, has_end, has_blend, has_lstart, has_lend, has_from, has_keep, keep = 1;
+  int has_tracks = 0, tracks_v = 0, has_playlist = 0;
   music_settings_t m;
 
   get_param(req->query, "id", id, sizeof(id));
@@ -1517,6 +1537,9 @@ api_theme_settings(request_t *req) {
   int has_fw = !get_param(req->query, "fw", fw, sizeof(fw)) && fw[0];
   int has_loop = !get_param(req->query, "loop", loop, sizeof(loop)) && loop[0];
   int has_order = !get_param(req->query, "order", order, sizeof(order)) && order[0];
+  int has_between = !get_param(req->query, "between", between, sizeof(between)) && between[0];
+  int has_endmode = !get_param(req->query, "end_mode", end_mode, sizeof(end_mode)) && end_mode[0];
+  int has_seq = !get_param(req->query, "sequence", seq, sizeof(seq)) && seq[0];
   if(!theme_exists(id)) return respond_error(req->fd, 404, "no such theme");
   for(char *p = name; *p; p++) if(*p == '\n' || *p == '\r' || *p == '=') *p = ' ';
   for(char *p = fw; *p; p++) if(*p == '\n' || *p == '\r' || *p == '=') *p = ' ';
@@ -1532,8 +1555,11 @@ api_theme_settings(request_t *req) {
   else if(int_param(req->query, "loop_start", -1, MUSIC_MAX_MS, &m.loop_start_ms, &has_lstart)) bad = "loop_start must be -1 to 3600000 ms";
   else if(int_param(req->query, "loop_end", -1, MUSIC_MAX_MS, &m.loop_end_ms, &has_lend)) bad = "loop_end must be -1 to 3600000 ms";
   else if(int_param(req->query, "keep_originals", 0, 1, &keep, &has_keep)) bad = "keep_originals must be 0 or 1";
+  else if(int_param(req->query, "tracks", 1, MUSIC_MAX_TRACKS, &tracks_v, &has_tracks)) bad = "tracks must be 1 to 8";
   else if(has_loop && !music_loop_valid(loop)) bad = "loop must be crossfade, fade or cut";
   else if(has_order && !music_order_valid(order)) bad = "order must be music, loop-first, alternate or music-first";
+  else if(has_between && !music_loop_valid(between)) bad = "between must be crossfade, fade or cut";
+  else if(has_endmode && !music_end_mode_valid(end_mode)) bad = "end_mode must be loop-all or loop-last";
   else if(m.end_ms && m.end_ms <= m.start_ms) bad = "the end must come after the start";
   else if((m.loop_start_ms < 0) != (m.loop_end_ms < 0)) bad = "loop_start and loop_end are set together";
   else if(m.loop_start_ms >= 0 && m.loop_end_ms && m.loop_end_ms <= m.loop_start_ms) bad = "the loop must end after it starts";
@@ -1541,14 +1567,43 @@ api_theme_settings(request_t *req) {
   else if(m.play_from_ms >= 0 && (m.play_from_ms < m.start_ms || (m.end_ms && m.play_from_ms >= m.end_ms))) {
     bad = "play_from must be within the music part";
   }
+  /* Playlist: each added slot's part (start2/end2 … start8/end8), then the order. */
+  for(int s = 2; s <= MUSIC_MAX_TRACKS && !bad; s++) {
+    char ks[16], ke[16];
+    int hs = 0, he = 0;
+    snprintf(ks, sizeof(ks), "start%d", s);
+    snprintf(ke, sizeof(ke), "end%d", s);
+    if(int_param(req->query, ks, 0, MUSIC_MAX_MS, &m.track_start_ms[s - 1], &hs)) bad = "a track start is out of range";
+    else if(int_param(req->query, ke, 0, MUSIC_MAX_MS, &m.track_end_ms[s - 1], &he)) bad = "a track end is out of range";
+    else if(m.track_end_ms[s - 1] && m.track_end_ms[s - 1] <= m.track_start_ms[s - 1]) bad = "a track end must come after its start";
+    if(hs || he) has_playlist = 1;
+  }
+  if(!bad && has_seq) {
+    int t = 0;
+    for(char *p = seq; *p && t < MUSIC_MAX_TRACKS; ) {
+      while(*p == ',' || *p == ' ') p++;
+      if(!*p) break;
+      int nv = atoi(p);
+      if(nv < 1 || nv > MUSIC_MAX_TRACKS) { bad = "sequence has an invalid track"; break; }
+      m.seq[t++] = nv;
+      while(*p && *p != ',') p++;
+    }
+    if(!bad) { if(t < 1) bad = "sequence is empty"; else m.tracks = t; }
+  } else if(!bad && has_tracks) {
+    m.tracks = tracks_v;
+    for(int i = 0; i < tracks_v; i++) m.seq[i] = i + 1;
+  }
   if(bad) {
     themes_unlock();
     return respond_error(req->fd, 400, bad);
   }
   if(has_loop) snprintf(m.loop, sizeof(m.loop), "%s", loop);
   if(has_order) snprintf(m.order, sizeof(m.order), "%s", order);
-  if(m.loop_start_ms < 0) snprintf(m.order, sizeof(m.order), "music");
-  int music = has_gain || has_start || has_end || has_blend || has_loop || has_lstart || has_lend || has_order || has_from;
+  if(m.loop_start_ms < 0 && m.tracks <= 1) snprintf(m.order, sizeof(m.order), "music");
+  if(has_between) snprintf(m.between, sizeof(m.between), "%s", between);
+  if(has_endmode) snprintf(m.end_mode, sizeof(m.end_mode), "%s", end_mode);
+  has_playlist = has_playlist || has_tracks || has_seq || has_between || has_endmode;
+  int music = has_gain || has_start || has_end || has_blend || has_loop || has_lstart || has_lend || has_order || has_from || has_playlist;
   int rc = keep_snapshot(id) || write_theme_ini(id, has_name ? name : NULL, has_fw ? fw : NULL, music ? &m : NULL);
   if(!rc && has_keep) {
     /* keeping the pictures a theme's textures were made from: on unless the marker file is there */
