@@ -70,8 +70,10 @@ container (GitHub Actions runs them on every push: see
   once a minute: the theme taken down and not put back at the next start,
   while one restart, or sandboxes left by earlier restarts, change nothing;
 - an overlay still in use when switching themes or restoring stock: never
-  forced off, the new theme or the system's own files shown on top, its
-  stage folder kept, and every layer off once it is free;
+  forced off, the new theme straight on top of it (one layer per switch),
+  the system's own files on top for Restore stock and where the new theme's
+  overlay fails its check, its stage folder kept, and every layer off once it
+  is free;
 - read-only overlays, sandbox views and symlink containment;
 - concurrent requests during an apply, slow and malformed clients;
 - recovery after a hard kill, log rotation and the crash handler;

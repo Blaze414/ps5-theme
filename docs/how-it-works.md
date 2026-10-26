@@ -546,7 +546,12 @@ where it is. It never forces it off. On 13.42, forcing it broke the
 system's own views stacked on it ("Bad file descriptor"), and apps wouldn't
 start until a restart. Instead:
 
-- the new theme's overlay goes on top of the one in use;
+- the new theme's overlay goes straight on top of the one in use (since
+  1.63; before, a copy of the system's folder went in between, so each
+  switch while ShellUI held its interface folder added two layers there);
+- if the new theme's overlay can't go on there, or fails its check, a
+  verified copy of the system's own folder goes on top instead, so the
+  console never shows the theme that was taken down;
 - for **Restore stock**, a verified copy of the system's own folder goes on
   top, so the console looks stock;
 - the app keeps reading what it already had open;

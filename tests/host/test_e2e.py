@@ -43,7 +43,8 @@ FONTS = "/preinst/common/font"           # the console's text fonts
 SYSA = "/system/vsh_asset"                # the Appearance themes' textures and Welcome backgrounds
 LOG = f"{BASE}/logs/log.txt"
 ENV = dict(os.environ, ASAN_OPTIONS="detect_leaks=0:halt_on_error=1:abort_on_error=0",
-           UBSAN_OPTIONS="halt_on_error=1:print_stacktrace=1")
+           UBSAN_OPTIONS="halt_on_error=1:print_stacktrace=1",
+           PS5THEME_TEST_FAIL_VERIFY="/tmp/fail-verify")   # holds a mount point whose overlay then fails its check
 
 
 # ---------------------------------------------------------------- fixtures
@@ -574,7 +575,7 @@ S = {}  # shared state between ordered tests
 
 def t_startup():
     s = status()
-    assert s["fw"] == "13.42" and s["version"] == "1.62" and s["themes"] == [], s
+    assert s["fw"] == "13.42" and s["version"] == "1.63" and s["themes"] == [], s
     listing = open(f"{BASE}/dump/assets-v2-13.42.txt").read()
     assert f"{VSH}/bg_hub_default.dds.zst" in listing
     assert f"{HOME}/bg.png" in listing and "/mnt/rnps/apps/NPXS40099/a.png" in listing
@@ -584,7 +585,7 @@ def t_startup():
     assert open("/tmp/tile-registered").read().strip() == "THEM00001"
     assert "starting" in log_text()
     notes = open("/tmp/notifications.txt").read()
-    assert "ps5-theme 1.62 starting" in notes and "ps5-theme ready" in notes, notes
+    assert "ps5-theme 1.63 starting" in notes and "ps5-theme ready" in notes, notes
 
 
 def t_ui_and_icon_served():
@@ -1038,8 +1039,10 @@ def t_crash_loop_takes_theme_down():
 def t_busy_overlay_is_never_forced():
     """An overlay an app is still reading is never pulled away (on the console
     that broke the system's views stacked on it, and apps wouldn't start until
-    a restart). The next theme goes on top of it, Restore stock puts the
-    system's own files on top, and it comes off once nothing reads it."""
+    a restart). The next theme goes straight on top of it, one layer per
+    switch; where the next theme's overlay doesn't go on, and for Restore
+    stock, the system's own files go on top; it comes off once nothing reads
+    it."""
     if EMULATED:
         print("      (skipped: needs real mounts)", flush=True)
         return
@@ -1052,12 +1055,33 @@ def t_busy_overlay_is_never_forced():
     try:
         apply_and_wait("dawn")
         assert crc_file(f"{HOME}/bg.png") == zlib.crc32(dawn)
-        assert len(mounts_on(HOME)) >= 2, mounts_on(HOME)       # night's stays under dawn's
+        # night's stays under dawn's, with nothing in between: one layer per switch, not two
+        assert len(mounts_on(HOME)) == 2, mounts_on(HOME)
         new = log_text()[len(before):]
         assert f"unmount {HOME}: still in use" in new and "forcing" not in new, new[-2000:]
+        assert f"covered {HOME} with the system's own files" not in new, new[-2000:]
+        assert "stay under the new theme's overlay, which goes straight on top" in new, new[-2000:]
+        layers = [l.split("\t")[1] for l in open(f"{BASE}/mounts").read().splitlines() if l.startswith(HOME + "\t")]
+        assert len(layers) == 2 and all("/stage/" in x for x in layers), layers
         assert zlib.crc32(reader.read()) == zlib.crc32(S["bg"]), "the reader lost its file"
-        stage = next(l.split("\t")[1] for l in open(f"{BASE}/mounts").read().splitlines() if l.startswith(HOME + "\t"))
+        stage = layers[0]
         assert os.path.isdir(stage), "a stage folder still mounted was deleted"
+
+        # The next theme's overlay fails its check where the one in use stays: the system's own files go on top
+        # instead, so the console never shows the theme that was taken down.
+        write("/tmp/fail-verify", HOME.encode())
+        mark = len(log_text())
+        n = len(applies())
+        assert call("POST", "/api/apply", {"id": "night"})[0] == 200
+        end = time.time() + 60
+        while len(applies()) == n:
+            assert time.time() < end, "the apply did not finish"
+            time.sleep(0.2)
+        os.unlink("/tmp/fail-verify")
+        new = log_text()[mark:]
+        assert f"verification failed on {HOME}" in new and f"covered {HOME} with the system's own files" in new, new[-2000:]
+        assert crc_file(f"{HOME}/bg.png") == S["stock_bg"]
+        assert len(mounts_on(HOME)) == 2, mounts_on(HOME)       # night's in use, the system's copy on top
 
         # Restore stock while it is still in use: the system's own files on top.
         assert call("POST", "/api/apply", {"id": "none"})[0] == 200
@@ -3055,7 +3079,7 @@ def t_appearance_textures():
     # A remembered check result is made by a version and a revision of the rules: results of other rules are
     # not trusted (the same version can ship twice while a feature is built).
     remembered = open(f"{BASE}/checked").read().splitlines()
-    assert remembered and all(re.match(r"1\.62r\d+\t", l) for l in remembered), remembered[:2]
+    assert remembered and all(re.match(r"1\.63r\d+\t", l) for l in remembered), remembered[:2]
     assert put_file("appear", f"{HOME}/bg.png", S["bg"])[0] == 200
 
     shell = "/mnt/sandbox/NPXS40087_000"

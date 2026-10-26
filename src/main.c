@@ -759,6 +759,37 @@ source_in_use(const char *dir) {
 static void mirror_paths(const char *real, char *dir, size_t dsize, char *mark, size_t msize);
 static int  mount_overlay(const char *src, const char *on);
 
+/* A verified copy of the system's folder `real` over `on`, where an overlay
+   still in use shows a theme, so the console shows its own files there.
+   0 if done, with the new overlay in `rec`. */
+static int
+cover_with_stock(const char *on, const char *real, mount_rec_t *rec) {
+  char mirror[PATH_MAX], mark[PATH_MAX];
+  if(real[0]) mirror_paths(real, mirror, sizeof(mirror), mark, sizeof(mark));
+  if(!real[0] || access(mark, F_OK)) {
+    log_err("%s still shows the theme: no verified copy of the system's folder to put over it", on);
+    return -1;
+  }
+  int r = mount_overlay(mirror, on);
+  if(r) {
+    if(r < 0) log_err("%s still shows the theme: mounting the system's copy over it failed: %s", on, strerror(errno));
+    return -1;
+  }
+  log_msg("covered %s with the system's own files", on);
+  snprintf(rec->on, sizeof(rec->on), "%s", on);
+  snprintf(rec->src, sizeof(rec->src), "%s", mirror);
+  snprintf(rec->real, sizeof(rec->real), "%s", real);
+  return 0;
+}
+
+/* The same, recorded in MOUNTS_FILE: for an apply whose new overlay didn't
+   go on where revert_mounts left the previous theme under it. */
+static void
+cover_left_theme(const char *on, const char *real) {
+  mount_rec_t rec;
+  if(!cover_with_stock(on, real, &rec) && record_mount(rec.on, rec.src, rec.real)) log_err("could not record mount %s", on);
+}
+
 /* Take every overlay down. Stage folders go too, except those whose name
    starts with `keep` (the theme being applied, staged before this runs),
    those in kept_stages, and those an overlay still uses.
@@ -767,12 +798,20 @@ static int  mount_overlay(const char *src, const char *on);
    stacked on it ("Bad file descriptor") and the apps using them, until a
    restart. One still in use stays, with everything under it at that mount
    point, and a verified copy of the system's folder goes on top so the
-   console looks stock; the next revert tries again from the top. */
+   console looks stock; the next revert tries again from the top.
+
+   `covers` (`ncovers` of them, or none): the mount points an apply puts its
+   new overlays on straight after. Where one of them is still in use, the
+   new overlay goes straight on top and no copy of the system's folder goes
+   in between (each apply while ShellUI holds its interface folder used to
+   add two layers there); deferred[k] is set for covers[k], so the apply
+   puts that copy on only if its own overlay doesn't go on there. */
 static void
-revert_mounts(const char *keep) {
+revert_mounts(const char *keep, const char *const *covers, int ncovers, int *deferred) {
   static mount_rec_t left[MAX_RECORDS];
   static int gone[MAX_RECORDS];
-  int n = read_mount_records(records, MAX_RECORDS), count = 0, busy = 0, nleft = 0;
+  int n = read_mount_records(records, MAX_RECORDS), count = 0, busy = 0, nleft = 0, under_new = 0;
+  for(int k = 0; k < ncovers; k++) deferred[k] = 0;
 
   crumb(CRUMB_MAIN, "reverting mounts");
   /* Newest first, so nested and view mounts come off before what they cover. */
@@ -805,21 +844,18 @@ revert_mounts(const char *keep) {
     int top = 1;
     for(int k = i + 1; k < n0 && top; k++) top = strcmp(left[k].on, left[i].on) != 0;
     if(!top || !strncmp(left[i].src, stock_prefix, strlen(stock_prefix))) continue;
-    char mirror[PATH_MAX], mark[PATH_MAX];
-    if(left[i].real[0]) mirror_paths(left[i].real, mirror, sizeof(mirror), mark, sizeof(mark));
-    if(!left[i].real[0] || access(mark, F_OK) || nleft == MAX_RECORDS) {
-      log_err("%s still shows the theme: no verified copy of the system's folder to put over it", left[i].on);
+    int k = 0;
+    while(k < ncovers && strcmp(covers[k], left[i].on)) k++;
+    if(k < ncovers) {
+      deferred[k] = 1;
+      under_new++;
       continue;
     }
-    int r = mount_overlay(mirror, left[i].on);
-    if(r) {
-      if(r < 0) log_err("%s still shows the theme: mounting the system's copy over it failed: %s", left[i].on, strerror(errno));
+    if(nleft == MAX_RECORDS) {
+      log_err("%s still shows the theme: too many overlays recorded", left[i].on);
       continue;
     }
-    log_msg("covered %s with the system's own files", left[i].on);
-    left[nleft] = left[i];
-    snprintf(left[nleft].src, sizeof(left[nleft].src), "%s", mirror);
-    nleft++;
+    if(!cover_with_stock(left[i].on, left[i].real, &left[nleft])) nleft++;
   }
   if(write_mount_records(left, nleft)) log_err("could not record the overlays that stayed");
 
@@ -843,6 +879,7 @@ revert_mounts(const char *keep) {
   }
   if(count) log_msg("reverted %d mount(s)", count);
   if(busy) log_msg("%d overlay(s) were still in use and stay until they are free or the console restarts", busy);
+  if(under_new) log_msg("%d of them stay under the new theme's overlay, which goes straight on top", under_new);
 }
 
 
@@ -915,6 +952,21 @@ test_hold(const char *where) {
   if(strcmp(buf, where)) return;
   log_msg("test: holding the apply %s mounting", where);
   while(!access(hold, F_OK)) usleep(50 * 1000);
+}
+
+/* For the test of an overlay that fails its check where the previous theme's
+   stays under it: 1 if the file PS5THEME_TEST_FAIL_VERIFY names holds `on`. */
+static int
+test_fail_verify(const char *on) {
+  const char *name = getenv("PS5THEME_TEST_FAIL_VERIFY");
+  char buf[PATH_MAX];
+  int fd = name ? open(name, O_RDONLY) : -1;
+  if(fd < 0) return 0;
+  ssize_t n = read(fd, buf, sizeof(buf) - 1);
+  close(fd);
+  buf[n > 0 ? n : 0] = 0;
+  buf[strcspn(buf, "\n")] = 0;
+  return !strcmp(buf, on);
 }
 #endif
 
@@ -1406,7 +1458,7 @@ keep_spares(prev_stage_t *prev, int nprev) {
 static void
 revert_keep_spares(prev_stage_t *prev, int nprev) {
   keep_spares(prev, nprev);
-  revert_mounts(NULL);
+  revert_mounts(NULL, NULL, 0, NULL);
 }
 
 
@@ -1987,7 +2039,7 @@ apply_theme(const char *name) {
     }
     int m = ensure_mirror(j->real, mirror, sizeof(mirror));
     if(m > 0) {
-      revert_mounts(keep);
+      revert_mounts(keep, NULL, 0, NULL);
       m = ensure_mirror(j->real, mirror, sizeof(mirror));
     }
     memset(&stage_meter, 0, sizeof(stage_meter));
@@ -2008,7 +2060,17 @@ apply_theme(const char *name) {
   crumb(CRUMB_MAIN, "applying theme %s: mounting", name);
   set_progress(band_stage, "Switching to the new theme");
   keep_spares(prev, nprev);
-  revert_mounts(keep);
+  /* Where the previous theme's overlay is still in use, this one goes straight on top of it; where this one then
+     doesn't go on, the system's own files do (job_left). */
+  static const char *covers[MAX_JOBS];
+  static int cover_job[MAX_JOBS], deferred[MAX_JOBS], job_left[MAX_JOBS];
+  int ncovers = 0;
+  for(int i = 0; i < njobs; i++) {
+    job_left[i] = 0;
+    if(stages[job_stage[i]].state >= 0) { cover_job[ncovers] = i; covers[ncovers++] = jobs[i].on; }
+  }
+  revert_mounts(keep, covers, ncovers, deferred);
+  for(int k = 0; k < ncovers; k++) job_left[cover_job[k]] = deferred[k];
 #ifdef TEST_HOOKS
   test_hold("before");
 #endif
@@ -2025,6 +2087,7 @@ apply_theme(const char *name) {
     if(r) {
       if(r < 0) log_err("mount %s -> %s failed: %s", st->dir, j->on, strerror(errno));
       if(r < 0 && !j->view) failed++;
+      if(job_left[i]) cover_left_theme(j->on, j->real);
       continue;
     }
     if(record_mount(j->on, st->dir, st->real)) log_err("could not record mount %s", j->on);
@@ -2046,9 +2109,14 @@ apply_theme(const char *name) {
                  "Checking it on the console (%d of %d)", i + 1, njobs);
     snprintf(src, sizeof(src), "%s%s", files_root, j->real);
     /* Against the stage folder: the very folder that is mounted. */
-    if(verify_plan(&st->plan, st->dir, j->on, "live mount")) {
+    int bad = verify_plan(&st->plan, st->dir, j->on, "live mount");
+#ifdef TEST_HOOKS
+    bad = bad || test_fail_verify(j->on);
+#endif
+    if(bad) {
       log_err("verification failed on %s, removing overlay", j->on);
       if(plat_unmount(j->on)) log_err("unmount %s failed: %s", j->on, strerror(errno));
+      else if(job_left[i]) cover_left_theme(j->on, j->real);
       if(!j->view) failed++;
       continue;
     }
@@ -2558,7 +2626,7 @@ main(void) {
     static prev_stage_t kept[64];
     load_prev_stages(kept, 64);
     forget_live(0);
-    revert_mounts(NULL);
+    revert_mounts(NULL, NULL, 0, NULL);
     nkept_stages = 0;
   }
   dump_mount_table();
