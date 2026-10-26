@@ -152,12 +152,12 @@ Below the files, **Interface sounds** lists the sounds the interface makes as
 you use it (since 1.62): moving between items, selecting, going back,
 reaching the end of a list, switching between Games and Media (L1 and R1),
 changing panel, opening and closing the Control Center, opening and closing
-the options menu (the Options button), taking a screenshot (since 1.64 these
-three show without Show all), and
-**Show all** for the other default ones (menus, dialogs, switches,
-notifications, trophies, the keyboard and more).
-The PlayStation, PlayStation 2, 3 and 4 Appearance themes' own moving,
-selecting and going-back sounds follow.
+the options menu (the Options button) and taking a screenshot (since 1.64
+these three show without Show all). **Show all** lists the other default
+ones (menus, dialogs, switches, notifications, trophies, the keyboard and
+more); one the theme replaced shows either way. The PlayStation,
+PlayStation 2, 3 and 4 Appearance themes' own moving, selecting and
+going-back sounds follow.
 
 - **Play** plays the console's sound on the device you're using; **Play
   yours** plays the theme's.
