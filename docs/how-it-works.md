@@ -484,7 +484,8 @@ original avoids both, and the overlay goes with a restart.
 
 The interface's sounds (since 1.62) are the `sound/vag` entries of
 `Sce.PlayStation.PUI_UI3.rco`: 107 on 13.42, among them `snd_focus_move`
-(moving between items), `snd_enter`, `snd_cancel`, the PlayStation 1 to 4
+(moving between items), `snd_enter`, `snd_cancel`, `snd_change_space`
+(switching between Games and Media with L1 and R1), the PlayStation 1 to 4
 Appearance themes' own (`snd_1_focus_move` to `snd_4_cancel`, 12 in all)
 and 23 vibration patterns for the controller's haptic motors
 (`..._vibration`), which the manager doesn't offer.

@@ -2412,7 +2412,7 @@ async function resetPictureNow(path, el) {
 /* What each interface sound is for, by the console's name for it (snd_<name>), in the order shown. */
 const UI_SOUND_NAMES = {
   focus_move: "Moving between items", enter: "Selecting", cancel: "Going back", cannot_move_focus: "Reaching the end of a list",
-  change_space: "Changing space", change_panel: "Changing panel", change_panel2: "Changing panel (2)",
+  change_space: "Switching between Games and Media", change_panel: "Changing panel", change_panel2: "Changing panel (2)",
   open_control_center: "Opening the Control Center", close_control_center: "Closing the Control Center",
   open_option_menu: "Opening the options menu", close_option_menu: "Closing the options menu", open_home: "Going to the home screen",
   open_dialog: "A dialog opening", open_error_dialog: "An error dialog opening", yes_in_dialog: "Confirming in a dialog",
@@ -2430,8 +2430,8 @@ const UI_SOUND_NAMES = {
   psvr2_room_scale_finish: "The PS VR2 play area done", set_pad_orientation_1: "Controller orientation (1)",
   set_pad_orientation_2: "Controller orientation (2)", undefined: "A sound without its own",
 };
-const UI_SOUND_FIRST = 9;   /* moving, selecting, going back, the end of a list, changing space or panel (L1/R1 and the
-                               like), the Control Center: shown without "Show all" */
+const UI_SOUND_FIRST = 9;   /* moving, selecting, going back, the end of a list, switching between Games and Media (L1/R1,
+                               snd_change_space: heard on 13.42), changing panel, the Control Center: shown without "Show all" */
 const UI_SOUND_SETS = { "": "Default", 1: "PlayStation", 2: "PlayStation 2", 3: "PlayStation 3", 4: "PlayStation 4" };
 
 /* The interface's sounds (default ones, then each Appearance theme's: snd_2_focus_move is the PlayStation 2

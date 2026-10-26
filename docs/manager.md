@@ -145,8 +145,8 @@ replaced: see [The wake-up sound](home-music.md#the-wake-up-sound).
 
 Below the files, **Interface sounds** lists the sounds the interface makes as
 you use it (since 1.62): moving between items, selecting, going back,
-reaching the end of a list, changing space and panel (switching tabs such as
-Games and Media with L1 and R1), opening and closing the Control Center, and
+reaching the end of a list, switching between Games and Media (L1 and R1),
+changing panel, opening and closing the Control Center, and
 **Show all** for the other default ones (menus, dialogs, switches,
 notifications, trophies, the keyboard and more).
 The PlayStation, PlayStation 2, 3 and 4 Appearance themes' own moving,
