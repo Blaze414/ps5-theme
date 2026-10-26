@@ -139,9 +139,14 @@ System sounds and music clips, such as the wake-from-rest chime. Any audio
 file is converted to the sound's own format (WAV or ATRAC9) and loudness. The
 cold-boot sounds play before the jailbreak, so a theme can't reach them.
 `sfx_warmboot.at9`, the sound as the console wakes from rest mode, can be
-replaced: see [The wake-up sound](home-music.md#the-wake-up-sound).
+replaced: see [The wake-up sound](home-music.md#the-wake-up-sound). Every
+file in the list takes any audio, a simple beep included (since 1.62:
+`sfx_transition.at9` refused a pure tone before). The section's summary
+counts the interface sounds the theme replaced too.
 
 #### Interface sounds
+
+![The interface sounds: moving, selecting and going back first, the ones the theme replaced marked, then each Appearance theme's own](screenshots/interface-sounds.png)
 
 Below the files, **Interface sounds** lists the sounds the interface makes as
 you use it (since 1.62): moving between items, selecting, going back,

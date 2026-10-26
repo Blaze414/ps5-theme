@@ -234,3 +234,9 @@ After any failure the console was restarted before the next test.
 | 1.61 | The plugin keeping a playlist's songs (`music2.wav` …) and their settings, with a one-song theme applied | **Works**: the one song as home music, as before |
 | 1.61 | A home music playlist made in the editor (songs added, each its own part), applied, then a game's music and back to the home screen | **Works** |
 | 1.61 | The editor's Preview of a theme (home screen and Control Center drawn from its files) | **Works** |
+| 1.62 | An update through the update folder, with the plugin installed in PS5 Payload Manager (`payloads/local/ps5-theme/`) | **Works**: the new version took the place of Payload Manager's copy (byte for byte the build), and the update folder emptied itself |
+| 1.62 | Interface sounds: moving between items, selecting and going back replaced with sounds from a game, applied, then rest mode | **The new sounds played**, but late. Read back from the console, they got loud 180 to 325 ms after a press, after a quiet stretch in the clips (Sony's: 5 to 35 ms) |
+| 1.62 | The same sounds started at their hit (Start at the hit, and attached again) | **Works**: no delay |
+| 1.62 | Which sound plays on L1 and R1 (the candidates decoded and played on a computer) | `snd_change_space`, now named Switching between Games and Media; it and the Control Center's sounds replaced: **work** |
+| 1.63 | Theme switches while the home screen held the interface folder, the same theme applied again among them | One layer per switch, but the same theme again was refused on three folders ("Resource deadlock avoided"): the console's files went on top, then the theme again, three layers and "applied partly" |
+| 1.63 | The fix, after a restart: Yakuza 0, Yakuza 0 again, Snoopy, Yakuza 0 | **Works**: each applied completely; exactly one theme layer on every folder afterwards (13 after a day of tests with 1.62) |

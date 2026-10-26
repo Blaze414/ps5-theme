@@ -8,9 +8,11 @@ The problems met while building this, and how each was solved. Part of the [PS5 
 - [Overlays the home screen couldn't see](#overlays-the-home-screen-couldnt-see)
 - [Stock again after rest mode](#stock-again-after-rest-mode)
 - [Updating when the Toolbox is gone](#updating-when-the-toolbox-is-gone)
+- [An update that didn't last](#an-update-that-didnt-last)
 - [Nothing running after a restart](#nothing-running-after-a-restart)
 - [The interface that wouldn't start](#the-interface-that-wouldnt-start)
 - [A guard that took down every theme](#a-guard-that-took-down-every-theme)
+- [Layers that piled up](#layers-that-piled-up)
 - [Changing game and app icons safely](#changing-game-and-app-icons-safely)
 - [PS5 game icons that stayed the same](#ps5-game-icons-that-stayed-the-same)
 - [Apps that wouldn't start](#apps-that-wouldnt-start)
@@ -27,6 +29,9 @@ The problems met while building this, and how each was solved. Part of the [PS5 
 - [Slow encoding in some browsers](#slow-encoding-in-some-browsers)
 - [Reading the system's own file while a theme is applied](#reading-the-systems-own-file-while-a-theme-is-applied)
 - [Music that starts part-way through](#music-that-starts-part-way-through)
+- [Interface sounds no common tool reads](#interface-sounds-no-common-tool-reads)
+- [Sounds that played late](#sounds-that-played-late)
+- [A beep the transition sound refused](#a-beep-the-transition-sound-refused)
 - [A slow start after every reboot](#a-slow-start-after-every-reboot)
 - ["It forgot my theme after a reboot"](#it-forgot-my-theme-after-a-reboot)
 - [An import that lost the backgrounds](#an-import-that-lost-the-backgrounds)
@@ -73,6 +78,23 @@ back. **Solution:** the plugin updates itself: it notices a newer plugin
 file, starts it through etaHEN's ELF loader and hands over to it, and the new
 copy keeps the overlays already in place.
 
+## An update that didn't last
+
+A new version put in `/data/ps5-theme/update/` took over within seconds, but
+only until the next start: etaHEN or PS5 Payload Manager then started the old
+copy installed with them, which handed over to the new one again, and the
+update folder had to keep its copy for that. Newer versions of Payload
+Manager also keep imported payloads two folders down
+(`payloads/local/<name>/`), where the plugin never looked. **Solution**
+(1.62): once a newer copy runs, it takes the place of the older copies in
+etaHEN's and Payload Manager's folders, both layouts, written beside each and
+checked before it is renamed over it. Only then is the update folder emptied.
+It is the one write outside the plugin's own folders, and the write guard
+allows exactly that (see
+[Never writing the system](how-it-works.md#never-writing-the-system)).
+Confirmed on the console: Payload Manager's copy became the new build byte
+for byte.
+
 ## Nothing running after a restart
 
 After a restart, etaHEN started an older plugin while a newer one waited in
@@ -112,6 +134,24 @@ applied as its starting point, and only newer ones count. A host test now
 starts with three old sandboxes, applies a theme, and checks that a rest
 mode restart is covered, that a crash loop is still caught, and that
 applying again with all six sandboxes still there keeps the theme.
+
+## Layers that piled up
+
+The home screen keeps its interface folder open, so the plugin never pulls a
+theme's overlay out from under it: it stays, and the next one goes on top.
+Each switch added two layers there, a copy of the console's own files and
+then the new theme; after a day of trying themes the console's mount list
+showed 13 on `/system_ex/vsh_asset` (cleared at a restart). **Solution**
+(1.63): the new theme goes straight on top, with the copy of the console's
+files only where the new overlay doesn't go on. The first build then met a
+refusal on the console: applying the same theme again reuses its unchanged
+folder, which was the very folder under the overlay in use, and the
+console's nullfs won't stack a folder on a view of itself ("Resource
+deadlock avoided"). The fallback worked (the console's files went on top,
+then the view watcher covered them again), but that made three layers. In
+that case the overlay in use already shows exactly that folder, so it now
+simply carries on. After a restart and four applies, the console showed one
+theme layer on every folder.
 
 ## Changing game and app icons safely
 
@@ -579,6 +619,38 @@ music file changes it continues from the same point in the new file. Changing
 that would mean changing how the console's own software runs. **Solution:**
 the editor and README say so in plain words, and the editor describes what
 plays from the start of the music.
+
+## Interface sounds no common tool reads
+
+The interface's own sounds (moving between items, selecting, going back and
+81 more, besides 23 vibration patterns for the controller) live inside its
+resource file in Sony's HE-VAG, a VAG variant with 128 predictors instead of
+5 and two channels side by side. FFmpeg reads these files as plain mono VAG:
+the navigation sound came out garbled and twice its length (0.83 s instead
+of 0.41 s). **Solution:** the manager decodes them
+with vgmstream's predictor table and writes new ones with the 5 predictors
+both formats share, laid out byte for byte as Sony's (all 107 on 13.42 share
+one layout), and the plugin checks that layout before a sound is accepted.
+See [Interface sounds, in Sony's layout](how-it-works.md#interface-sounds-in-sonys-layout).
+
+## Sounds that played late
+
+The first replaced interface sounds played on the console, but late. Read
+back from the console, the theme's sounds (clips from a game) got loud 180 to
+325 ms after a press, after a quiet stretch 20 to 38 dB down that the
+trimming of silence had kept; Sony's own get loud within 5 to 35 ms.
+**Solution:** a new sound starts at its hit, keeping only the 10 ms before
+it, faded in, and a sound made earlier can be trimmed the same way with
+**Start at the hit**. On the console the delay was gone.
+
+## A beep the transition sound refused
+
+Any audio file converted for the system's ATRAC9 sounds, except a simple
+tone for `sfx_transition.at9`: "the console's ATRAC9 bitrate is too low for
+this encoder". That file is the only one never coded above precision 6, and
+with the encoder's gradients a loud, pure tone needed 7 somewhere.
+**Solution** (1.62): for such a file the encoder has steeper gradients too;
+every other file encodes byte for byte as before.
 
 ## A slow start after every reboot
 
