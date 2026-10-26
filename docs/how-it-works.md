@@ -506,6 +506,14 @@ and 23 vibration patterns for the controller's haptic motors
   sound, and lays its own frames out the same way. Its frames use the
   classic VAG predictors 0 to 4, which HE-VAG decodes as the original VAG
   does, each frame with the predictor and shift that come closest.
+- **Starting at the hit.** The console plays an interface sound the moment
+  you press, so any wait is in the sound itself. Sony's get loud (within 15
+  dB of their loudest 5 ms) 5 to 35 ms in for moving, selecting and going
+  back. A new sound starts 10 ms before that point, faded in, and anything
+  quieter before it is cut: on the console, a theme's sounds made from game
+  clips had 150 to 300 ms of quiet sound before their hit and were heard
+  late. Run on Sony's own 84 sounds, the same rule leaves the moving sounds
+  untouched and cuts at most 20 to 55 ms of a slow swell from a few others.
 - **Checked in the browser.** Decoded again, a new sound must give exactly
   the samples the encoder meant, sample for sample, and its layout must pass
   the same checks the plugin makes.

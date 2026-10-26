@@ -145,17 +145,26 @@ replaced: see [The wake-up sound](home-music.md#the-wake-up-sound).
 
 Below the files, **Interface sounds** lists the sounds the interface makes as
 you use it (since 1.62): moving between items, selecting, going back,
-reaching the end of a list, and **Show all** for the other default ones
-(menus, dialogs, switches, notifications, trophies, the keyboard and more).
+reaching the end of a list, changing space and panel (switching tabs such as
+Games and Media with L1 and R1), opening and closing the Control Center, and
+**Show all** for the other default ones (menus, dialogs, switches,
+notifications, trophies, the keyboard and more).
 The PlayStation, PlayStation 2, 3 and 4 Appearance themes' own moving,
 selecting and going-back sounds follow.
 
 - **Play** plays the console's sound on the device you're using; **Play
   yours** plays the theme's.
-- **Attach** takes any audio file. Silence at its start is trimmed so it
-  plays the moment you press, and it is made as loud as the sound it
-  replaces. It can be as long as the console's sound at most (moving between
-  items is 0.41 seconds on 13.42); a longer one is cut with a short fade.
+- **Attach** takes any audio file. It starts at its hit, as the console's
+  sounds do (they get loud within 5 to 35 ms): silence and anything quieter
+  before the hit are cut, keeping the last 10 ms faded in, so it plays the
+  moment you press. A clip from a game often has a quiet stretch before its
+  hit that would otherwise be heard as a delay. It is made as loud as the
+  sound it replaces, and can be as long as the console's sound at most
+  (moving between items is 0.41 seconds on 13.42); a longer one is cut with
+  a short fade.
+- A sound attached before this (1.62's first builds) that gets loud late
+  shows **yours gets loud … s after you press** and **Start at the hit**,
+  which trims it the same way without attaching it again.
 - Apply, then put the console in rest mode and wake it: the interface reads
   its sounds as it starts.
 - The controller's vibration patterns, which sit beside the sounds, stay the

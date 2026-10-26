@@ -2100,9 +2100,24 @@ function loudRms(chans, rate) {
   return top > 0 ? Math.sqrt(loud.reduce((a, b) => a + b, 0) / loud.length) : 0;
 }
 
-/* Your audio for an interface sound: the silence before and after it trimmed (it plays the moment you press), no
-   longer than `max` samples (cut with a short fade), and as loud as the console's sound (`target`, by their loud
-   parts), with a soft limit just below full scale. */
+/* Where a sound gets loud: the start of its first 5 ms within 15 dB of its loudest 5 ms. Sony's own get there
+   within 5-35 ms (moving, selecting, going back) and nearly all within 85 ms. */
+function uiSoundHit(chans, rate) {
+  const n = Math.min(...chans.map(c => c.length)), w = Math.max(1, Math.round(rate * 0.005)), p = [];
+  for (let s = 0; s < n; s += w) {
+    let e = 0, m = 0;
+    for (const c of chans) for (let i = s; i < Math.min(n, s + w); i++) { e += c[i] * c[i]; m++; }
+    p.push(e / Math.max(m, 1));
+  }
+  const top = Math.max(0, ...p);
+  return top > 0 ? p.findIndex(v => v >= top / 10 ** 1.5) * w : 0;
+}
+const UI_SOUND_LEAD = 0.01;   /* seconds kept before a sound's hit, faded in */
+
+/* Your audio for an interface sound: the silence before and after it trimmed, and anything quieter before its hit
+   down to the last 10 ms (faded in), so it plays the moment you press as the console's do; no longer than `max`
+   samples (cut with a short fade); as loud as the console's sound (`target`, by their loud parts), with a soft
+   limit just below full scale. `lead`: the seconds of quieter sound cut before the hit. */
 function uiSoundPrepare(chans, rate, target, max) {
   const n = Math.min(...chans.map(c => c.length)), quiet = 0.001;
   const heard = i => chans.some(c => Math.abs(c[i]) > quiet);
@@ -2112,10 +2127,15 @@ function uiSoundPrepare(chans, rate, target, max) {
   if (a >= z) throw new Error("the sound is silent");
   a = Math.max(0, a - Math.round(rate * 0.001));
   z = Math.min(n, z + Math.round(rate * 0.005));
+  const hit = a + uiSoundHit(chans.map(c => c.subarray(a, z)), rate);
+  const from = Math.max(a, hit - Math.round(rate * UI_SOUND_LEAD)), lead = from - a;
+  a = from;
+  const rise = lead > 0 ? hit - from : 0;   /* the part kept before the hit fades in, when quieter sound was cut */
   const cut = z - a > max, len = Math.min(z - a, max);
   const fade = cut ? Math.min(Math.round(rate * 0.03), Math.floor(len / 4)) : Math.min(Math.round(rate * 0.002), len);
   const out = chans.map(c => {
     const o = c.slice(a, a + len);
+    for (let i = 0; i < Math.min(rise, len); i++) o[i] *= i / rise;
     for (let i = 0; i < fade; i++) o[len - fade + i] *= 1 - (i + 1) / fade;
     return o;
   });
@@ -2127,7 +2147,7 @@ function uiSoundPrepare(chans, rate, target, max) {
       o[i] = m <= knee ? v : Math.sign(v) * (knee + (1 - knee) * Math.tanh((m - knee) / (1 - knee)));
     }
   }
-  return { chans: out, cut, seconds: len / rate };
+  return { chans: out, cut, seconds: len / rate, lead: lead / rate };
 }
 /* vag:end */
 
@@ -2392,9 +2412,9 @@ async function resetPictureNow(path, el) {
 /* What each interface sound is for, by the console's name for it (snd_<name>), in the order shown. */
 const UI_SOUND_NAMES = {
   focus_move: "Moving between items", enter: "Selecting", cancel: "Going back", cannot_move_focus: "Reaching the end of a list",
-  open_option_menu: "Opening the options menu", close_option_menu: "Closing the options menu",
+  change_space: "Changing space", change_panel: "Changing panel", change_panel2: "Changing panel (2)",
   open_control_center: "Opening the Control Center", close_control_center: "Closing the Control Center",
-  open_home: "Going to the home screen", change_space: "Changing space", change_panel: "Changing panel", change_panel2: "Changing panel (2)",
+  open_option_menu: "Opening the options menu", close_option_menu: "Closing the options menu", open_home: "Going to the home screen",
   open_dialog: "A dialog opening", open_error_dialog: "An error dialog opening", yes_in_dialog: "Confirming in a dialog",
   no_in_dialog: "Declining in a dialog", neutral_in_dialog: "Another choice in a dialog", error: "An error",
   switch_on: "Turning a switch on", switch_off: "Turning a switch off", checkbox_on: "Ticking a box", checkbox_off: "Unticking a box",
@@ -2410,7 +2430,8 @@ const UI_SOUND_NAMES = {
   psvr2_room_scale_finish: "The PS VR2 play area done", set_pad_orientation_1: "Controller orientation (1)",
   set_pad_orientation_2: "Controller orientation (2)", undefined: "A sound without its own",
 };
-const UI_SOUND_FIRST = 4;   /* moving, selecting, going back, the end of a list: shown without "Show all" */
+const UI_SOUND_FIRST = 9;   /* moving, selecting, going back, the end of a list, changing space or panel (L1/R1 and the
+                               like), the Control Center: shown without "Show all" */
 const UI_SOUND_SETS = { "": "Default", 1: "PlayStation", 2: "PlayStation 2", 3: "PlayStation 3", 4: "PlayStation 4" };
 
 /* The interface's sounds (default ones, then each Appearance theme's: snd_2_focus_move is the PlayStation 2
@@ -2441,6 +2462,7 @@ async function uiSoundFile(onWait) {
   return null;
 }
 
+const UI_SOUND_LATE = 0.05;   /* a theme's sound that gets loud later than this is offered Start at the hit */
 let uiSoundsLast = null;   /* the list as last shown, and for which theme: shown again at once when the section is redrawn */
 function uiSoundsBox() {
   if (uiSoundsLast && uiSoundsLast.id === state.editId) return uiSoundsLast.html;
@@ -2465,13 +2487,19 @@ async function uiSoundsShow() {
       const changes = await rcoChanges(path), list = uiSounds(r);
       const mineOf = s => changes.has(`${s.f.el}\t${s.f.attr}`);
       const length = s => { try { const d = rcoData(r, s.f); return `${(vagMaxSamples(d) / vagInfo(d).rate).toFixed(2)} s`; } catch (e) { return ""; } };
+      /* When the theme's sound gets loud, if later than UI_SOUND_LATE (heard as a delay after pressing) */
+      const late = s => {
+        try { const d = vagDecode(changes.get(`${s.f.el}\t${s.f.attr}`)), t = uiSoundHit(d.chans, d.rate) / d.rate; return t > UI_SOUND_LATE ? t : 0; }
+        catch (e) { return 0; }
+      };
       const row = s => {
-        const mine = mineOf(s), at = `data-path="${esc(path)}" data-id="${esc(s.id)}"`;
+        const mine = mineOf(s), at = `data-path="${esc(path)}" data-id="${esc(s.id)}"`, wait = mine ? late(s) : 0;
         return `<div class="row-item${mine ? " replaced" : ""}">
           <div class="info"><div class="file">${esc(s.name)}${mine ? ` <span class="tag on">Replaced</span>` : ""}</div>
-            <div class="dir">${esc(s.id)} · ${length(s)}</div></div>
+            <div class="dir">${esc(s.id)} · ${length(s)}${wait ? ` · yours gets loud ${wait.toFixed(2)} s after you press` : ""}</div></div>
           <div class="acts"><button class="btn sm ghost" data-act="uisnd-play" ${at}>Play</button>
             ${mine ? `<button class="btn sm ghost" data-act="uisnd-play" ${at} data-mine="1">Play yours</button>` : ""}
+            ${wait ? `<button class="btn sm" data-act="uisnd-hit" ${at} title="Cut the quieter sound before its hit (keeping the last 10 ms, faded in), so it plays the moment you press">Start at the hit</button>` : ""}
             <button class="btn sm" data-act="uisnd-pick" ${at}>${mine ? "Replace" : "Attach"}</button>
             ${mine ? `<button class="btn sm ghost danger" data-act="uisnd-reset" ${at}>Reset</button>` : ""}</div></div>`;
       };
@@ -2480,7 +2508,7 @@ async function uiSoundsShow() {
       const sets = Object.keys(UI_SOUND_SETS).filter(k => k && list.some(s => s.set === k));
       replaced = list.filter(mineOf).length;
       html = `<h3 class="sub-head">Interface sounds</h3>
-        <p class="note">The sounds of moving between items, selecting, going back and the rest${replaced ? ` (${plural(replaced, "replaced")})` : ""}. Apply, then use rest mode.${help(`Any audio file, converted on this device to the console's own sound format, as loud as the sound it replaces and no longer: a longer one is cut with a short fade (moving between items is 0.41 s on 13.42). Silence at its start is trimmed, so it plays the moment you press. The PlayStation to PlayStation 4 sounds are the Appearance themes' own (Settings > Appearance and Sound). The controller's vibration patterns stay the console's. The sounds are kept in the interface's resource file (${baseName(path)}), so Interface icons shows that file as changed too.`)}</p>
+        <p class="note">The sounds of moving between items, selecting, going back and the rest${replaced ? ` (${plural(replaced, "replaced")})` : ""}. Apply, then use rest mode.${help(`Any audio file, converted on this device to the console's own sound format, as loud as the sound it replaces and no longer: a longer one is cut with a short fade (moving between items is 0.41 s on 13.42). It starts at its hit, as the console's do: silence and quieter sound before it are cut (the last 10 ms kept, faded in), so it plays the moment you press. The PlayStation to PlayStation 4 sounds are the Appearance themes' own (Settings > Appearance and Sound). The controller's vibration patterns stay the console's. The sounds are kept in the interface's resource file (${baseName(path)}), so Interface icons shows that file as changed too.`)}</p>
         <div class="rows">${showDefaults.map(row).join("")}</div>
         ${defaults.length > UI_SOUND_FIRST ? `<div><button class="btn sm ghost" data-act="uisnd-all">${all ? "Show fewer" : `Show all ${defaults.length} default sounds`}</button></div>` : ""}
         ${sets.map(k => `<p class="note" style="margin-top:14px"><b>${esc(UI_SOUND_SETS[k])}</b> Appearance theme</p>
@@ -2525,7 +2553,29 @@ async function replaceUiSoundNow(path, id, file) {
     changes.set(`${s.f.el}\t${s.f.attr}`, made.bytes);
     p.set(`Sending ${baseName(path)} to the console…`, 0.6);
     await rcoSave(path, changes);
-    p.done(`${s.label}: replaced and verified${prep.cut ? ` (cut to ${prep.seconds.toFixed(2)} s, the console's length)` : ""}. Apply the theme, then put the console in rest mode and wake it.`, "ok");
+    const notes = [prep.lead >= 0.02 ? `starting at its hit: ${prep.lead.toFixed(2)} s of quieter sound before it cut` : "",
+                   prep.cut ? `cut to ${prep.seconds.toFixed(2)} s, the console's length` : ""].filter(Boolean);
+    p.done(`${s.label}: replaced and verified${notes.length ? ` (${notes.join("; ")})` : ""}. Apply the theme, then put the console in rest mode and wake it.`, "ok");
+  } catch (e) {
+    p.done(`${s.label}: ${e.message}`, "err");
+  }
+  renderAspect(aspectById("sounds"));
+}
+
+/* A theme's sound made earlier, started at its hit: decoded, trimmed as a new one is, written again. */
+function startUiSoundAtHit(path, id) { return rcoQueued("Starting the sound at its hit", () => startUiSoundAtHitNow(path, id), true); }
+async function startUiSoundAtHitNow(path, id) {
+  const r = await rcoStock(path), s = r && uiSounds(r).find(x => x.id === id);
+  if (!s) return;
+  const p = progressToast(`Starting ${s.label.toLowerCase()} at its hit…`);
+  try {
+    const stock = rcoData(r, s.f), changes = await rcoChanges(path), key = `${s.f.el}\t${s.f.attr}`, mine = changes.get(key);
+    if (!mine) throw new Error("the theme has the console's own sound here");
+    const d = vagDecode(mine), prep = uiSoundPrepare(d.chans, d.rate, vagDecode(stock).chans, vagMaxSamples(stock));
+    changes.set(key, vagEncode(stock, prep.chans).bytes);
+    p.set(`Sending ${baseName(path)} to the console…`, 0.6);
+    await rcoSave(path, changes);
+    p.done(`${s.label}: now starts at its hit (${prep.lead.toFixed(2)} s of quieter sound before it cut). Apply the theme, then put the console in rest mode and wake it.`, "ok");
   } catch (e) {
     p.done(`${s.label}: ${e.message}`, "err");
   }
@@ -6305,6 +6355,7 @@ document.addEventListener("click", async e => {
       if (file) replaceUiSound(el.dataset.path, el.dataset.id, file);
       return;
     }
+    case "uisnd-hit": el.disabled = true; el.textContent = "Trimming…"; return startUiSoundAtHit(el.dataset.path, el.dataset.id);
     case "uisnd-reset": el.disabled = true; el.textContent = "Resetting…"; return resetUiSound(el.dataset.path, el.dataset.id);
     case "uisnd-all": state.uiSoundsAll = !state.uiSoundsAll; uiSoundsLast = null; return renderAspect(aspectById("sounds"));
     case "uisnd-retry": rcoFailed.clear(); uiSoundsLast = null; return renderAspect(aspectById("sounds"));

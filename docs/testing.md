@@ -28,7 +28,8 @@ container (GitHub Actions runs them on every push: see
   doesn't match, longer than the console's, another opening or ending, a loop
   mark, a sound frame flagged as the last too early or not at all, a shift
   of 13, a predictor beyond the 128, or a changed vibration pattern; the
-  page's encoder, run in Node, trimming the silence before a sound, cutting
+  page's encoder, run in Node, trimming the silence before a sound and a
+  quiet stretch before its hit (getting loud within 10 ms), cutting
   one that is too long to the console's length, refusing to write a longer
   one, keeping the console's header, opening and closing frames byte for
   byte, decoding again to exactly the samples it meant, and changing only

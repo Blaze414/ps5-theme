@@ -248,18 +248,20 @@ SOUNDS_JS = """
 const fs = require("fs");
 const html = fs.readFileSync(process.argv[2], "utf8");
 const grab = n => html.slice(html.indexOf(`/* ${n}:begin */`), html.indexOf(`/* ${n}:end */`));
-const R = new Function("esc", grab("rco") + grab("vag") + ";return { rcoParse, rcoRebuild, rcoData, vagInfo, vagSamples, vagDecode, vagEncode, vagMaxSamples, vagLayoutProblem, uiSoundPrepare };")(s => String(s));
+const R = new Function("esc", grab("rco") + grab("vag") + ";return { rcoParse, rcoRebuild, rcoData, vagInfo, vagSamples, vagDecode, vagEncode, vagMaxSamples, vagLayoutProblem, uiSoundPrepare, uiSoundHit };")(s => String(s));
 const r = R.rcoParse(new Uint8Array(fs.readFileSync(process.argv[3])));
 const entry = id => r.files.find(f => f.id === id && f.type === "sound/vag");
 const out = {};
 const replace = new Map();
-for (const [id, seconds, mono] of [["snd_focus_move", 1, false], ["snd_2_focus_move", 0.01, true]]) {
+for (const [id, seconds, mono, bed] of [["snd_focus_move", 1, false, 7200], ["snd_2_focus_move", 0.01, true, 0]]) {
   const f = entry(id), stock = R.rcoData(r, f), info = R.vagInfo(stock);
   if (R.vagLayoutProblem(stock, stock) !== "") throw new Error("the console's own sound is not laid out as the console's");
-  /* Your audio: silence, a falling tone with a click, silence; one channel for the theme's sound. */
-  const n = Math.round(seconds * info.rate), lead = 2000, chans = [];
+  /* Your audio: silence, a quiet bed (`bed` samples, 40 dB down: as in a clip from a game), a falling tone with a
+     click, silence; one channel for the theme's sound. */
+  const n = Math.round(seconds * info.rate), lead = 2000 + bed, chans = [];
   for (let c = 0; c < (mono ? 1 : 2); c++) {
     const x = new Float32Array(lead + n + 3000);
+    for (let i = 2000; i < lead; i++) x[i] = 0.006 * Math.sin(i / 3);
     for (let i = 0; i < n; i++) x[lead + i] = 0.6 * Math.sin(2 * Math.PI * (900 - 400 * i / n) * i / info.rate) * (c ? 0.5 : 1) + (i === 5 ? 0.3 : 0);
     chans.push(x);
   }
@@ -268,7 +270,8 @@ for (const [id, seconds, mono] of [["snd_focus_move", 1, false], ["snd_2_focus_m
   let tooLong = "";
   try { R.vagEncode(stock, [new Float32Array(R.vagMaxSamples(stock) + 1)]); } catch (e) { tooLong = e.message; }
   out[id] = { cut: prep.cut, samples: made.samples, max: R.vagMaxSamples(stock), snr: made.snr, layout: R.vagLayoutProblem(stock, made.bytes),
-              size: made.bytes.length, stockSize: stock.length, tooLong, started: prep.chans[0].findIndex(v => Math.abs(v) > 0.001) };
+              size: made.bytes.length, stockSize: stock.length, tooLong, started: prep.chans[0].findIndex(v => Math.abs(v) > 0.001),
+              lead: prep.lead, loudAt: R.uiSoundHit(prep.chans, info.rate) / info.rate };
   replace.set(f.el + "\\t" + f.attr, made.bytes);
   fs.writeFileSync(process.argv[4] + "." + id, made.bytes);
 }
@@ -2411,7 +2414,8 @@ def t_interface_pictures():
         code, r = put_file("ui", UI_RCO, numbered)
         assert code == 200, (mode, r)
 
-    # The page's sounds: your audio trimmed to start at once, cut to the console's length with a fade, as loud as the
+    # The page's sounds: your audio trimmed to start at once (silence, and quieter sound before its hit but the last
+    # 10 ms), cut to the console's length with a fade, as loud as the
     # console's; laid out as the console's byte for byte where its bytes don't depend on the sound; decoded again it
     # gives exactly what the encoder meant (checked in the page); the console accepts it, everything else unchanged.
     write("/tmp/sounds.js", SOUNDS_JS.encode())
@@ -2422,7 +2426,10 @@ def t_interface_pictures():
     assert move["cut"] and move["samples"] == move["max"] and move["size"] == move["stockSize"], move
     assert not ps2["cut"] and ps2["size"] < ps2["stockSize"], ps2
     for s in (move, ps2):
-        assert s["layout"] == "" and s["snr"] > 12 and s["started"] < 60 and "longer than the console's" in s["tooLong"], s
+        assert s["layout"] == "" and s["snr"] > 12 and "longer than the console's" in s["tooLong"], s
+        assert s["loudAt"] <= 0.011, s                          # loud at once: at most the 10 ms kept before its hit
+    assert 0.14 <= move["lead"] <= 0.155 and move["started"] < 0.012 * 48000, move   # the quiet bed cut, its last 10 ms faded in
+    assert ps2["lead"] == 0 and ps2["started"] < 60, ps2                               # nothing before the hit: only silence trimmed
     sounds = open("/tmp/sounds.rco", "rb").read()
     for sid in ("snd_focus_move", "snd_2_focus_move"):
         made, stock_snd = open(f"/tmp/sounds.rco.{sid}", "rb").read(), old[(sid, "src")]
