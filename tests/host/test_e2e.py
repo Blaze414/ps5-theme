@@ -1053,6 +1053,18 @@ def t_busy_overlay_is_never_forced():
     before = log_text()
     reader = open(f"{HOME}/bg.png", "rb")          # an app reading the theme's picture
     try:
+        # The same theme again, unchanged: its folder is reused (renamed), and the overlay in use already shows it
+        # (the console's nullfs refuses to stack a folder on a view of itself): it carries on, no layer added.
+        mark = len(log_text())
+        s = apply_and_wait("night")
+        new = log_text()[mark:]
+        assert f"{HOME} already shows this theme's folder (an overlay still in use): it carries on" in new, new[-2000:]
+        assert "could not be used" not in status()["result"] and "failed" not in new, (status()["result"], new[-2000:])
+        assert len(mounts_on(HOME)) == 1, mounts_on(HOME)
+        layers = [l.split("\t")[1] for l in open(f"{BASE}/mounts").read().splitlines() if l.startswith(HOME + "\t")]
+        assert len(layers) == 1 and os.path.isdir(layers[0]), layers     # recorded under the folder's new name
+        assert crc_file(f"{HOME}/bg.png") == zlib.crc32(S["bg"])
+        before = log_text()
         apply_and_wait("dawn")
         assert crc_file(f"{HOME}/bg.png") == zlib.crc32(dawn)
         # night's stays under dawn's, with nothing in between: one layer per switch, not two

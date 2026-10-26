@@ -782,6 +782,19 @@ cover_with_stock(const char *on, const char *real, mount_rec_t *rec) {
   return 0;
 }
 
+/* Carry on with the overlay that stayed in use on `on` as this apply's,
+   recorded under its folder's new name `dir`: it already shows that very
+   folder (an unchanged folder reused for the same theme, renamed from the
+   name it was mounted under). 0 if done. */
+static int
+adopt_left_overlay(const char *on, const char *dir) {
+  int n = read_mount_records(records, MAX_RECORDS), top = -1;
+  for(int i = 0; i < n; i++) if(!strcmp(records[i].on, on)) top = i;
+  if(top < 0) return -1;
+  snprintf(records[top].src, sizeof(records[top].src), "%s", dir);
+  return write_mount_records(records, n);
+}
+
 /* The same, recorded in MOUNTS_FILE: for an apply whose new overlay didn't
    go on where revert_mounts left the previous theme under it. */
 static void
@@ -2074,16 +2087,24 @@ apply_theme(const char *name) {
 #ifdef TEST_HOOKS
   test_hold("before");
 #endif
-  static int job_mounted[MAX_JOBS];
+  static int job_mounted[MAX_JOBS], job_adopted[MAX_JOBS];
   for(int i = 0; i < njobs; i++) {
     job_t *j = &jobs[i];
     stage_t *st = &stages[job_stage[i]];
-    job_mounted[i] = 0;
+    job_mounted[i] = job_adopted[i] = 0;
     if(st->state < 0) {
       if(!j->view) failed++;
       continue;
     }
     int r = mount_overlay(st->dir, j->on);
+    /* nullfs won't stack a folder on a view of itself (EDEADLK): the overlay
+       that stayed in use there already shows this very folder, so it carries
+       on as this one, and nothing goes on top. */
+    if(r < 0 && errno == EDEADLK && job_left[i] && !adopt_left_overlay(j->on, st->dir)) {
+      log_msg("%s already shows this theme's folder (an overlay still in use): it carries on", j->on);
+      job_mounted[i] = job_adopted[i] = 1;
+      continue;
+    }
     if(r) {
       if(r < 0) log_err("mount %s -> %s failed: %s", st->dir, j->on, strerror(errno));
       if(r < 0 && !j->view) failed++;
@@ -2115,7 +2136,8 @@ apply_theme(const char *name) {
 #endif
     if(bad) {
       log_err("verification failed on %s, removing overlay", j->on);
-      if(plat_unmount(j->on)) log_err("unmount %s failed: %s", j->on, strerror(errno));
+      if(job_adopted[i]) cover_left_theme(j->on, j->real);   /* the one in use stays; the system's files go on top */
+      else if(plat_unmount(j->on)) log_err("unmount %s failed: %s", j->on, strerror(errno));
       else if(job_left[i]) cover_left_theme(j->on, j->real);
       if(!j->view) failed++;
       continue;

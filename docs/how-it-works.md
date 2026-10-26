@@ -549,6 +549,11 @@ start until a restart. Instead:
 - the new theme's overlay goes straight on top of the one in use (since
   1.63; before, a copy of the system's folder went in between, so each
   switch while ShellUI held its interface folder added two layers there);
+- the same theme again, unchanged: its prepared folder is reused, and the
+  overlay in use already shows it, so it carries on and nothing goes on top
+  (the console's nullfs refuses to stack a folder on a view of itself,
+  "Resource deadlock avoided"; 1.63's first build hit this on the console,
+  and the plugin put the system's files on top before covering them again);
 - if the new theme's overlay can't go on there, or fails its check, a
   verified copy of the system's own folder goes on top instead, so the
   console never shows the theme that was taken down;

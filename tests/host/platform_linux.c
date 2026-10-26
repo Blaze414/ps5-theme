@@ -71,6 +71,13 @@ plat_klog(const char *msg) {
 
 int
 plat_mount_ro(const char *from, const char *on) {
+  /* As the console's nullfs: a folder is never stacked on a view of itself
+     (FreeBSD's "lock against myself" check), EDEADLK. */
+  struct stat a, b;
+  if(!stat(from, &a) && !stat(on, &b) && a.st_dev == b.st_dev && a.st_ino == b.st_ino) {
+    errno = EDEADLK;
+    return -1;
+  }
   if(emulated()) {
     char under[PATH_MAX];
     under_path(on, under, sizeof(under));
