@@ -170,6 +170,14 @@ label.field { display: grid; gap: 8px; font-size: .875rem; color: var(--muted); 
 
 .panel { background: var(--surface); border-radius: var(--radius-lg); padding: 20px; }
 form.create { display: grid; gap: 16px; grid-template-columns: 1fr; margin-bottom: 24px; }
+.panel.mix { display: grid; gap: 14px; margin-bottom: 24px; }
+.mix-top { display: grid; gap: 14px; grid-template-columns: 1fr; }
+@media (min-width: 720px) { .mix-top { grid-template-columns: 2fr 1fr; align-items: end; } }
+.mix-parts { display: grid; gap: 12px; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); align-items: start; }
+.mix-part { display: grid; gap: 6px; padding: 12px; border-radius: var(--radius); background: var(--surface); }
+.mix-part > .btn { justify-self: start; }
+.mix-elems { display: grid; gap: 8px; max-height: 360px; overflow: auto; padding-right: 4px; }
+.mix-elems .field span { font-size: .85rem; }
 @media (min-width: 720px) { form.create { grid-template-columns: 2fr 1fr auto; align-items: end; } }
 form.create .row { display: flex; gap: 8px; }
 
@@ -912,10 +920,12 @@ function renderLibrary() {
     <div class="head">
       <h1>Library</h1><span class="spacer"></span>
       <button class="btn" data-act="import">Import .zip</button>
+      ${s.themes.length > 1 ? `<button class="btn" data-act="mix">Mix and match</button>` : ""}
       <button class="btn primary" data-act="new">New theme</button>
     </div>
     ${resultBanner()}
     ${state.creating ? createForm() : ""}
+    ${state.mix ? mixForm() : ""}
     ${s.themes.length ? `<div class="grid">
       <article class="card${stockOn ? " current" : ""}">
         <div class="preview"><img class="logo" src="/icon.png" alt=""></div>
@@ -934,6 +944,7 @@ function renderLibrary() {
       ? `On a computer or phone on the same network, open <code>http://${esc(s.ip)}:8095</code> to attach files and drag in themes. `
       : ""}The applied theme comes back by itself every time etaHEN starts the plugin, after a reboot or an update too: there is no need to restore stock first. Without the jailbreak the console is stock.</p>`;
   if (state.creating) $("#new-name").focus();
+  paintLoads(view);
   fillMissingPreviews();
 }
 
@@ -1026,6 +1037,384 @@ async function duplicateTheme(id) {
     renderLibrary();
   } catch (e) { toast(e.message, "err"); }
 }
+
+/* ================================================================ mix and match */
+
+/* A new theme made of parts of others: each part, or each element of a part, taken from one of your themes or
+   left as the console's own. The parts are the editor's sections, with what the interface file holds (its
+   pictures, sounds, colours and corner shapes) split into parts of their own. The themes taken from stay as they
+   are. The plugin copies the files (/api/themes/mix); the interface file is made here, from each theme's changes
+   to it, entry by entry. */
+const MIX_PARTS = [
+  { id: "background", label: "Background", aspects: ["background"], by: "area" },
+  { id: "icons", label: "Icons", aspects: ["icons"], by: "group" },
+  { id: "music", label: "Home music", music: true },
+  { id: "sounds", label: "Sounds", aspects: ["sounds"], by: "group" },
+  { id: "uisounds", label: "Interface sounds", rco: "sound", sections: ["sounds"] },
+  { id: "fonts", label: "Fonts", aspects: ["fonts"], by: "font" },
+  { id: "appearance", label: "Appearance themes' artwork", aspects: ["appearance"], by: "piece" },
+  { id: "colours", label: "Colours", rco: "color", sections: ["appearance"] },
+  { id: "interface", label: "Interface icons", rco: "picture", sections: ["interface"] },
+  { id: "shapes", label: "Corner shapes", rco: "shape", sections: ["interface"] },
+  { id: "tiles", label: "Home screen tiles", aspects: ["tiles"], by: "tile" },
+  { id: "titles", label: "Games and apps", aspects: ["titles"], by: "title" },
+  { id: "other", label: "Animations, video, textures and other images", aspects: ["animations", "video", "textures", "images"], by: "group" },
+];
+/* Where a file goes when more than one section would list it: the more particular first. */
+const MIX_ORDER = ["background", "appearance", "tiles", "titles", "sounds", "fonts", "icons", "animations", "video", "textures", "images"];
+const MIX_ASPECT_PART = Object.fromEntries(MIX_PARTS.flatMap(p => (p.aspects || []).map(a => [a, p.id])));
+const mixPartById = id => MIX_PARTS.find(p => p.id === id);
+
+let mixAssetIndex = null;
+function mixAsset(path) {
+  if (!mixAssetIndex || mixAssetIndex.list !== state.assets) {
+    mixAssetIndex = { list: state.assets, map: new Map((state.assets || []).map(a => [a.path, a])) };
+  }
+  return mixAssetIndex.map.get(path);
+}
+
+/* The part a theme's file belongs to: "music" for the home music, "rco" for an interface file, or null for a file
+   this console doesn't have (it is left out). */
+function mixPartOf(path) {
+  if (path === HOME_MUSIC) return "music";
+  const a = mixAsset(path);
+  if (!a) return null;
+  if (a.kind === "rco") return "rco";
+  for (const id of MIX_ORDER) {
+    const asp = aspectById(id);
+    if (asp && asp.filter && asp.filter(a)) return MIX_ASPECT_PART[id];
+  }
+  return null;
+}
+
+/* The element of its part a file belongs to, [key, name]: a background area, an Appearance piece, a font, a tile,
+   a game, or the file with its size variants. */
+function mixElementOf(part, path) {
+  switch (part.by) {
+    case "area": return [areaOf(path), areaOf(path)];
+    case "piece": return [path, appearanceName(path)];
+    case "font": return [path, fontName(path)];
+    case "tile": { const t = tileTitle(path); return [t, (state.tileNames && state.tileNames.get(t)) || t]; }
+    case "title": { const t = titlesOf(path)[0] || path; return [t, (state.titleNames && state.titleNames.get(t)) || t]; }
+    default: { const k = groupKey(path); return [k, baseName(k)]; }
+  }
+}
+
+/* What one of your themes has, by part. */
+async function mixThemeInfo(t) {
+  const r = await api("GET", "/api/theme/files", { id: t.id });
+  const info = { id: t.id, name: t.name, parts: {}, rco: [], home: false, slots: [], left: 0 };
+  for (const f of r.files) {
+    const part = mixPartOf(f.path);
+    if (part === "rco") info.rco.push(f.path);
+    else if (part === "music") info.home = true;
+    else if (part) (info.parts[part] = info.parts[part] || []).push(f.path);
+    else info.left++;
+  }
+  if (t.music) info.slots = [...new Set(t.musicSequence && t.musicSequence.length ? t.musicSequence : [1])];
+  return info;
+}
+
+/* Which themes a part can be taken from: those that have something of it (any interface file, for its parts: what
+   is in it shows once the file is read). */
+function mixHas(info, part) {
+  if (part.music) return info.home || info.slots.length > 0;
+  if (part.rco) return info.rco.length > 0;
+  return (info.parts[part.id] || []).length > 0;
+}
+
+/* A part's elements across your themes: key, name, and the files (or the interface file's entries) each theme has. */
+function mixElements(part) {
+  const out = new Map();
+  const add = (key, label, tid, item) => {
+    if (!out.has(key)) out.set(key, { key, label, themes: new Map() });
+    const e = out.get(key);
+    if (!e.themes.has(tid)) e.themes.set(tid, []);
+    e.themes.get(tid).push(item);
+  };
+  if (part.rco) {
+    for (const [tid, byPath] of state.mix.rco) {
+      for (const [path, changes] of byPath) {
+        const r = state.rco && state.rco.get(path);
+        if (!r) continue;
+        const files = new Map(r.files.map(f => [`${f.el}\t${f.attr}`, f]));
+        const sounds = part.rco === "sound" ? new Map(uiSounds(r).map(s => [s.id, s.label])) : null;
+        for (const k of changes.keys()) {
+          const f = files.get(k);
+          if (!f || rcoEntryKind(f) !== part.rco) continue;
+          const label = part.rco === "sound" ? sounds.get(f.id) || f.id : part.rco === "color" ? PALETTE_NAMES[f.id] || f.id
+            : part.rco === "shape" ? "Corner shapes" : f.id;
+          add(`${path}|${part.rco === "picture" ? f.el : k}`, label, tid, k);
+        }
+      }
+    }
+  } else if (!part.music) {
+    for (const info of state.mix.themes.values()) {
+      for (const path of info.parts[part.id] || []) {
+        const [key, label] = mixElementOf(part, path);
+        add(key, label, info.id, path);
+      }
+    }
+  }
+  return [...out.values()].sort((a, b) => a.label.localeCompare(b.label) || a.key.localeCompare(b.key));
+}
+
+/* Where an element comes from: chosen for it, or its part's choice ("" for the console's own). */
+function mixSource(part, key) {
+  const own = state.mix.elems[part.id] || {};
+  return key in own ? own[key] : state.mix.picks[part.id] || "";
+}
+
+/* A theme's changes to an interface file, against the console's own (read once while the form is open). */
+async function mixRcoChanges(tid, path) {
+  const byPath = state.mix.rco.get(tid) || new Map();
+  state.mix.rco.set(tid, byPath);
+  if (byPath.has(path)) return byPath.get(path);
+  const stock = await rcoStock(path), out = new Map();
+  const res = await fetch(`/api/theme/file?${q({ id: tid, path })}`);
+  if (stock && res.ok) {
+    const t = rcoParse(await readBytes(res, f => loadProgress(`mix:${tid}:${path}`, f)));
+    const theirs = new Map(t.files.map(f => [`${f.el}\t${f.attr}`, f]));
+    for (const f of stock.files) {
+      const k = `${f.el}\t${f.attr}`, o = theirs.get(k);
+      if (!o) continue;
+      const a = rcoData(stock, f), b = rcoData(t, o);
+      if (a.length !== b.length || a.some((v, i) => v !== b[i])) out.set(k, b);
+    }
+  }
+  byPath.set(path, out);
+  return out;
+}
+
+/* Read the interface files of the themes that have one, for choosing their contents element by element. */
+async function mixLoadRco() {
+  if (state.mix.rcoLoading) return;
+  state.mix.rcoLoading = true;
+  renderLibrary();
+  try {
+    const all = [...state.mix.themes.values()].flatMap(info => info.rco.map(path => [info.id, path]));
+    for (let i = 0; i < all.length; i++) {
+      loadProgress("mix:rco", i / all.length);
+      await mixRcoChanges(all[i][0], all[i][1]);
+    }
+    loadProgress("mix:rco", 1);
+  } catch (e) { toast(`The interface files could not be read: ${e.message}`, "err"); }
+  state.mix.rcoLoading = false;
+  state.mix.rcoReady = true;
+  renderLibrary();
+}
+
+async function openMix() {
+  state.creating = false;
+  state.mix = { loading: true, themes: new Map(), name: "", picks: {}, elems: {}, open: {}, rco: new Map() };
+  renderLibrary();
+  try {
+    await loadAssets();
+    if (!state.assets) throw new Error(state.assetsError || "the console's files could not be listed");
+    const list = state.status.themes.filter(x => x.compatible);
+    for (let i = 0; i < list.length; i++) {
+      loadProgress("mix", i / list.length);
+      state.mix.themes.set(list[i].id, await mixThemeInfo(list[i]));
+    }
+    loadProgress("mix", 1);
+  } catch (e) {
+    state.mix = null;
+    toast(`Mix and match: ${e.message}`, "err");
+    return renderLibrary();
+  }
+  state.mix.loading = false;
+  renderLibrary();
+}
+
+function mixForm() {
+  const m = state.mix;
+  if (m.loading) return `<div class="panel mix">${loadingMarker("mix", "Reading your themes…")}</div>`;
+  const themes = [...m.themes.values()].sort((a, b) => a.name.localeCompare(b.name));
+  if (themes.length < 2) {
+    return `<div class="panel mix"><p class="note">Mix and match takes each part from one of your themes for this console's firmware: make or import at least two first.</p>
+      <div class="row"><button class="btn ghost" type="button" data-act="cancel-mix">Close</button></div></div>`;
+  }
+  const opt = (v, label, sel) => `<option value="${esc(v)}"${v === sel ? " selected" : ""}>${esc(label)}</option>`;
+  /* An interface file's parts, once the files are read: only the themes that change that kind, with how much. */
+  const rcoCounts = new Map(MIX_PARTS.filter(p => p.rco && m.rcoReady).map(p => {
+    const n = new Map();
+    for (const e of mixElements(p)) for (const tid of e.themes.keys()) n.set(tid, (n.get(tid) || 0) + 1);
+    return [p.id, n];
+  }));
+  const count = (info, part) => part.music ? "" : part.rco ? (rcoCounts.has(part.id) ? ` · ${plural(rcoCounts.get(part.id).get(info.id) || 0, "item")}` : "")
+    : ` · ${plural(new Set((info.parts[part.id] || []).map(p => mixElementOf(part, p)[0])).size, "item")}`;
+  const rows = MIX_PARTS.map(part => {
+    const have = themes.filter(i => mixHas(i, part) && (!rcoCounts.has(part.id) || rcoCounts.get(part.id).has(i.id)));
+    if (!have.length) return "";
+    const pick = m.picks[part.id] || "";
+    const open = !!m.open[part.id], elems = open ? mixElements(part) : [];
+    const canSplit = !part.music;
+    let detail = "";
+    if (open && part.rco && !m.rcoReady) {
+      detail = m.rcoLoading ? loadingMarker("mix:rco", "Reading the themes' interface files…", "Each is read once while this stays open.")
+        : `<p class="note">The interface files are read to list what each theme changes in them.</p>`;
+    } else if (open) {
+      detail = elems.length ? `<div class="mix-elems">${elems.map(e => {
+        const own = m.elems[part.id] || {}, cur = e.key in own ? own[e.key] : "*";
+        return `<label class="field small"><span>${esc(e.label)}</span><select data-mix-elem="${esc(part.id)}" data-key="${esc(e.key)}">
+          ${opt("*", `As the part (${pick ? (m.themes.get(pick) || {}).name || pick : "console's own"})`, cur)}${opt("", "Console's own", cur)}
+          ${themes.filter(i => e.themes.has(i.id)).map(i => opt(i.id, i.name, cur)).join("")}</select></label>`;
+      }).join("")}</div>` : `<p class="note">None of your themes changes any of it.</p>`;
+    }
+    if (rcoCounts.has(part.id) && m.picks[part.id] && !rcoCounts.get(part.id).has(m.picks[part.id])) m.picks[part.id] = "";   /* it changes none of it */
+    if (part.rco && rcoCounts.has(part.id) && !have.length) return "";
+    return `<div class="mix-part">
+      <label class="field"><span>${esc(part.label)}</span><select data-mix-part="${esc(part.id)}">
+        ${opt("", "Console's own", pick)}${have.map(i => opt(i.id, `${i.name}${count(i, part)}`, pick)).join("")}</select></label>
+      ${canSplit ? `<button class="btn ghost sm" type="button" data-act="mix-elements" data-part="${esc(part.id)}">${open ? "One choice for all" : "Element by element"}</button>` : ""}
+      ${detail}</div>`;
+  }).join("");
+  const chosen = MIX_PARTS.some(p => m.picks[p.id] || Object.values(m.elems[p.id] || {}).some(Boolean));
+  return `<form class="panel mix" id="mix">
+    <div class="mix-top">
+      <label class="field">Name of the new theme<input type="text" id="mix-name" maxlength="60" required placeholder="My mix" value="${esc(m.name)}"></label>
+      <label class="field">Start from<select id="mix-all">${opt("", "Choose a theme…", "")}${themes.map(i => opt(i.id, i.name, "")).join("")}</select></label>
+    </div>
+    <p class="note">Take each part from one of your themes; a part left as the console's own stays stock.${m.rcoReady || ![...m.themes.values()].some(i => i.rco.length) ? "" : " Interface sounds, colours, icons and corner shapes list only what each theme changes once Element by element has read their interface files."} ${help("A new theme is made from copies of the parts you choose; the themes they come from stay as they are. Element by element takes a part's pieces from different themes: each background area, each Appearance piece, each tile, game, sound or colour palette on its own. Only themes for this console's firmware are offered.")}</p>
+    <div class="mix-parts">${rows}</div>
+    <div class="row"><button class="btn ghost" type="button" data-act="cancel-mix">Cancel</button>
+      <button class="btn primary" type="submit"${chosen ? "" : " disabled"}>Create</button></div>
+  </form>`;
+}
+
+/* Make the new theme: the files copied by the plugin, the interface files made here, the editor's choices, saved. */
+async function createMix() {
+  const m = state.mix, name = uniqueName(($("#mix-name").value || "").trim() || "My mix"), id = uniqueId(name);
+  const p = progressToast(`Making ${name}…`);
+  try {
+    const lines = [], used = new Set(), sourcesOf = new Map();
+    const originals = async tid => {
+      if (!sourcesOf.has(tid)) {
+        const r = await api("GET", "/api/theme/sources", { id: tid }).catch(() => ({ have: [] }));
+        sourcesOf.set(tid, new Set(r.have || []));
+      }
+      return sourcesOf.get(tid);
+    };
+    const sections = new Set();
+    for (const part of MIX_PARTS) {
+      if (part.music) {
+        const tid = m.picks.music, info = tid && m.themes.get(tid);
+        if (!info) continue;
+        lines.push(`settings\t${tid}`);
+        if (info.home) lines.push(`file\t${tid}\t${HOME_MUSIC}`);
+        for (const slot of info.slots) lines.push(`music\t${tid}\t${slot}`);
+        used.add(tid);
+        sections.add("music");
+        continue;
+      }
+      if (part.rco) continue;
+      for (const e of mixElements(part)) {
+        const tid = mixSource(part, e.key), paths = tid && e.themes.get(tid);
+        if (!paths) continue;
+        const have = await originals(tid);
+        for (const path of paths) {
+          lines.push(`file\t${tid}\t${path}`);
+          if (have.has(path)) lines.push(`source\t${tid}\t${path}`);
+          const a = mixAsset(path);
+          for (const asp of part.aspects) if (aspectById(asp).filter(a)) sections.add(asp);
+        }
+        used.add(tid);
+      }
+    }
+    if (m.picks.background) lines.push(`preview\t${m.picks.background}`);
+
+    /* The interface files: each entry from the theme its part or element is taken from. */
+    const rcoParts = MIX_PARTS.filter(part => part.rco && (m.picks[part.id] || Object.values(m.elems[part.id] || {}).some(Boolean)));
+    const rcoFiles = new Map();
+    if (rcoParts.length) {
+      const involved = new Set();
+      for (const part of rcoParts) {
+        if (m.picks[part.id]) involved.add(m.picks[part.id]);
+        for (const v of Object.values(m.elems[part.id] || {})) if (v) involved.add(v);
+      }
+      const paths = new Set([...involved].flatMap(tid => m.themes.get(tid).rco));
+      let i = 0;
+      for (const path of paths) {
+        p.set(`Reading ${baseName(path)}…`, 0.1 + 0.4 * i++ / paths.size);
+        const changes = new Map();
+        for (const tid of involved) if (m.themes.get(tid).rco.includes(path)) changes.set(tid, await mixRcoChanges(tid, path));
+        const kinds = new Map(rcoParts.map(part => [part.rco, part]));
+        const merged = rcoMixEntries(await rcoStock(path), changes, (kind, key) => kinds.has(kind) ? mixSource(kinds.get(kind), key) : "", path);
+        if (merged.size) {
+          rcoFiles.set(path, merged);
+          for (const part of rcoParts) {
+            const own = [...merged.keys()].some(k => rcoEntryKind((state.rco.get(path).files).find(f => `${f.el}\t${f.attr}` === k)) === part.rco);
+            if (own) for (const s of part.sections) sections.add(s);
+          }
+        }
+      }
+    }
+
+    p.set(`Copying the parts…`, 0.55);
+    await api("POST", "/api/themes/mix", { id, name }, lines.join("\n") + "\n");
+    let i = 0;
+    for (const [path, merged] of rcoFiles) {
+      p.set(`Sending ${baseName(path)} to the console…`, 0.6 + 0.3 * i++ / rcoFiles.size);
+      await uploadVerified("/api/theme/file", { id, path }, new Blob([rcoRebuild(await rcoStock(path), merged)]));
+    }
+    /* The editor's choices: the sections in use, and the background's, the Appearance pieces' and the songs' own. */
+    const c = { sections: Object.fromEntries([...sections].map(s => [s, 1])) };
+    const choicesOf = async tid => cleanChoices(await api("GET", "/api/theme/choices", { id: tid }).catch(() => ({})));
+    if (m.picks.background) {
+      const b = await choicesOf(m.picks.background);
+      if (b.fit) c.fit = b.fit;
+      if (b.bgOff) c.bgOff = b.bgOff;
+    }
+    if (m.picks.music) { const s = await choicesOf(m.picks.music); if (s.songs) c.songs = s.songs; }
+    const appearance = mixPartById("appearance");
+    for (const e of mixElements(appearance)) {
+      const tid = mixSource(appearance, e.key), paths = tid && e.themes.get(tid);
+      if (!paths) continue;
+      const pieces = (await choicesOf(tid)).pieces || {};
+      for (const path of paths) if (pieces[path]) (c.pieces = c.pieces || {})[path] = pieces[path];
+    }
+    await putChoices(id, c, true);
+    if (rcoFiles.size) await api("POST", "/api/theme/save", { id });
+    await refreshStatus();
+    const from = [...used, ...rcoParts.flatMap(part => [m.picks[part.id], ...Object.values(m.elems[part.id] || {})])].filter(Boolean);
+    p.done(`${name} made from ${plural(new Set(from).size, "theme")}. Open it to check, then apply it.`, "ok");
+    state.mix = null;
+    location.hash = `#/edit/${encodeURIComponent(id)}`;
+  } catch (e) {
+    p.done(`Mix and match: ${e.message}`, "err");
+  }
+}
+
+/* mix:begin */
+/* What an entry of an interface file is, as Mix and match sorts them: "picture", "sound", "color", "shape", or ""
+   for anything a theme can't change. */
+function rcoEntryKind(f) {
+  if (!f) return "";
+  if (f.elem === "texture" && (f.type === "texture/png" || f.type === "texture/svg")) return "picture";
+  if (f.elem === "sounddata" && f.type === "sound/vag" && !/_vibration$/.test(f.id)) return "sound";
+  if (f.elem === "file" && f.type === "color") return "color";
+  if (f.elem === "file" && f.type === "shape") return "shape";
+  return "";
+}
+
+/* A mixed interface file's entries: each one changed by any of the themes in `changes` (theme id -> its changed
+   entries in this file, "element\tattribute" -> bytes), taken from the theme `sourceOf(kind, key)` names for it
+   ("" for the console's own). A picture is chosen whole, with its size variants (key "<path>|<element>"); any other
+   entry by itself ("<path>|<element>\t<attribute>"). */
+function rcoMixEntries(r, changes, sourceOf, path) {
+  const files = new Map(r.files.map(f => [`${f.el}\t${f.attr}`, f]));
+  const keys = new Set();
+  for (const m of changes.values()) for (const k of m.keys()) keys.add(k);
+  const out = new Map();
+  for (const k of keys) {
+    const f = files.get(k), kind = rcoEntryKind(f);
+    if (!kind) continue;
+    const src = sourceOf(kind, `${path}|${kind === "picture" ? f.el : k}`), m = src && changes.get(src);
+    if (m && m.has(k)) out.set(k, m.get(k));
+  }
+  return out;
+}
+/* mix:end */
 
 /* ================================================================ assets & grouping */
 
@@ -6253,7 +6642,18 @@ document.addEventListener("click", async e => {
     case "save": return saveTheme(id);
     case "discard": return discardTheme(id, el);
     case "delete": return armDelete(el, id);
-    case "new": state.creating = true; return renderLibrary();
+    case "new": state.creating = true; state.mix = null; return renderLibrary();
+    case "mix": return openMix();
+    case "cancel-mix": state.mix = null; return renderLibrary();
+    case "mix-elements": {
+      const part = mixPartById(el.dataset.part), m = state.mix;
+      if (!part || !m) return;
+      m.open[part.id] = !m.open[part.id];
+      if (!m.open[part.id]) delete m.elems[part.id];   /* one choice for the whole part again */
+      renderLibrary();
+      if (m.open[part.id] && part.rco && !m.rcoReady) mixLoadRco();
+      return;
+    }
     case "new-from-editor": state.creating = true; location.hash = "#/library"; return;
     case "cancel-new": state.creating = false; return renderLibrary();
     case "import": {
@@ -6425,6 +6825,7 @@ document.addEventListener("click", async e => {
 });
 
 document.addEventListener("submit", async e => {
+  if (e.target.id === "mix") { e.preventDefault(); return createMix(); }
   if (e.target.id !== "create") return;
   e.preventDefault();
   const name = $("#new-name").value.trim();
@@ -6480,6 +6881,7 @@ async function placementChangedNow(path) {
 }
 
 document.addEventListener("input", e => {
+  if (e.target.id === "mix-name" && state.mix) { state.mix.name = e.target.value; return; }
   if (e.target.dataset && e.target.dataset.pad) {
     const v = Math.max(0, Math.min(40, Math.round(+e.target.value || 0)));
     pieceChoice(state.choices, e.target.dataset.pad).pad = v;
@@ -6511,6 +6913,19 @@ document.addEventListener("input", e => {
 });
 
 document.addEventListener("change", async e => {
+  const mixEl = e.target;
+  if (state.mix && (mixEl.id === "mix-all" || (mixEl.dataset && (mixEl.dataset.mixPart || mixEl.dataset.mixElem)))) {
+    const m = state.mix;
+    if (mixEl.id === "mix-all") {
+      for (const part of MIX_PARTS) m.picks[part.id] = mixEl.value && mixHas(m.themes.get(mixEl.value), part) ? mixEl.value : "";
+      m.elems = {};
+    } else if (mixEl.dataset.mixPart) m.picks[mixEl.dataset.mixPart] = mixEl.value;
+    else {
+      const own = m.elems[mixEl.dataset.mixElem] = m.elems[mixEl.dataset.mixElem] || {};
+      if (mixEl.value === "*") delete own[mixEl.dataset.key]; else own[mixEl.dataset.key] = mixEl.value;
+    }
+    return renderLibrary();
+  }
   if (e.target.dataset && e.target.dataset.keep) {
     const on = e.target.checked;
     setChoice(c => { pieceChoice(c, e.target.dataset.keep).keepClear = on; });

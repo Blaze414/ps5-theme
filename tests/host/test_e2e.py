@@ -280,6 +280,31 @@ fs.writeFileSync(process.argv[4], R.rcoRebuild(r, replace));
 console.log(JSON.stringify(out));
 """
 
+MIX_JS = """
+const fs = require("fs");
+const html = fs.readFileSync(process.argv[2], "utf8");
+const grab = n => html.slice(html.indexOf(`/* ${n}:begin */`), html.indexOf(`/* ${n}:end */`));
+const R = new Function("esc", grab("rco") + grab("mix") + ";return { rcoParse, rcoRebuild, rcoData, rcoEntryKind, rcoMixEntries };")(s => String(s));
+const stock = R.rcoParse(new Uint8Array(fs.readFileSync(process.argv[3])));
+const keyOf = f => f.el + "\\t" + f.attr;
+const changesOf = p => {
+  const t = R.rcoParse(new Uint8Array(fs.readFileSync(p))), theirs = new Map(t.files.map(f => [keyOf(f), f])), out = new Map();
+  for (const f of stock.files) {
+    const a = R.rcoData(stock, f), b = R.rcoData(t, theirs.get(keyOf(f)));
+    if (a.length !== b.length || a.some((v, i) => v !== b[i])) out.set(keyOf(f), b);
+  }
+  return out;
+};
+const changes = new Map([["a", changesOf(process.argv[4])], ["b", changesOf(process.argv[5])]]);
+const picks = JSON.parse(process.argv[7]), byId = JSON.parse(process.argv[8]), path = "/x.rco", elems = {};
+for (const f of stock.files) if (f.id in byId) elems[`${path}|${R.rcoEntryKind(f) === "picture" ? f.el : keyOf(f)}`] = byId[f.id];
+const merged = R.rcoMixEntries(stock, changes, (kind, key) => key in elems ? elems[key] : picks[kind] || "", path);
+fs.writeFileSync(process.argv[6], R.rcoRebuild(stock, merged));
+const from = k => [...changes].find(([, m]) => m.get(k) === merged.get(k))[0];
+console.log(JSON.stringify({ taken: Object.fromEntries([...merged.keys()].map(k => [stock.files.find(f => keyOf(f) === k).id, from(k)])),
+                             kinds: Object.fromEntries(stock.files.filter(f => f.id).map(f => [f.id, R.rcoEntryKind(f)])) }));
+"""
+
 PICTURE_JS = """
 const fs = require("fs"), zlib = require("zlib");
 const html = fs.readFileSync(process.argv[2], "utf8");
@@ -575,7 +600,7 @@ S = {}  # shared state between ordered tests
 
 def t_startup():
     s = status()
-    assert s["fw"] == "13.42" and s["version"] == "1.64" and s["themes"] == [], s
+    assert s["fw"] == "13.42" and s["version"] == "1.65" and s["themes"] == [], s
     listing = open(f"{BASE}/dump/assets-v2-13.42.txt").read()
     assert f"{VSH}/bg_hub_default.dds.zst" in listing
     assert f"{HOME}/bg.png" in listing and "/mnt/rnps/apps/NPXS40099/a.png" in listing
@@ -585,7 +610,7 @@ def t_startup():
     assert open("/tmp/tile-registered").read().strip() == "THEM00001"
     assert "starting" in log_text()
     notes = open("/tmp/notifications.txt").read()
-    assert "ps5-theme 1.64 starting" in notes and "ps5-theme ready" in notes, notes
+    assert "ps5-theme 1.65 starting" in notes and "ps5-theme ready" in notes, notes
 
 
 def t_ui_and_icon_served():
@@ -2020,6 +2045,99 @@ def t_discard_applies_only_when_needed():
         call("DELETE", "/api/themes", {"id": "redo"})
 
 
+def t_mix_and_match():
+    """Mix and match: a new theme made of parts of others (/api/themes/mix), each file, original, song and the music
+    settings copied byte for byte from the theme named for it, the themes taken from left as they were; a list that
+    names a file outside its theme or that it doesn't have, a theme that isn't there or anything else is refused,
+    leaving nothing behind. The page's merge of the interface file takes each entry from its own theme."""
+    bg, pic, song, move = png(480, 270, (10, 200, 30)), png(480, 270, (1, 2, 3)), wav(48000, 2, 2, 12000), wav(48000, 1, 0.1, 5000)
+    for tid in ("mixa", "mixb"):
+        assert call("POST", "/api/themes", {"id": tid, "name": tid})[0] == 200
+    assert put_file("mixa", f"{HOME}/bg.png", bg)[0] == 200
+    assert call("PUT", "/api/theme/source", {"id": "mixa", "path": f"{HOME}/bg.png", "crc": f"{zlib.crc32(pic):08x}"}, pic)[0] == 200
+    assert call("PUT", "/api/theme/music", {"id": "mixa", "crc": f"{zlib.crc32(song):08x}"}, song)[0] == 200
+    assert call("POST", "/api/theme/settings", {"id": "mixa", "gain": "4"})[0] == 200
+    assert put_file("mixb", f"{MEDIA}/sounds/move.wav", move)[0] == 200
+    for tid in ("mixa", "mixb"):
+        assert call("POST", "/api/theme/save", {"id": tid})[0] == 200
+    themes = f"{BASE}/themes"
+
+    def tree(tid):
+        out = {}
+        for root, _, names in os.walk(f"{themes}/{tid}"):
+            for n in names:
+                out[os.path.relpath(os.path.join(root, n), themes)] = zlib.crc32(open(os.path.join(root, n), "rb").read())
+        return out
+    before = {tid: tree(tid) for tid in ("mixa", "mixb")}
+    lines = [f"file\tmixa\t{HOME}/bg.png", f"source\tmixa\t{HOME}/bg.png", "music\tmixa\t1", "settings\tmixa", "preview\tmixa",
+             f"file\tmixb\t{MEDIA}/sounds/move.wav"]
+    code, r = call("POST", "/api/themes/mix", {"id": "mixed", "name": "Mixed = one"}, ("\r\n".join(lines) + "\n").encode())
+    assert code == 200 and r["files"] == 2, (code, r)
+    t = {x["id"]: x for x in status()["themes"]}["mixed"]
+    assert t["name"] == "Mixed   one" and t["gain"] == 4 and t["music"] == 2 and t["files"] == 2, t
+    assert open(f"{themes}/mixed/files{HOME}/bg.png", "rb").read() == bg
+    assert open(f"{themes}/mixed/files{MEDIA}/sounds/move.wav", "rb").read() == move
+    assert open(f"{themes}/mixed/music.wav", "rb").read() == song
+    assert call("GET", "/api/theme/source", {"id": "mixed", "path": f"{HOME}/bg.png"})[1] == pic
+    assert {tid: tree(tid) for tid in ("mixa", "mixb")} == before, "a theme taken from changed"
+    assert not [n for n in os.listdir(themes) if n.startswith(".mix-")]
+    assert "mixed theme mixed (Mixed   one): 6 part line(s), 2 file(s)" in log_text()
+
+    # Refused, and nothing left behind.
+    os.makedirs(f"{themes}/mixb/files{HOME}", exist_ok=True)
+    os.symlink("/etc/hosts", f"{themes}/mixb/files{HOME}/icon.png")      # a link out of the theme's folder
+    bad = [("mixed", lines[:1], 409, "a theme with that id exists"),
+           ("m2", [f"file\tnope\t{HOME}/bg.png"], 422, "no such theme"),
+           ("m2", [f"file\tm2\t{HOME}/bg.png"], 422, "no such theme"),
+           ("m2", ["file\tmixa\t/etc/passwd"], 422, "not a replaceable system asset"),
+           ("m2", [f"file\tmixa\t{HOME}/../../../../../../etc/passwd"], 422, "not a replaceable system asset"),
+           ("m2", [f"file\tmixb\t{HOME}/bg.png"], 422, "mixb has no file"),
+           ("m2", [f"file\tmixb\t{HOME}/icon.png"], 422, "mixb has no file"),
+           ("m2", [lines[0], "music\tmixa\t9"], 422, "line 2 (music\tmixa\t9): a song is numbered 1 to 8"),
+           ("m2", ["music\tmixb\t1"], 422, "mixb has no song 1"),
+           ("m2", ["copy\tmixa"], 422, "unknown part copy"),
+           ("../m2", lines[:1], 400, "id: use letters"),
+           ("m2", [], 400, "nothing to mix")]
+    for tid, body, want, needle in bad:
+        code, r = call("POST", "/api/themes/mix", {"id": tid, "name": "M2"}, ("\n".join(body)).encode())
+        assert code == want and needle in r["error"], (body, code, r)
+        assert "m2" not in {x["id"] for x in status()["themes"]} and not [n for n in os.listdir(themes) if n.startswith(".mix-")]
+    code, r = call("POST", "/api/themes/mix", {"id": "m2"}, b"x", headers={"Content-Length": str((1 << 20) + 1)})
+    assert code == 413 and "too long" in r["error"], (code, r)
+    os.unlink(f"{themes}/mixb/files{HOME}/icon.png")
+    assert call("POST", "/api/themes/mix", {"id": "m2"}, "\n".join(lines).encode(), token=False)[0] == 403
+
+    # Applied like any theme.
+    apply_and_wait("mixed")
+    assert crc_file(f"{HOME}/bg.png") == zlib.crc32(bg) and crc_file(f"{MEDIA}/sounds/move.wav") == zlib.crc32(move)
+    apply_and_wait("night")
+
+    # The page's merge of the interface file: each kind from the theme picked for it, an element from its own.
+    rco = Rco(open(UI_RCO, "rb").read())
+    rounder = SHAPES.replace(b"16.0", b"0")
+    red = COLORS_PS2.replace(b'"text.primary.enabled": 4294967295', b'"text.primary.enabled": 4294901760')
+    write("/tmp/mix-a.rco", rco.replaced({("snd_focus_move", "src"): hevag(30, seed=9), ("color_ps2", "src"): red}))
+    write("/tmp/mix-b.rco", rco.replaced({("emoji_game", "src"): png(24, 24, (255, 0, 255)), ("shape_default", "src"): rounder,
+                                           ("snd_focus_move", "src"): hevag(20, seed=4),
+                                           ("snd_2_focus_move", "src"): hevag(50, name=b"PS2_coursol_Slim", seed=5)}))
+    write("/tmp/mix.js", MIX_JS.encode())
+    out = subprocess.run(["node", "/tmp/mix.js", WEB_PAGE, UI_RCO, "/tmp/mix-a.rco", "/tmp/mix-b.rco", "/tmp/mix.rco",
+                          json.dumps({"sound": "b", "picture": "b", "shape": "b"}), json.dumps({"snd_focus_move": "a"})],
+                         capture_output=True, text=True)
+    assert out.returncode == 0, out.stderr
+    info = json.loads(out.stdout)
+    assert info["taken"] == {"snd_focus_move": "a", "snd_2_focus_move": "b", "emoji_game": "b", "shape_default": "b"}, info["taken"]
+    assert info["kinds"]["snd_focus_move_vibration"] == "" and info["kinds"]["color_ps2"] == "color", info["kinds"]
+    mixed = Rco(open("/tmp/mix.rco", "rb").read())
+    got = {(f[1], f[3]): mixed.data(f[5], f[6]) for f in mixed.files()}
+    old = {(f[1], f[3]): rco.data(f[5], f[6]) for f in rco.files()}
+    assert got[("color_ps2", "src")] == old[("color_ps2", "src")]                     # colours weren't picked
+    assert got[("snd_focus_move", "src")] == hevag(30, seed=9) and got[("shape_default", "src")] == rounder
+    assert put_file("mixed", UI_RCO, open("/tmp/mix.rco", "rb").read())[0] == 200
+    for tid in ("mixed", "mixa", "mixb"):
+        assert call("DELETE", "/api/themes", {"id": tid})[0] == 200
+
+
 def t_preview_pictures():
     """A theme's library picture: a complete JPEG kept beside the theme, never in what is applied."""
     pic, other = jpeg_header(1280, 720), jpeg_header(640, 480)
@@ -3091,7 +3209,7 @@ def t_appearance_textures():
     # A remembered check result is made by a version and a revision of the rules: results of other rules are
     # not trusted (the same version can ship twice while a feature is built).
     remembered = open(f"{BASE}/checked").read().splitlines()
-    assert remembered and all(re.match(r"1\.64r\d+\t", l) for l in remembered), remembered[:2]
+    assert remembered and all(re.match(r"1\.65r\d+\t", l) for l in remembered), remembered[:2]
     assert put_file("appear", f"{HOME}/bg.png", S["bg"])[0] == 200
 
     shell = "/mnt/sandbox/NPXS40087_000"
@@ -3531,7 +3649,7 @@ TESTS = [t_startup, t_ui_and_icon_served, t_mutations_need_token, t_create_theme
          t_stock_mirror_and_linked_staging, t_stage_folders_reused_without_links,
          t_firmware_mismatch_is_refused, t_delete_rules, t_concurrent_requests_during_apply,
          t_restore_stock_cleans_up, t_overlays_reach_system_views, t_crash_loop_takes_theme_down, t_busy_overlay_is_never_forced, t_recovers_after_hard_kill, t_update_from_payload_manager, t_update_from_plain_elf, t_update_hands_over, t_update_at_boot, t_web_comes_back_after_rest_mode, t_takeover_when_web_is_down, t_stop_tool_keeps_the_theme, t_failed_write_closes_its_file, t_survives_malformed_and_abusive_requests,
-         t_slow_clients_do_not_block_others, t_log_rotates, t_media_policy, t_music, t_music_playlist, t_theme_choices, t_settings_and_duplicate, t_preview_pictures, t_save_and_discard, t_discard_applies_only_when_needed, t_cut_off_uploads_are_not_theme_files,
+         t_slow_clients_do_not_block_others, t_log_rotates, t_media_policy, t_music, t_music_playlist, t_theme_choices, t_settings_and_duplicate, t_mix_and_match, t_preview_pictures, t_save_and_discard, t_discard_applies_only_when_needed, t_cut_off_uploads_are_not_theme_files,
          t_home_background_textures, t_interface_pictures, t_title_pictures, t_fonts, t_bc7_keeps_transparency, t_page_writes_the_consoles_zstd_frames, t_page_builds_playlists, t_page_bleeds_colour_into_clear_pixels, t_page_places_textures_against_their_edge, t_texture_sources, t_appearance_textures, t_shellui_exit_releases_sandbox, t_shellui_exits_during_apply, t_title_where, t_watch_files, t_home_music_at9, t_long_mount_paths_use_parent_folder, t_system_is_byte_identical_afterwards, t_crash_is_reported_and_recovered,
          t_privilege_failure_exits_cleanly]
 

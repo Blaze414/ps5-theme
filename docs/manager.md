@@ -32,10 +32,43 @@ The library is the home page.
   as "16 files verified on the console".
 - **Import .zip:** imports a theme. You can also drop a `.zip` or a folder
   anywhere on the page.
+- **Mix and match** (with two themes or more, since 1.65): see below.
 
 The page refreshes by itself every few seconds, and every second while a
 theme is being applied, so it stays correct even when you use it from two
 devices at once.
+
+### Mix and match
+
+**Mix and match** makes a new theme from parts of the ones you have: Snoopy's
+background and icons, say, with another theme's home music and interface
+sounds and a third one's font. The themes it takes from stay as they are.
+
+- **Name** the new theme, then choose where each part comes from: one of your
+  themes, or **Console's own** (that part stays stock). **Start from** fills
+  every part from one theme, to change a few of them afterwards.
+- **The parts:** background, icons, home music (its songs, playlist and
+  settings), sounds, interface sounds, fonts, the Appearance themes'
+  artwork, colours, interface icons, corner shapes, home screen tiles, games
+  and apps, and the rest (animations, video, textures and other images).
+  Each list offers only the themes that have something of that part, and how
+  many items each has.
+- **Element by element** splits a part so each piece can come from its own
+  theme: each background area (the default background, the Game Library, a
+  tile's), each Appearance piece, each tile, game, font or sound, each
+  interface sound, colour palette or interface icon. A piece left at **As the
+  part** follows the part's choice.
+- **Interface sounds, colours, interface icons and corner shapes** live in
+  one interface file. Element by element reads it from each theme that has
+  one (about 39 MB each on 13.42, read once while the form is open); after
+  that, only the themes that change that kind are offered. The new theme's
+  interface file is made on the device you're using, each entry taken from
+  its own theme.
+- **Create** makes the theme, saves it, and opens it in the editor, with the
+  sections it uses switched on and the background's, Appearance pieces' and
+  songs' own choices kept. Check it there, then apply it.
+- Only themes for this console's firmware are offered, and parts are taken
+  as each theme is now, unsaved changes included.
 
 ## Creating a theme
 

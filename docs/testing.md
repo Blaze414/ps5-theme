@@ -7,7 +7,7 @@ tests/host/run.sh
 ```
 
 Builds the real plugin sources for Linux with AddressSanitizer and UBSan and
-runs 58 end-to-end tests against a fake console tree in a privileged
+runs 59 end-to-end tests against a fake console tree in a privileged
 container (GitHub Actions runs them on every push: see
 [Building](building.md#continuous-integration)). They cover:
 
@@ -94,6 +94,15 @@ container (GitHub Actions runs them on every push: see
 - Save and Discard, preview pictures and duplicates; Discard applying the
   theme again only when the console shows other files than the ones it puts
   back;
+- Mix and match: a new theme made of three themes' parts, each file,
+  original, song and the music settings copied byte for byte, the themes
+  taken from unchanged, then applied; a list naming another theme's file, a
+  file a theme doesn't have, a path out of the system's folders or through a
+  link out of the theme, a theme that isn't there, a song numbered 9, an
+  unknown part, an existing id, an empty or too long list or a request
+  without the manager's header refused, leaving nothing behind; the page's
+  merge of the interface file taking each kind, and a single element, from
+  its own theme, and the plugin accepting the result;
 - home music made by the browser's encoder, and damaged or wrong-format
   ATRAC9 files; a pure tone encoded for a sound never coded above precision
   6, as 13.42's `sfx_transition.at9` is;

@@ -598,6 +598,35 @@ each checked by the console. Anything the console refuses (another firmware's
 files, for example) is skipped and listed. The message says what came in,
 for example "15 backgrounds and the home music, all verified".
 
+## Mix and match
+
+A new theme made of parts of others (since 1.65).
+
+- **The page decides what makes each part.** It sorts each theme's files into
+  the editor's sections by the same rules the editor lists them with, the
+  more particular first (a tile's icon is a tile, not an icon), and into
+  elements: background areas, Appearance pieces, tiles, games, fonts, or a
+  file with its size variants. Files this console doesn't have are left out.
+- **The plugin copies them** (`POST /api/themes/mix`): the page sends one line
+  per file, kept original, song, music settings or preview picture, each
+  naming the theme it comes from. Every path is checked as an upload's is (a
+  replaceable system file of this console), must lie inside that theme's
+  folder (no link out of it) and must be a file it has; anything else
+  refuses the whole mix. The theme is built under a hidden name and renamed
+  into place only when everything is in, so a mix that fails leaves nothing.
+  The files are copied as they are, as Duplicate copies them, and checked
+  against the console's own again when the theme is applied.
+- **The interface file is made in the browser.** Interface icons, interface
+  sounds, colours and corner shapes share one file, so each theme's changes to
+  it are read against the console's own, and each changed entry is taken from
+  the theme its part or element names: a picture with all its size variants,
+  anything else entry by entry. The rebuilt file is uploaded like any other
+  and checked by the plugin (see
+  [Interface pictures in resource files](#interface-pictures-in-resource-files)).
+- **The editor's choices** come along: the sections the parts use, the
+  background's fit and areas, the Appearance pieces' placement, the songs'
+  names.
+
 ## The web server
 
 A small HTTP/1.1 server in C (`src/web.c`): one listener thread and four

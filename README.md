@@ -16,7 +16,7 @@ the plugin stops, and the plugin puts your theme back each time etaHEN starts.
 
 ![The theme library](docs/screenshots/library.png)
 
-Version 1.64. Developed and tested on a PS5 with firmware 13.42, both with
+Version 1.65. Developed and tested on a PS5 with firmware 13.42, both with
 etaHEN 2.5B (unified build) and on its own from PS5 Payload Manager.
 
 > **About the screenshots.** They were taken from the author's own console.
@@ -81,6 +81,10 @@ etaHEN 2.5B (unified build) and on its own from PS5 Payload Manager.
   Discard puts the theme back as it was.
 - **Clear progress.** Applying shows what the console is doing and how far it
   has got.
+- **Mix and match.** Make a new theme from parts of the ones you have: each
+  part, or each element of it (a background area, a game's icon, one
+  interface sound), taken from the theme you choose (see
+  [Mix and match](docs/manager.md#mix-and-match)).
 - **Library tools.** Duplicate, export to a `.zip`, import a `.zip` or a folder
   (drag it in), and delete.
 - **Comes back by itself.** The applied theme is put back every time etaHEN

@@ -37,7 +37,9 @@ console with those rights. So that code gets the most testing.
 - Every write goes through the write guard and stays inside
   `/data/ps5-theme/` and the tile's folder (see
   [Never writing the system](how-it-works.md#never-writing-the-system), including what it
-  doesn't cover). The one exception is the plugin bringing its own older
+  doesn't cover). Mix and match copies files only between themes, under
+  `/data/ps5-theme/themes/`, each path checked as an upload's is and kept
+  inside its theme's folder. The one exception is the plugin bringing its own older
   installed copies in etaHEN's and PS5 Payload Manager's folders up to date
   after an update; that write is limited to those files and checked the
   same way.
