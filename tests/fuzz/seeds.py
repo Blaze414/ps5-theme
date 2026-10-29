@@ -111,6 +111,22 @@ put("json", "bom", b'\xef\xbb\xbf{"w": 100, "h": 100}')
 
 # PNG pictures checked against the console's own (a palette picture)
 open(f"{stock_dir}/stock-palette.png", "wb").write(palette_png(20, 20))
+def png_filtered(w, h, ch, filt):
+    """An 8-bit RGB (ch 3) or RGBA (ch 4) PNG whose rows use row filter `filt`."""
+    rows = []
+    for y in range(h):
+        row = bytes(((x * 37 + y * 11 + c * 53) & 255) for x in range(w) for c in range(ch))
+        rows.append(bytes([filt]) + row)   # (the filter byte with raw bytes: decodes to some picture, which is enough)
+    def chunk(kind, data):
+        return struct.pack(">I", len(data)) + kind + data + struct.pack(">I", zlib.crc32(kind + data))
+    return (b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", w, h, 8, 2 if ch == 3 else 6, 0, 0, 0))
+            + chunk(b"IDAT", zlib.compress(b"".join(rows))) + chunk(b"IEND", b""))
+
+
+for ch in (3, 4):
+    for filt in range(5):
+        put("png-pixels", f"ch{ch}-filter{filt}", png_filtered(9, 7, ch, filt))
+put("png-pixels", "icon-like", png_filtered(64, 64, 3, 0))
 put("png", "same", palette_png(20, 20))
 put("png", "other-pixels", palette_png(20, 20, lambda x, y: 2 * (x > y)))
 put("png", "stored", palette_png(20, 20, level=0))

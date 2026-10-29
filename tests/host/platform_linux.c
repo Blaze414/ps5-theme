@@ -24,6 +24,7 @@
 
 #include <sys/mount.h>
 #include <sys/stat.h>
+#include <sys/statvfs.h>
 
 #include "platform.h"
 
@@ -152,6 +153,9 @@ plat_is_our_mount(const char *on, const char *stage_prefix) {
 }
 
 
+static int proc_times(const char *pid, unsigned long long *start, unsigned long long *cpu_us);
+
+/* (not one that has exited and is waiting to be reaped, as on the console) */
 int
 plat_find_process(const char *name) {
   DIR *d = opendir("/proc");
@@ -159,16 +163,62 @@ plat_find_process(const char *name) {
   int pid = -1;
   while(d && pid < 0 && (e = readdir(d))) {
     char path[64], comm[64] = "";
+    unsigned long long start, cpu;
     if(e->d_name[0] < '1' || e->d_name[0] > '9') continue;
     snprintf(path, sizeof(path), "/proc/%s/comm", e->d_name);
     FILE *f = fopen(path, "r");
     if(!f) continue;
     if(fgets(comm, sizeof(comm), f)) comm[strcspn(comm, "\n")] = 0;
     fclose(f);
-    if(!strcmp(comm, name)) pid = atoi(e->d_name);
+    if(!strcmp(comm, name) && !proc_times(e->d_name, &start, &cpu)) pid = atoi(e->d_name);
   }
   if(d) closedir(d);
   return pid;
+}
+
+
+/* A process's start (as plat_process_start gives it) and processor time from /proc/<pid>/stat: its user and
+   system time in clock ticks, as the console's kernel keeps ki_runtime. Plus one microsecond, as the start is plus
+   one: a process that has used less than a tick has a time that is known, and 0 means one that can't be told.
+   0, or -1 if it has gone. */
+static int
+proc_times(const char *pid, unsigned long long *start, unsigned long long *cpu_us) {
+  char path[64], line[1024] = "";
+  snprintf(path, sizeof(path), "/proc/%s/stat", pid);
+  FILE *f = fopen(path, "r");
+  char *rest = f && fgets(line, sizeof(line), f) ? strrchr(line, ')') : NULL;
+  if(f) fclose(f);
+  unsigned long long ut = 0, st = 0, began = 0;
+  char state = 0;
+  if(!rest || sscanf(rest + 1, " %c %*s %*s %*s %*s %*s %*s %*s %*s %*s %*s %llu %llu %*s %*s %*s %*s %*s %*s %llu",
+                     &state, &ut, &st, &began) != 4 || state == 'Z') {
+    return -1;
+  }
+  long tick = sysconf(_SC_CLK_TCK);
+  *start = began + 1;
+  *cpu_us = (ut + st) * 1000000ull / (unsigned long long)(tick > 0 ? tick : 100) + 1;
+  return 0;
+}
+
+int
+plat_processes_named(const char *name, plat_proc_t *out, int max) {
+  DIR *d = opendir("/proc");
+  if(!d) return -1;
+  struct dirent *e;
+  int n = 0;
+  while(n < max && (e = readdir(d))) {
+    char path[64], comm[64] = "";
+    if(e->d_name[0] < '1' || e->d_name[0] > '9') continue;
+    snprintf(path, sizeof(path), "/proc/%s/comm", e->d_name);
+    FILE *f = fopen(path, "r");
+    if(!f) continue;
+    if(fgets(comm, sizeof(comm), f)) comm[strcspn(comm, "\n")] = 0;
+    fclose(f);
+    if(strcmp(comm, name) || proc_times(e->d_name, &out[n].start, &out[n].cpu_us)) continue;
+    out[n++].pid = atoi(e->d_name);
+  }
+  closedir(d);
+  return n;
 }
 
 
@@ -178,13 +228,15 @@ plat_dump_processes(FILE *out) {
   struct dirent *e;
   while(d && (e = readdir(d))) {
     char path[64], comm[64] = "";
+    unsigned long long start = 0, cpu = 0;
     if(e->d_name[0] < '1' || e->d_name[0] > '9') continue;
     snprintf(path, sizeof(path), "/proc/%s/comm", e->d_name);
     FILE *f = fopen(path, "r");
     if(!f) continue;
     if(fgets(comm, sizeof(comm), f)) comm[strcspn(comm, "\n")] = 0;
     fclose(f);
-    fprintf(out, "%s %s\n", e->d_name, comm);
+    proc_times(e->d_name, &start, &cpu);
+    fprintf(out, "%s %s cpu=%llu.%03llus\n", e->d_name, comm, cpu / 1000000, cpu / 1000 % 1000);
   }
   if(d) closedir(d);
 }
@@ -225,10 +277,20 @@ plat_wait_exit(int pid, int ms) {
   static __thread int pidfd = -1, watched = -1;
   if(pid != watched) {
     if(pidfd >= 0) close(pidfd);
-    pidfd = (int)syscall(SYS_pidfd_open, pid, 0);
+    /* PS5THEME_TEST_NO_EXIT_EVENTS: as when the console's kqueue won't watch the process */
+    const char *no_events = getenv("PS5THEME_TEST_NO_EXIT_EVENTS");
+    pidfd = no_events && *no_events ? -1 : (int)syscall(SYS_pidfd_open, pid, 0);
     if(pidfd < 0) {
+      if(no_events && *no_events) errno = EPERM;
       watched = -1;
-      return errno == ESRCH;
+      if(errno == ESRCH) return 1;
+      /* can't be watched: wait a little all the same, then look (never straight back, which would spin; never
+         long, as an exit is acted on at once) */
+      unsigned long long start, cpu;
+      char name[16];
+      usleep((ms < 50 ? ms : 50) * 1000);
+      snprintf(name, sizeof(name), "%d", pid);
+      return proc_times(name, &start, &cpu) != 0;
     }
     watched = pid;
   }
@@ -339,6 +401,36 @@ plat_process_start(int pid) {
   return start + 1;
 }
 
+
+int
+plat_our_top_mounts(const char *stage_prefix, const char *under, char (*out)[1024], int max, int *buried) {
+  /* per call, as two threads ask: the table's mount points in the order made, whether each is ours */
+  char (*points)[512] = malloc(4096 * 512), *mine = malloc(4096);
+  int *ours = malloc(4096 * sizeof(int));
+  char line[4096], root[PATH_MAX], point[PATH_MAX];
+  int count = 0, n = 0, nours = 0;
+  *buried = 0;
+  FILE *f = emulated() || !points || !mine || !ours ? NULL : fopen("/proc/self/mountinfo", "r");
+  if(!f) { free(points); free(mine); free(ours); return -1; }
+  while(n < 4096 && fgets(line, sizeof(line), f)) {
+    if(sscanf(line, "%*s %*s %*s %4095s %4095s", root, point) != 2) continue;
+    snprintf(points[n], sizeof(points[n]), "%s", point);
+    mine[n] = !strncmp(root, stage_prefix, strlen(stage_prefix));
+    if(mine[n] && !strncmp(point, under, strlen(under))) ours[nours++] = n;
+    n++;
+  }
+  fclose(f);
+  for(int i = 0; i < nours && count < max; i++) {
+    int top = 1;   /* nothing but ours over it */
+    for(int k = ours[i] + 1; k < n && top; k++) top = strcmp(points[k], points[ours[i]]) || mine[k];
+    if(top) snprintf(out[count++], 1024, "%s", points[ours[i]]);
+    else (*buried)++;
+  }
+  free(points);
+  free(mine);
+  free(ours);
+  return count;
+}
 
 int
 plat_our_mounts(const char *stage_prefix, const char *under, char (*out)[1024], int max) {
@@ -460,12 +552,22 @@ plat_register_tile(const char *title_id) {
 }
 
 
+/* (x86-64 as the console is; ARM64 too, so the suite also runs natively there: ThreadSanitizer needs that) */
 void
 plat_crash_regs(void *ucontext, uint64_t *rip, uint64_t *rsp, uint64_t *rbp) {
   ucontext_t *uc = ucontext;
+#if defined(__x86_64__)
   *rip = uc ? (uint64_t)uc->uc_mcontext.gregs[REG_RIP] : 0;
   *rsp = uc ? (uint64_t)uc->uc_mcontext.gregs[REG_RSP] : 0;
   *rbp = uc ? (uint64_t)uc->uc_mcontext.gregs[REG_RBP] : 0;
+#elif defined(__aarch64__)
+  *rip = uc ? (uint64_t)uc->uc_mcontext.pc : 0;
+  *rsp = uc ? (uint64_t)uc->uc_mcontext.sp : 0;
+  *rbp = uc ? (uint64_t)uc->uc_mcontext.regs[29] : 0;
+#else
+  (void)uc;
+  *rip = *rsp = *rbp = 0;
+#endif
 }
 
 
@@ -475,3 +577,20 @@ plat_socket_nosigpipe(int fd) {
 }
 
 
+
+
+/* What the test says is free (the file PS5THEME_TEST_FREE_BYTES names, while it exists), else the real figure. */
+uint64_t
+plat_free_bytes(const char *path) {
+  const char *name = getenv("PS5THEME_TEST_FREE_BYTES");
+  FILE *f = name ? fopen(name, "r") : NULL;
+  if(f) {
+    unsigned long long v = 0;
+    int ok = fscanf(f, "%llu", &v) == 1;
+    fclose(f);
+    if(ok) return v;
+  }
+  struct statvfs sv;
+  if(statvfs(path, &sv)) return UINT64_MAX;
+  return (uint64_t)sv.f_bavail * (uint64_t)sv.f_frsize;
+}

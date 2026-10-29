@@ -12,6 +12,7 @@
 #include <fcntl.h>
 #include <limits.h>
 #include <pthread.h>
+#include <stdatomic.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -20,6 +21,7 @@
 #include <dirent.h>
 #include <sys/stat.h>
 
+#include "platform.h"
 #include "theme.h"
 
 
@@ -27,6 +29,12 @@ static const char *const roots[] = { BASE_DIR, TILE_DIR };
 #define NROOTS (sizeof(roots) / sizeof(*roots))
 
 static uint32_t crc_table[256];
+
+/* A count of the writes made (bumped after each: one made during a read of the themes is seen by the next read), so
+   what was worked out from the plugin's folders can be kept until it changes (the status's walk of each theme). */
+static atomic_uint writes_made;
+static int written(int rc) { atomic_fetch_add(&writes_made, 1); return rc; }
+unsigned fs_generation(void) { return atomic_load(&writes_made); }
 static pthread_once_t crc_once = PTHREAD_ONCE_INIT;
 
 static void
@@ -190,10 +198,25 @@ deny(const char *op, const char *path) {
 }
 
 
+/* Room for `need` more bytes under the plugin's folder, keeping FS_RESERVE free: the storage is the console's,
+   shared with saves, app data and the system's own records, and a full disk is worse for them than a refused
+   theme file. 0 when there is room (or the free space can't be told); -1 with errno ENOSPC, logged, when not. */
+int
+fs_room_for(uint64_t need) {
+  uint64_t avail = plat_free_bytes(BASE_DIR);
+  if(avail == UINT64_MAX || (avail > FS_RESERVE && need <= avail - FS_RESERVE)) return 0;
+  log_err("storage nearly full: %llu MB free, %llu MB needed, %llu MB kept free for the console",
+          (unsigned long long)(avail >> 20), (unsigned long long)((need + (1u << 20) - 1) >> 20),
+          (unsigned long long)(FS_RESERVE >> 20));
+  errno = ENOSPC;
+  return -1;
+}
+
+
 int
 fs_open_write(const char *path) {
   if(!fs_write_allowed(path)) return deny("write", path);
-  return open(path, O_WRONLY | O_CREAT | O_TRUNC | O_NOFOLLOW, 0644);
+  return written(open(path, O_WRONLY | O_CREAT | O_TRUNC | O_NOFOLLOW, 0644));
 }
 
 
@@ -210,7 +233,7 @@ fs_mkdirs(const char *path) {
     *p = 0;
     if(stat(tmp, &st) || !S_ISDIR(st.st_mode)) {
       if(!fs_write_allowed(tmp)) return deny("mkdir", tmp);
-      if(mkdir(tmp, 0755) && errno != EEXIST) return -1;
+      if(written(mkdir(tmp, 0755)) && errno != EEXIST) return -1;
     }
     *p = saved;
     if(!saved) break;
@@ -223,28 +246,28 @@ int
 fs_rename(const char *from, const char *to) {
   if(!fs_write_allowed(from)) return deny("rename", from);
   if(!fs_write_allowed(to)) return deny("rename", to);
-  return rename(from, to);
+  return written(rename(from, to));
 }
 
 
 int
 fs_unlink(const char *path) {
   if(!fs_write_allowed(path)) return deny("unlink", path);
-  return unlink(path);
+  return written(unlink(path));
 }
 
 
 int
 fs_rmdir(const char *path) {
   if(!fs_write_allowed(path)) return deny("rmdir", path);
-  return rmdir(path);
+  return written(rmdir(path));
 }
 
 
 int
 fs_symlink(const char *target, const char *path) {
   if(!fs_write_allowed(path)) return deny("symlink", path);
-  return symlink(target, path);
+  return written(symlink(target, path));
 }
 
 
@@ -263,7 +286,7 @@ fs_link(const char *existing, const char *path) {
   if(!fs_read_within(existing, BASE_DIR) || lstat(existing, &st) || !S_ISREG(st.st_mode)) {
     return deny("link from", existing);
   }
-  return link(existing, path);
+  return written(link(existing, path));
 }
 
 
@@ -274,6 +297,7 @@ fs_copy_file(const char *existing, const char *path) {
   if(!fs_read_within(existing, BASE_DIR) || lstat(existing, &st) || !S_ISREG(st.st_mode)) {
     return deny("copy from", existing);
   }
+  if(fs_room_for((uint64_t)st.st_size)) return -1;
   int in = open(existing, O_RDONLY);
   if(in < 0) return -1;
   int out = fs_open_write(path);
@@ -348,13 +372,18 @@ fs_rm_rf_under(const char *root, const char *path) {
 }
 
 
-/* Atomic replace: write to a temp file, fsync, rename over the target. */
+/* Atomic replace: write to a temp file, fsync, rename over the target. Each write has a temporary name of its own:
+   two threads writing one file (the chosen theme, from two requests at once) never write into each other's, and
+   the last rename wins whole. The name ends in .part, which listings and applies skip and clear after an hour, so
+   one cut off by a crash or a power loss is never taken for a theme's file. */
+static atomic_uint temp_seq;
+
 int
 fs_write_file(const char *path, const void *data, size_t len) {
   char tmp[PATH_MAX];
   const char *p = data;
 
-  if(snprintf(tmp, sizeof(tmp), "%s.tmp", path) >= (int)sizeof(tmp)) return -1;
+  if(snprintf(tmp, sizeof(tmp), "%s.%u.part", path, atomic_fetch_add(&temp_seq, 1)) >= (int)sizeof(tmp)) return -1;
   int fd = fs_open_write(tmp);
   if(fd < 0) return -1;
   while(len) {

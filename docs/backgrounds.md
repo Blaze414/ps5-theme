@@ -17,7 +17,7 @@ is selected. The manager makes it in the exact format and size of each of
 the console's backgrounds; the console's own files are never written (the
 plugin lays the theme over them, see [How it works](how-it-works.md)).
 
-![The background section](screenshots/background.png)
+![The Background part: the box to drop a picture on, then where your background is used, each area with its switch](screenshots/background.png)
 
 ## Step by step
 
@@ -25,20 +25,22 @@ plugin lays the theme over them, see [How it works](how-it-works.md)).
    theme** first. A computer or phone is the easiest place: the picture is
    made into the console's format in that browser, which is quicker there
    than in the console's own browser.
-2. **Choose how the picture is fitted**, at the top of the page (**How images
-   are fitted**): **Fill** crops its edges to fill the screen, **Fit** keeps
-   all of it with bars at the sides or top, **Stretch** squeezes it. A 16:9
-   picture fits exactly either way.
-3. **Switch on Background**, and under **Choose where your background is
-   used**, switch on the areas you want it (see [below](#where-a-background-is-used)).
-   The home screen's own backgrounds are on to begin with.
-4. **Add the picture:** drop it on the box at the top of the section, or
+2. **Choose how the picture is fitted**, in **Name and picture** (**Pictures
+   of another shape**, each choice drawn on your own picture once you have
+   one): **Fill** crops its edges to fill the screen, **Fit** keeps all of it
+   with bars at the sides or top, **Stretch** squeezes it. A 16:9 picture
+   fits exactly either way.
+3. **Open Background** in the list of parts, and under **Choose where your
+   background is used**, switch on the areas you want it (see
+   [below](#where-a-background-is-used)). The home screen's own backgrounds
+   are on to begin with.
+4. **Add the picture:** drop it on the box at the top of the part, or
    press **Choose file**. It's made for every background in the areas
    switched on (on 13.42, 15 of them), each at its own size, with the
    progress showing, and then "Background added and verified".
 5. **The theme's card** in the library takes a picture made from the
    background, unless you chose your own under **Preview picture**.
-6. **Save** (the bar at the bottom), then **Apply to console**. The home
+6. **Save** (the bar at the bottom), then **Apply**. The home
    screen shows the new background within a few seconds; it can show the
    console's own look for a moment while it switches. A tile's background
    shows when that tile is selected.
@@ -69,8 +71,8 @@ background is shown, with a switch. On 13.42:
 
 - **A different picture:** drop it in again. It replaces the backgrounds in
   the areas switched on.
-- **A different fit:** change **How images are fitted**. With **Keep original
-  pictures** on (at the top of the page; on to begin with), every background
+- **A different fit:** change **Pictures of another shape**. With **Keep
+  original pictures** on (both in **Name and picture**; on to begin with), every background
   is made again from the picture you attached, with a progress bar, without
   attaching anything again.
 - **Back to the console's backgrounds:** **Reset background** at the bottom
@@ -109,7 +111,7 @@ background is shown, with a switch. On 13.42:
   example). Use a smoother picture.
 - **The console's background after rest mode:** a screen that read its
   background before the theme was back in place can show the console's own
-  until it reloads. **Re-apply** brings it back at once.
+  until it reloads. **Apply again** brings it back at once.
 - **Applied partly:** **Activity** says which file was skipped and why.
 
 ## How it is made

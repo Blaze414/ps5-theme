@@ -107,6 +107,16 @@ h2 { font-size: 1.0625rem; margin: 0; font-weight: 500; }
 .btn.danger:focus-visible { color: #c62f27; }
 .btn[disabled] { opacity: .35; cursor: default; transform: none; }
 .btn.sm { min-height: 36px; padding: 0 14px; font-size: .875rem; }
+/* A few choices side by side (aria-pressed). Focus is white, as on the console, so the chosen one is told by its
+   tick and blue ring, which stay when it is focused. */
+.btn.chip { background: transparent; color: var(--muted); }
+.btn.chip:hover { background: var(--surface-hover); color: var(--text); }
+.btn.chip[aria-pressed="true"] { background: rgba(31, 124, 240, .24); color: var(--text); box-shadow: inset 0 0 0 2px var(--blue); }
+.btn.chip[aria-pressed="true"]::before {
+  content: ""; width: 9px; height: 5px; margin: -3px 1px 0 0; border: solid currentColor; border-width: 0 0 2px 2px; transform: rotate(-45deg);
+}
+.btn.chip:focus-visible { background: #fff; color: #000; }
+.btn.chip[aria-pressed="true"]:focus-visible { background: #fff; color: #000; box-shadow: inset 0 0 0 2px var(--blue), 0 0 0 2px #fff, 0 10px 28px rgba(0, 0, 0, .5); }
 
 input[type=text], input[type=search], select {
   min-height: 44px; padding: 0 18px; border-radius: 999px; border: 0;
@@ -149,6 +159,7 @@ label.field { display: grid; gap: 8px; font-size: .875rem; color: var(--muted); 
   aspect-ratio: 16 / 9; display: flex; gap: 10px; align-items: center; justify-content: center; padding: 18px;
   background: linear-gradient(160deg, rgba(31, 124, 240, .16), rgba(255, 255, 255, .02));
 }
+.card-open { display: block; text-decoration: none; color: inherit; }
 .preview.shot { padding: 0; background: #000; }
 .preview.shot img { width: 100%; height: 100%; max-width: none; object-fit: cover; border-radius: 0; }
 .preview img { height: 100%; max-width: 30%; object-fit: contain; border-radius: 8px; }
@@ -182,10 +193,10 @@ form.create { display: grid; gap: 16px; grid-template-columns: 1fr; margin-botto
 form.create .row { display: flex; gap: 8px; }
 
 /* Builder */
-.builder-head { display: grid; gap: 14px; grid-template-columns: 1fr; margin-bottom: 20px; }
-@media (min-width: 900px) { .builder-head { grid-template-columns: minmax(0, 2fr) minmax(0, 1fr) minmax(0, 1fr); align-items: end; } }
+.builder-head { display: grid; gap: 14px; grid-template-columns: 1fr; }
+@media (min-width: 1200px) { .builder-head { grid-template-columns: minmax(0, 2fr) minmax(0, 1fr) minmax(0, 1fr); align-items: end; } }
 .aspects { display: grid; gap: 14px; }
-.cover-panel { display: flex; gap: 20px; align-items: center; flex-wrap: wrap; margin-bottom: 14px; }
+.cover-panel { display: flex; gap: 20px; align-items: center; flex-wrap: wrap; }
 .savebar {
   position: sticky; bottom: 16px; z-index: 30; display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
   margin-top: 20px; padding: 10px 12px 10px 22px; border-radius: 28px;
@@ -206,7 +217,7 @@ form.create .row { display: flex; gap: 8px; }
 .aspect-head { display: flex; align-items: center; gap: 16px; padding: 16px 20px; flex-wrap: wrap; }
 .aspect-head .text { flex: 1; min-width: 200px; }
 .aspect-head .sub { color: var(--muted); font-size: .875rem; }
-.aspect-body { padding: 0 20px 20px; display: grid; gap: 14px; }
+.aspect-body { padding: 0 20px 20px; display: grid; gap: 14px; grid-template-columns: minmax(0, 1fr); }
 .aspect-body[hidden] { display: none; }
 
 .switch {
@@ -232,6 +243,12 @@ form.create .row { display: flex; gap: 8px; }
 .drop-zone .title { font-weight: 500; }
 
 .tiles { display: grid; gap: 14px; grid-template-columns: repeat(auto-fill, minmax(9.5rem, 1fr)); }
+@media (max-width: 600px) {
+  .savebar .text span { display: none; }   /* the bar stays one line on a phone */
+  .savebar { flex-wrap: nowrap; } .savebar .text { min-width: 0; }
+  .tiles { gap: 10px; grid-template-columns: repeat(auto-fill, minmax(7rem, 1fr)); }
+  .aspect-head { padding: 14px; } .aspect-body { padding: 0 14px 14px; }
+}
 .tile {
   display: grid; gap: 8px; padding: 10px; text-align: left; cursor: pointer; position: relative;
   background: rgba(255, 255, 255, .04); border: 0; border-radius: var(--radius);
@@ -245,13 +262,16 @@ form.create .row { display: flex; gap: 8px; }
 .tile .meta { font-size: .75rem; color: var(--faint); }
 .tile .tag { position: absolute; top: 16px; left: 16px; z-index: 1; }
 
-.rows { display: grid; gap: 8px; }
+.rows { display: grid; gap: 8px; grid-template-columns: minmax(0, 1fr); }
 .row-item {
   display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 12px; align-items: center;
   padding: 10px 12px; border-radius: var(--radius); background: rgba(255, 255, 255, .04);
   transition: box-shadow .15s, background .15s;
 }
-@media (max-width: 600px) { .row-item { grid-template-columns: 1fr; } .row-item .acts { justify-content: flex-start; } }
+@media (max-width: 600px) {
+  .row-item { grid-template-columns: minmax(0, 1fr); } .row-item .acts { justify-content: flex-start; }
+  .rows .row-item .file { white-space: normal; overflow-wrap: anywhere; }   /* a long name wraps instead of widening the part */
+}
 .row-item.drag { box-shadow: 0 0 0 2px #fff; background: var(--surface-hover); }
 .row-item.replaced { box-shadow: inset 3px 0 0 var(--blue); }
 .row-item .file { font-weight: 500; font-size: .9375rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -268,6 +288,11 @@ audio { height: 36px; max-width: 100%; }
   font-size: .75rem; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: .04em;
 }
 .thumb img { width: 100%; height: 100%; object-fit: contain; }
+.thumb.glyph { color: var(--faint); }
+.thumb.glyph svg { width: 45%; height: 45%; max-width: 28px; max-height: 28px; }
+.thumb.glyph img.ci { width: 45%; height: 45%; max-width: 28px; max-height: 28px; object-fit: contain; opacity: .55; }
+.thumb.glyph .ci-fb { display: contents; }
+.font-sample { margin-top: 6px; font-size: 1.25rem; line-height: 1.3; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .strip { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
 .strip .thumb { width: 72px; }
 .row-item .strip .thumb { width: 48px; }
@@ -358,6 +383,69 @@ input[type=number] {
 }
 input[type=number]:focus-visible { box-shadow: 0 0 0 2px #fff; }
 .sub-head { margin: 22px 0 8px; font-size: 1.0625rem; font-weight: 500; }
+/* Folded groups: a part's long list in categories, each a row that opens */
+.folds { display: grid; gap: 8px; }
+.fold { border-radius: var(--radius); background: rgba(255, 255, 255, .03); }
+.fold > summary { display: flex; align-items: center; gap: 10px; padding: 12px 14px; list-style: none; border-radius: var(--radius);
+  font-weight: 500; transition: background .15s; }
+.fold > summary::-webkit-details-marker { display: none; }
+.fold > summary::before { content: "›"; font-size: 1.25rem; line-height: 1; color: var(--muted); transition: transform .18s var(--ease); }
+.fold[open] > summary::before { transform: rotate(90deg); }
+.fold > summary:hover { background: var(--surface-hover); }
+.fold > summary:focus-visible { outline: none; background: #fff; color: #000; }
+.fold > summary:focus-visible::before, .fold > summary:focus-visible .fold-count { color: rgba(0, 0, 0, .62); }
+.fold-title { flex: 1; min-width: 0; }
+.fold-count { font-size: .8125rem; font-weight: 400; color: var(--muted); white-space: nowrap; }
+.fold > .rows { padding: 0 8px 8px; }
+/* Options drawn as they'll look: each a choice you can see before you pick it */
+.fit-field { grid-column: 1 / -1; }
+.icon-style { display: grid; gap: 14px; }
+/* The picture behind the icons, placed as a profile picture is */
+/* laid out as the Preview is: its bar and its picture straight on the backdrop, the controls in a standard panel */
+.bge-dialog { width: min(1100px, 94vw); max-height: 92vh; overflow: auto; display: flex; flex-direction: column; gap: 14px; }
+.bge-body { display: grid; gap: 20px; grid-template-columns: auto minmax(260px, 1fr); align-items: start; }
+@media (max-width: 760px) { .bge-body { grid-template-columns: minmax(0, 1fr); } }
+#bge-canvas { max-width: 100%; height: auto; border-radius: var(--radius-lg); box-shadow: 0 30px 80px rgba(0, 0, 0, .6); cursor: grab; touch-action: none; }
+#bge-canvas:active { cursor: grabbing; }
+#bge-canvas:focus-visible { outline: 2px solid #fff; outline-offset: 3px; }
+.bge-side { display: grid; gap: 14px; align-content: start; }
+.bge-side.panel { background: rgba(28, 34, 48, .97); }   /* solid, as the messages are: nothing of the page shows through */
+@media (max-width: 600px) { #bge.pv-overlay { padding: 12px; place-items: start center; } .bge-dialog { max-height: calc(100vh - 24px); } }
+.bge-side .field > span { color: var(--muted); font-size: .875rem; }
+.bge-zoom { display: flex; align-items: center; gap: 10px; }
+.bge-zoom input[type=range] { flex: 1; max-width: none; }
+.bge-zoom .btn { min-width: 36px; padding: 0; font-size: 1.125rem; }
+.bge-sources { display: flex; gap: 8px; flex-wrap: wrap; }
+.bge-previews { display: flex; gap: 16px; align-items: flex-end; flex-wrap: wrap; }
+.bge-previews figure { margin: 0; display: grid; gap: 6px; justify-items: center; }
+.bge-previews canvas { border-radius: 10px; box-shadow: 0 6px 18px rgba(0, 0, 0, .45); }
+.bge-previews figcaption { font-size: .75rem; color: var(--muted); }
+.icon-style .opts { grid-template-columns: repeat(auto-fill, minmax(104px, 1fr)); }
+.icon-style .opt canvas { border-radius: 14px; transition: opacity .2s; }
+.icon-style .opts[aria-busy="true"] canvas { opacity: .45; }
+.istyle-busy:empty { display: none; }
+.istyle-row { display: grid; gap: 14px; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); align-items: start; }
+input[type=color] { width: 56px; height: 36px; border: 0; border-radius: 10px; background: var(--surface-strong); padding: 4px; cursor: pointer; margin-top: 8px; }
+input[type=color]:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
+.opts { display: grid; gap: 10px; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); }
+.opts.place { grid-column: 1 / -1; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); margin-top: 4px; }
+.opt { position: relative; display: grid; gap: 2px; justify-items: start; text-align: left; padding: 8px; border: 0; border-radius: var(--radius); cursor: pointer;
+  background: rgba(255, 255, 255, .04); color: var(--text); font: inherit; transition: background .15s, box-shadow .15s, transform .18s var(--ease); }
+.opt canvas { width: 100%; height: auto; border-radius: 8px; margin-bottom: 6px; background: #000; }
+.opt b { font-size: .875rem; font-weight: 600; }
+.opt small { font-size: .75rem; color: var(--muted); }
+.opt:hover { background: var(--surface-hover); }
+.opt:focus-visible { outline: none; background: #fff; color: #000; transform: scale(1.03); }
+.opt:focus-visible small { color: rgba(0, 0, 0, .62); }
+/* The chosen one: a blue ring and a tick on its picture, both kept when it is focused (white), so a choice shows the
+   moment it is made, wherever the focus is. */
+.opt[aria-checked="true"] { background: rgba(31, 124, 240, .16); box-shadow: inset 0 0 0 3px var(--blue); }
+.opt[aria-checked="true"]:focus-visible { background: #fff; box-shadow: inset 0 0 0 3px var(--blue); }
+.opt[aria-checked="true"]::after {
+  content: ""; position: absolute; top: 14px; right: 14px; width: 24px; height: 24px; border-radius: 50%;
+  background: var(--blue) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M3.5 8.5l3 3 6-6.5' fill='none' stroke='%23fff' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") center / 14px no-repeat;
+  box-shadow: 0 0 0 2px rgba(0, 0, 0, .35), 0 2px 8px rgba(0, 0, 0, .45);
+}
 .acts select[data-place] { width: 240px; }
 #rco-shapes label { font-size: .9375rem; }
 
@@ -393,9 +481,96 @@ details[open] > :not(summary) { animation: in .2s var(--ease); }
 .loading .row .label { flex: 1; min-width: 0; }
 .loading .pct { font-variant-numeric: tabular-nums; color: var(--muted); font-size: .8125rem; }
 .loading .note { margin-top: 6px; }
-.loading.unknown .progress i { width: 35%; animation: sweep 1.2s var(--ease) infinite; }
+.loading.unknown .progress i, .waiting .progress i { width: 35%; animation: sweep 1.2s var(--ease) infinite; }
 @keyframes sweep { from { transform: translateX(-100%); } to { transform: translateX(290%); } }
 .stale { opacity: .45; pointer-events: none; user-select: none; }
+
+/* Focus that shows on everything a controller or keyboard can reach, not only buttons and fields */
+input[type=checkbox]:focus-visible, input[type=range]:focus-visible, summary:focus-visible, audio:focus-visible,
+a:not(.btn):focus-visible, .aspect-head h2 a:focus-visible { outline: 2px solid #fff; outline-offset: 3px; border-radius: 6px; }
+
+/* Edit page: the way back, the theme's name as the title; the list of the theme's parts beside the part being
+   changed, as in the console's Settings. On a phone the list comes first and a part opens on its own. */
+.back { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); text-decoration: none; font-size: .9375rem;
+  padding: 6px 12px 6px 8px; margin-left: -8px; border-radius: 999px; transition: background .15s, color .15s; }
+.back:hover { color: var(--text); background: var(--surface-hover); }
+.back:focus-visible { outline: none; background: #fff; color: #000; }
+.back::before { content: "‹"; font-size: 1.375rem; line-height: 1; margin-top: -2px; }
+.edit-title { display: grid; gap: 2px; min-width: 0; }
+.edit-title h1 { overflow-wrap: anywhere; }
+.editor { display: grid; gap: 20px; grid-template-columns: minmax(0, 1fr); scroll-margin-top: 88px; }
+@media (min-width: 900px) {
+  .editor { grid-template-columns: 300px minmax(0, 1fr); align-items: start; }
+  .secnav { position: sticky; top: 88px; max-height: calc(100vh - 104px); overflow-y: auto; }
+  .list-back { display: none !important; }
+}
+@media (max-width: 899px) {
+  .editor.picked .secnav, .editor:not(.picked) .pane { display: none; }
+}
+.secnav { scrollbar-width: thin; scrollbar-color: rgba(255, 255, 255, .18) transparent; }
+.secnav { display: grid; gap: 2px; padding: 8px; border-radius: var(--radius-lg); background: var(--surface); align-content: start; }
+.nav-group { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 14px 10px 4px;
+  font-size: .75rem; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--faint); }
+.nav-more { border: 0; background: transparent; color: var(--muted); font: inherit; letter-spacing: .02em; text-transform: none;
+  font-weight: 500; font-size: .8125rem; padding: 4px 10px; border-radius: 999px; cursor: pointer; }
+.nav-more:hover { color: var(--text); background: var(--surface-hover); }
+.nav-more:focus-visible { outline: none; background: #fff; color: #000; }
+.nav-hint { margin: 0; padding: 0 10px 6px; font-size: .8125rem; color: var(--faint); }
+.nav-item { display: flex; align-items: center; gap: 12px; padding: 7px 10px 7px 7px; border-radius: 14px; text-decoration: none;
+  color: var(--text); transition: background .15s, transform .18s var(--ease); }
+.nav-item:hover { background: var(--surface-hover); }
+.nav-item.sel { background: var(--surface-strong); }
+.nav-item:focus-visible { outline: none; background: #fff; color: #000; transform: scale(1.02); }
+.nav-item:focus-visible .nav-status { color: rgba(0, 0, 0, .62); }
+.nav-thumb { flex: none; width: 48px; height: 48px; border-radius: 10px; overflow: hidden; display: grid; place-items: center;
+  background: #1a2131; color: var(--muted); }
+.nav-thumb svg { width: 24px; height: 24px; }
+.nav-thumb img { width: 100%; height: 100%; object-fit: contain; }
+.nav-thumb img.cover { object-fit: cover; }
+.nav-thumb .aa { font-size: 1.25rem; line-height: 1; color: var(--text); }
+.nav-thumb img.ci { width: 28px; height: 28px; object-fit: contain; opacity: .78; }
+.nav-item.sel .nav-thumb img.ci, .nav-item:hover .nav-thumb img.ci { opacity: 1; }
+.nav-thumb .ci-fb { display: contents; }
+.nav-item:focus-visible .nav-thumb { box-shadow: 0 0 0 2px #000 inset; }
+.nav-text { display: grid; min-width: 0; }
+.nav-name { font-size: .9375rem; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.nav-status { font-size: .8125rem; color: var(--faint); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.nav-item.on .nav-status { color: var(--muted); }
+.nav-item.on .nav-status::before { content: ""; display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: var(--blue); margin: 0 6px 1px 0; }
+.pane { display: grid; gap: 14px; min-width: 0; align-content: start; }
+.pane h2[tabindex] { outline: none; }
+.pane-title { grid-column: 1 / -1; font-size: 1.0625rem; font-weight: 500; }
+.panel.start { display: grid; gap: 8px; box-shadow: inset 3px 0 0 var(--blue); }
+.panel.start h2 { font-size: 1.0625rem; font-weight: 500; }
+.panel.start ol { margin: 0; padding-left: 1.3em; display: grid; gap: 6px; color: var(--muted); font-size: .9375rem; }
+.panel.start a { color: var(--text); }
+.steps { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 6px; }
+.step { display: grid; gap: 2px; padding: 12px 16px; border-radius: var(--radius); background: var(--surface); text-decoration: none;
+  font-weight: 500; transition: background .15s, transform .18s var(--ease); }
+.step .note { font-weight: 400; font-size: .8125rem; }
+.step.next { text-align: right; }
+.step:hover { background: var(--surface-hover); }
+.step:focus-visible { outline: none; background: #fff; color: #000; transform: scale(1.02); }
+.step:focus-visible .note { color: rgba(0, 0, 0, .62); }
+.list-back { justify-self: start; }
+/* Why a button can't be used, beside it rather than only in a tooltip */
+.card .why { font-size: .8125rem; color: var(--warn); }
+
+/* Messages: errors stay until closed; any message closes with its × */
+.toast { padding-right: 40px; }
+.toast .x { position: absolute; top: 8px; right: 8px; width: 28px; height: 28px; border: 0; border-radius: 50%; padding: 0;
+  background: transparent; color: var(--muted); font-size: 1.125rem; line-height: 1; cursor: pointer; }
+.toast .x:hover, .toast .x:focus-visible { background: #fff; color: #000; outline: none; }
+
+/* Forms opened from the library's buttons have a title, as a dialog would */
+.form-title { grid-column: 1 / -1; display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+.form-title h2 { font-size: 1.25rem; font-weight: 500; }
+
+/* Phones: the page's buttons share the row evenly instead of wrapping one by one */
+@media (max-width: 600px) {
+  .head > .btn { flex: 1 1 auto; }
+  .head .spacer { flex-basis: 100%; height: 0; }
+}
 
 @media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }
 .visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
@@ -418,6 +593,15 @@ details[open] > :not(summary) { animation: in .2s var(--ease); }
 .pv-glyphs { display: flex; align-items: center; gap: 2cqw; }
 .pv-glyph { width: 3.4cqh; height: 3.4cqh; border-radius: 50%; background: color-mix(in srgb, var(--pv-text) 78%, transparent); }
 .pv-glyph.pv-avatar { background: var(--pv-accent); }
+.pv-ico { width: 3.6cqh; height: 3.6cqh; object-fit: contain; opacity: .92; }
+.pv-cc-ic { display: grid; place-items: center; }
+.pv-cc-img { width: 62%; height: 62%; object-fit: contain; }
+/* The console's icons are white: their circles are dark, the selected one white with its icon dark, as on the console */
+.pv-cc-ic.has-ic { background: color-mix(in srgb, var(--pv-panel) 70%, transparent); }   /* (no :has(): the console's browser may lack it) */
+.pv-cc-ic.pv-ccf.has-ic { background: #fff; }
+.pv-cc-ic.pv-ccf .pv-cc-img { filter: invert(1); }
+/* The clock, the icons and the tiles are drawn over the hanging artwork, as on the console */
+.pv-top, .pv-tiles, .pv-cap { z-index: 2; }
 .pv-clock { color: var(--pv-text); font-size: 3.6cqh; font-weight: 500; letter-spacing: .03em; font-variant-numeric: tabular-nums; text-shadow: 0 1px 6px rgba(0, 0, 0, .4); }
 .pv-tiles { position: absolute; left: 5cqw; right: 5cqw; top: 25cqh; display: flex; align-items: flex-start; gap: 2.6cqw; }
 .pv-tile { width: 17cqh; height: 17cqh; border-radius: 1.8cqh; overflow: hidden; flex: none; display: grid; place-items: center;
@@ -438,6 +622,17 @@ details[open] > :not(summary) { animation: in .2s var(--ease); }
 .pv-looklbl select { padding: 6px 10px; border-radius: 10px; background: var(--surface); border: 0; }
 /* Home: the Appearance theme's artwork hanging from the top. */
 .pv-art { position: absolute; top: 0; left: 0; width: 100%; height: auto; z-index: 1; pointer-events: none; }
+/* The Appearance part's own preview: the same sketch, inline, with outlines where pieces the theme keeps sit */
+.ap-preview { display: grid; gap: 10px; }
+.ap-preview .pv-toolbar { justify-content: space-between; }
+.ap-preview .pv-tabs { flex-wrap: wrap; }
+.ap-preview .pv-stage { box-shadow: none; border-radius: var(--radius); max-width: 720px; }
+.ap-dot { display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: var(--blue); margin-left: 6px; }
+.ap-slot { position: absolute; z-index: 1; display: grid; place-items: center; padding: 1cqh 2cqw; text-align: center;
+  border: .35cqh dashed rgba(255, 255, 255, .5); background: rgba(0, 0, 0, .22); color: rgba(255, 255, 255, .82); font-size: 2.6cqh; }
+.ap-slot.art { top: 0; left: 0; right: 0; height: 24cqh; border-top: 0; border-radius: 0 0 1.4cqh 1.4cqh; }
+.ap-slot.top { top: 0; right: 0; width: 36cqw; height: 20cqh; border-top: 0; border-right: 0; border-radius: 0 0 0 1.4cqh; }
+.ap-slot.bottom { left: 0; right: 0; bottom: 0; height: 36cqh; border-bottom: 0; border-radius: 1.4cqh 1.4cqh 0 0; }
 /* Control Center view. */
 .pv-ccbd { position: absolute; inset: 0; }
 .pv-cc-bar { position: absolute; left: 0; right: 0; bottom: 0; height: 24cqh; background: linear-gradient(0deg, color-mix(in srgb, var(--pv-panel) 66%, transparent), transparent); }
@@ -569,6 +764,9 @@ async function api(method, path, params = {}, body) {
 /* Upload with an end-to-end checksum: the console verifies it on receipt and
    reports what it stored, which must match what we computed. */
 async function uploadVerified(path, params, blob) {
+  /* Not sent when it can't fit: the console keeps part of its storage free for itself (the plugin refuses it too) */
+  const room = state.status && state.status.room;
+  if (typeof room === "number" && blob.size > room) throw new Error("the console's storage is nearly full: free some space, then try again");
   const bytes = new Uint8Array(await blob.arrayBuffer());
   const crc = hex8(crc32(bytes));
   const shown = progressStack.filter(x => x.el.isConnected).pop();
@@ -604,12 +802,29 @@ async function putWatched(path, params, bytes, onProgress) {
 
 /* ================================================================ toasts */
 
+/* A message at the top right. An error stays until it is closed: it may be read on the console with a controller,
+   from across the room. Anything else fades after `ms` (0: stays). Every message but a progress bar closes with its ×;
+   at most five stay, the oldest going first. */
 function toast(msg, kind = "", ms = 4500) {
   const el = document.createElement("div");
   el.className = `toast ${kind}`;
-  el.textContent = msg;
-  $("#toasts").append(el);
-  if (ms) setTimeout(() => leave(el), ms);
+  el.setAttribute("role", kind === "err" ? "alert" : "status");
+  const text = document.createElement("div");
+  text.className = "msg";
+  /* the plugin's reasons start in lower case; a file name stays as it is */
+  text.textContent = msg && /^[a-z]/.test(msg) && !/^\S*[._/]\S/.test(msg) ? msg[0].toUpperCase() + msg.slice(1) : msg;
+  const x = document.createElement("button");
+  x.type = "button";
+  x.className = "x";
+  x.setAttribute("aria-label", "Close");
+  x.textContent = "×";
+  x.addEventListener("click", () => leave(el));
+  el.append(text, x);
+  const box = $("#toasts");
+  box.append(el);
+  const closable = [...box.children].filter(t => !t.classList.contains("leaving") && !t.querySelector(".progress"));
+  for (const old of closable.slice(0, Math.max(0, closable.length - 5))) leave(old);
+  if (ms && kind !== "err") setTimeout(() => leave(el), ms);
   return el;
 }
 /* A message fades out, then is removed (removed at once if the animation can't run). */
@@ -661,6 +876,13 @@ addEventListener("scroll", hideTip, { passive: true });
 addEventListener("resize", hideTip);
 /* The colour tests stay open or closed as left when the colours are saved and drawn again. */
 document.addEventListener("toggle", e => { if (e.target.matches && e.target.matches("[data-color-tests]")) state.colorTestsOpen = e.target.open; }, true);
+/* A folded group stays open or closed as left when its list is drawn again (after a replace, say). */
+document.addEventListener("toggle", e => {
+  const g = e.target.dataset && (e.target.dataset.soundGroup || e.target.dataset.fold);
+  if (!g) return;
+  if (e.target.dataset.soundGroup) (state.uiSoundOpen = state.uiSoundOpen || {})[g] = e.target.open;
+  else (state.foldOpen = state.foldOpen || {})[g] = e.target.open;
+}, true);
 
 /* An action that fails where nothing catches it would leave the page silent, the button doing nothing: say what
    went wrong instead. */
@@ -687,7 +909,9 @@ function progressToast(label) {
   const p = {
     el,
     get frac() { return frac; },
-    set(t, f, to = 1) { text = t; frac = f; upTo = Math.max(f, to); show(t, f); },
+    set(t, f, to = 1) { el.classList.remove("waiting"); text = t; frac = f; upTo = Math.max(f, to); show(t, f); },
+    /* a step whose length can't be told: the bar sweeps while it runs */
+    wait(t) { text = t; el.classList.add("waiting"); show(t, 0); },
     /* how far an upload made in this step has got: the step's own text, and the bar from the step's start to its end */
     upload(f) { show(/^Sending\b/.test(text) ? text : `${text.replace(/\s*\d{1,3}%$/, "")}\nSending to the console…`, frac + (upTo - frac) * f); },
     done(msg, kind) {
@@ -700,6 +924,17 @@ function progressToast(label) {
   progressStack.push(p);
   p.set(label, 0);
   return p;
+}
+
+/* A progress message for work that is usually quick (saving, discarding): shown once it has taken a moment, so a
+   quick one doesn't flash, and saying what it is waiting for. */
+function laterProgress(text, after = 350) {
+  let p = null, now = text;
+  const timer = setTimeout(() => { p = progressToast(now); p.wait(now); }, after);
+  return {
+    wait(t) { now = t; if (p) p.wait(t); },
+    done(msg, kind) { clearTimeout(timer); if (p) p.done(msg, kind); else if (msg) toast(msg, kind); },
+  };
 }
 
 /* Loading markers: something being read from the console, shown where it will appear, with how far the download
@@ -799,7 +1034,7 @@ async function refreshStatus() {
   $("#pills").innerHTML =
     `<span class="pill">Firmware <b>${esc(s.fw)}</b></span>` +
     (s.applying ? `<span class="pill">Applying <b>${esc(nameOf(s.applying))}…</b></span>`
-      : `<span class="pill">Applied <b>${esc(s.applied ? nameOf(s.applied) : "Stock")}</b></span>`);
+      : `<span class="pill">Theme <b>${esc(s.applied ? nameOf(s.applied) : "None")}</b></span>`);
   if (state.route === "edit") syncEditorHead();
   return true;
 }
@@ -811,34 +1046,60 @@ function syncEditorHead() {
   if (!t || !apply || apply.dataset.id !== t.id) return;
   const has = !!(t.files || t.music);
   apply.disabled = !(t.compatible && has);
-  apply.textContent = state.status.applied === t.id ? "Re-apply to console" : "Apply to console";
-  if (exp) exp.disabled = !has;
+  apply.textContent = state.status.applied === t.id ? "Apply again" : "Apply";
+  apply.title = applyBlocked(t);
+  if (exp) { exp.disabled = !has; exp.title = has ? "" : "Add something to the theme first."; }
   const bar = $("#savebar");
   if (bar) bar.hidden = !t.unsaved;
 }
 
-async function saveTheme(id) {
-  try { await api("POST", "/api/theme/save", { id }); } catch (e) { return toast(e.message, "err"); }
+async function saveTheme(id, btn = null) {
+  const t = themeById(id), name = t ? t.name : id;
+  if (btn) { btn.disabled = true; btn.textContent = "Saving…"; }
+  const p = laterProgress(`Saving ${name}…`);
+  try {
+    /* a choice still on its way to the console goes first: saved before it, it would show as unsaved again */
+    p.wait("Keeping your last choice on the console…");
+    await choicesWork;
+    p.wait(`Saving ${name}: letting go of the copy kept for Discard…`);
+    await api("POST", "/api/theme/save", { id });
+  } catch (e) {
+    if (btn && btn.isConnected) { btn.disabled = false; btn.textContent = "Save"; }
+    return p.done(e.message, "err");
+  }
+  p.wait("Checking the console…");
   await refreshStatus();
-  toast("Saved.", "ok");
+  p.done("Saved.", "ok");
 }
 
 let discardArmed = 0;
 async function discardTheme(id, btn) {
   if (Date.now() > discardArmed) {   /* first press asks */
-    discardArmed = Date.now() + 4000;
-    btn.textContent = "Discard all changes?";
+    discardArmed = Date.now() + 6000;
+    btn.textContent = "Press again to discard";
     btn.classList.add("danger", "armed");
-    setTimeout(() => { if (btn.isConnected && Date.now() > discardArmed) { btn.textContent = "Discard"; btn.classList.remove("danger", "armed"); } }, 4100);
+    setTimeout(() => { if (btn.isConnected && Date.now() > discardArmed) { btn.textContent = "Discard"; btn.classList.remove("danger", "armed"); } }, 6100);
     return;
   }
   discardArmed = 0;
+  btn.disabled = true;
+  btn.textContent = "Discarding…";
+  const p = laterProgress("Discarding your changes…");
   let r;
-  try { r = await api("POST", "/api/theme/discard", { id }); } catch (e) { return toast(e.message, "err"); }
+  try {
+    p.wait("Keeping your last choice on the console…");
+    await choicesWork;
+    p.wait("Putting the theme back as it was at the last save…");
+    r = await api("POST", "/api/theme/discard", { id });
+  } catch (e) {
+    if (btn.isConnected) { btn.disabled = false; btn.textContent = "Discard"; btn.classList.remove("danger", "armed"); }
+    return p.done(e.message, "err");
+  }
   songCacheDrop(id);        /* the songs may be the saved ones again */
   stamp = Date.now();
+  p.wait("Checking the console…");
   await refreshStatus();
-  toast(r.reapplied ? "Changes discarded. The console is being updated to match." : "Changes discarded.", "ok");
+  p.done(r.reapplied ? "Changes discarded. The console is being updated to match." : "Changes discarded.", "ok");
   if (state.route === "edit" && state.editId === id) renderEditor();
 }
 
@@ -849,10 +1110,10 @@ function resultBanner() {
     return `<div class="banner" role="status"><div class="row"><span class="label">Applying ${esc((themeById(s.applying) || { name: s.applying }).name)}` +
       `${pr ? `: ${esc(pr.text)}…` : "…"}</span>${pr ? `<span class="pct">${pr.percent}%</span>` : ""}</div>` +
       `<div class="progress" style="margin-top:10px"><i style="width:${pr ? pr.percent : 0}%"></i></div>` +
-      `<span class="muted" style="font-size:.875rem">The home screen can show the stock look for a moment while it switches.</span></div>`;
+      `<span class="muted" style="font-size:.875rem">The home screen can show the console's own look for a moment while it switches.</span></div>`;
   }
   const r = s.result;
-  if (!r) return "";
+  if (!r || (!s.applied && /^No theme:/.test(r))) return "";   /* the No theme card says it */
   const kind = /could not|not applied|is for firmware|Invalid|Could not/.test(r) ? "err"
     : /partly|skipped/.test(r) ? "warn" : "ok";
   return `<div class="banner ${kind}" role="status">${esc(r)}</div>`;
@@ -862,6 +1123,8 @@ function parseRoute() {
   const parts = location.hash.replace(/^#\/?/, "").split("/");
   state.route = ["library", "edit", "activity"].includes(parts[0]) ? parts[0] : "library";
   if (state.route === "edit") state.editId = decodeURIComponent(parts[1] || "") || state.editId;
+  const part = state.route === "edit" ? parts[2] || "" : "";
+  state.section = part === "theme" || aspectById(part) ? part : "";
   const section = state.route === "edit" ? "library" : state.route;   /* editing is part of the library */
   document.querySelectorAll("nav a").forEach(a => {
     if (a.dataset.route === section) a.setAttribute("aria-current", "page");
@@ -871,6 +1134,7 @@ function parseRoute() {
 
 async function render() {
   parseRoute();
+  if (state.route !== "edit") document.title = state.route === "activity" ? "Activity · PS5 Themes" : "PS5 Themes";
   if (state.route !== "library") document.body.classList.remove("apply-shown");
   if (state.route === "library") renderLibrary();
   else if (state.route === "edit") await renderEditor();
@@ -892,24 +1156,31 @@ function renderLibrary() {
   document.body.classList.toggle("apply-shown", !!s.applying);
   const cards = s.themes.slice().sort((a, b) => a.name.localeCompare(b.name)).map(t => {
     const on = s.applied === t.id, busy = s.applying === t.id;
-    const meta = [`Firmware ${t.fw || "?"}`, plural(t.files, "file")];
-    if (t.unsaved) meta.push("unsaved changes");
+    /* The firmware only when it says something: a theme for this console's needs no label */
+    const meta = [];
+    if (t.fw === "any") meta.push("Any firmware");
+    if (t.files) meta.push(plural(t.files, "file"));
+    else if (!t.music) meta.push("Empty");
     if (t.music) meta.push(`music ${fmtTime(t.music)}`);
+    if (t.unsaved) meta.push("unsaved changes");
+    const blocked = applyBlocked(t), has = !!(t.files || t.music);
+    const keep = on || s.active === t.id;
     return `
     <article class="card${on ? " current" : ""}">
-      ${cardPreview(t)}
+      <a class="card-open" href="#/edit/${encodeURIComponent(t.id)}" tabindex="-1" aria-hidden="true">${cardPreview(t)}</a>
       <div class="body">
         <div class="title"><span class="name">${esc(t.name)}</span>
           ${busy ? `<span class="tag">Applying…</span>` : on ? `<span class="tag on">Applied</span>` : t.compatible ? "" : `<span class="tag warn">Other firmware</span>`}</div>
         <div class="meta">${esc(meta.join(" · "))}</div>
+        ${blocked && !on ? `<div class="why">${esc(blocked)}</div>` : ""}
         <div class="actions">
-          <button class="btn primary sm" data-act="apply" data-id="${esc(t.id)}" ${!t.compatible || !(t.files || t.music) ? "disabled" : ""}>${on ? "Re-apply" : "Apply"}</button>
+          <button class="btn primary sm" data-act="apply" data-id="${esc(t.id)}" ${blocked ? `disabled title="${esc(blocked)}"` : ""}>${on ? "Apply again" : "Apply"}</button>
           <a class="btn sm" href="#/edit/${encodeURIComponent(t.id)}">Edit</a>
         </div>
         <div class="actions secondary">
           <button class="btn ghost sm" data-act="duplicate" data-id="${esc(t.id)}">Duplicate</button>
-          <button class="btn ghost sm" data-act="export" data-id="${esc(t.id)}" ${t.files || t.music ? "" : "disabled"}>Export</button>
-          <button class="btn ghost danger sm" data-act="delete" data-id="${esc(t.id)}" ${on || s.active === t.id ? "disabled" : ""}>Delete</button>
+          <button class="btn ghost sm" data-act="export" data-id="${esc(t.id)}" ${has ? "" : `disabled title="Add something to the theme first."`}>Export</button>
+          <button class="btn ghost danger sm" data-act="delete" data-id="${esc(t.id)}" ${keep ? `disabled title="It is applied: apply another theme, or No theme, first."` : ""}>Delete</button>
         </div>
       </div>
     </article>`;
@@ -919,7 +1190,7 @@ function renderLibrary() {
   view.innerHTML = `
     <div class="head">
       <h1>Library</h1><span class="spacer"></span>
-      <button class="btn" data-act="import">Import .zip</button>
+      <button class="btn" data-act="import" title="A theme .zip, made with Export or shared by someone">Import theme</button>
       ${s.themes.length > 1 ? `<button class="btn" data-act="mix">Mix and match</button>` : ""}
       <button class="btn primary" data-act="new">New theme</button>
     </div>
@@ -930,27 +1201,29 @@ function renderLibrary() {
       <article class="card${stockOn ? " current" : ""}">
         <div class="preview"><img class="logo" src="/icon.png" alt=""></div>
         <div class="body">
-          <div class="title"><span class="name">Stock</span>${stockOn ? `<span class="tag on">Applied</span>` : ""}</div>
-          <div class="meta">The console's original home screen. Choosing it also stops a theme from coming back when etaHEN starts.</div>
-          <div class="actions"><button class="btn sm" data-act="apply" data-id="none" ${stockOn ? "disabled" : ""}>Restore stock</button></div>
+          <div class="title"><span class="name">No theme</span>${stockOn ? `<span class="tag on">Applied</span>` : ""}</div>
+          <div class="meta">The console's own look. Choosing it also keeps a theme from coming back the next time the plugin starts.</div>
+          ${stockOn ? "" : `<div class="actions"><button class="btn sm" data-act="apply" data-id="none">Remove the theme</button></div>`}
         </div>
       </article>${cards}</div>`
     : `<div class="empty">
         <h2>No themes yet</h2>
-        <p class="muted" style="margin:0">Create one and choose what it changes: background, icons, sounds, fonts, music and more. Or drop a theme .zip here.</p>
-        <div style="display:flex;gap:8px"><button class="btn primary" data-act="new">New theme</button><button class="btn" data-act="import">Import .zip</button></div>
+        <p class="muted" style="margin:0">Create one and choose what it changes: background, icons, sounds, fonts, music and more. Or import a theme someone shared.</p>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;justify-content:center"><button class="btn primary" data-act="new">New theme</button><button class="btn" data-act="import">Import theme</button></div>
       </div>`}
     <p class="hint">${isLocal() && s.ip
-      ? `On a computer or phone on the same network, open <code>http://${esc(s.ip)}:8095</code> to attach files and drag in themes. `
-      : ""}The applied theme comes back by itself every time etaHEN starts the plugin, after a reboot or an update too: there is no need to restore stock first. Without the jailbreak the console is stock.</p>`;
+      ? `Adding pictures and music is easier from a computer or phone on the same network: open <code>http://${esc(s.ip)}:8095</code> there. `
+      : ""}Your theme comes back by itself each time the plugin starts, after a restart or an update too. To go back to the console's own look, choose <b>No theme</b>.</p>`;
   if (state.creating) $("#new-name").focus();
+  if (state.mix && !state.mix.loading && !state.mixFocused) { state.mixFocused = true; const n = $("#mix-name"); if (n) n.focus(); }
   paintLoads(view);
   fillMissingPreviews();
 }
 
 function createForm() {
   return `
-  <form class="panel create" id="create">
+  <form class="panel create" id="create" aria-labelledby="create-title">
+    <div class="form-title"><h2 id="create-title">New theme</h2><span class="note">Name it, then choose what it changes.</span></div>
     <label class="field">Theme name<input type="text" id="new-name" maxlength="60" required placeholder="Midnight"></label>
     <label class="field">Firmware
       <select id="new-fw">
@@ -979,20 +1252,32 @@ async function createTheme(name, fw) {
 
 /* Seen on 13.42: the home screen reloads its files after an apply, and can
    show the stock look for a moment before the theme. */
-const APPLY_WAIT_NOTE = "Give it a few seconds: the home screen may show the stock look for a moment before your theme appears.";
+const APPLY_WAIT_NOTE = "Give it a few seconds: the home screen may show the console's own look for a moment before your theme appears.";
+
+/* Why a theme can't be applied, in words, or "" when it can. */
+function applyBlocked(t, inEditor = state.route === "edit") {
+  if (!t.compatible) return inEditor ? `Made for firmware ${t.fw}. To try it on ${state.status.fw}, set Firmware to Any firmware in Name and picture.`
+    : `Made for firmware ${t.fw}. To try it on ${state.status.fw}, open Edit and set Firmware to Any firmware.`;
+  if (!(t.files || t.music)) return inEditor ? "Add something to the theme first." : "Nothing in it yet: open Edit to add something.";
+  return "";
+}
 
 async function applyTheme(id) {
   try { await api("POST", "/api/apply", { id }); } catch (e) { return toast(e.message, "err"); }
-  const label = id === "none" ? "Restoring stock" : `Applying ${(themeById(id) || { name: id }).name}`;
+  const label = id === "none" ? "Removing the theme" : `Applying ${(themeById(id) || { name: id }).name}`;
   const p = progressToast(`${label}…`);
   p.el.dataset.apply = "1";   /* on the library, its banner shows the same progress: the message steps aside there */
   const want = id === "none" ? "" : id;
   const before = state.status.result;
-  let seen = false;
-  for (let i = 0; i < 160; i++) {
+  let seen = false, lastKey = "", lastChange = Date.now();
+  /* As long as the console reports progress: a large theme can take minutes. It gives up only after 3 minutes
+     without any change (the console out of reach, or the plugin stopped). */
+  for (let i = 0; Date.now() - lastChange < 180000; i++) {
     await sleep(750);
-    await refreshStatus();
+    if (!await refreshStatus()) continue;
     const s = state.status;
+    const key = JSON.stringify([s.applying, s.progress, s.applied, s.result]);
+    if (key !== lastKey) { lastKey = key; lastChange = Date.now(); }
     if (s.applying) {
       seen = seen || s.applying === want;
       const pr = s.applying === want ? s.progress : null;
@@ -1008,7 +1293,7 @@ async function applyTheme(id) {
       return render();
     }
   }
-  p.done("The console did not confirm the change. Check Activity for details.", "err");
+  p.done("The console stopped answering while applying. Check Activity, or open this page again in a minute.", "err");
   render();
 }
 
@@ -1023,8 +1308,8 @@ function armDelete(btn, id) {
   }
   armed.set(id, true);
   btn.classList.add("armed");
-  btn.textContent = "Confirm delete";
-  setTimeout(() => { armed.delete(id); if (btn.isConnected) { btn.classList.remove("armed"); btn.textContent = "Delete"; } }, 4000);
+  btn.textContent = "Press again to delete";
+  setTimeout(() => { armed.delete(id); if (btn.isConnected) { btn.classList.remove("armed"); btn.textContent = "Delete"; } }, 6000);
 }
 
 async function duplicateTheme(id) {
@@ -1047,7 +1332,7 @@ async function duplicateTheme(id) {
    to it, entry by entry. */
 const MIX_PARTS = [
   { id: "background", label: "Background", aspects: ["background"], by: "area" },
-  { id: "icons", label: "Icons", aspects: ["icons"], by: "group" },
+  { id: "icons", label: "Other icons", aspects: ["icons"], by: "group" },
   { id: "music", label: "Home music", music: true },
   { id: "sounds", label: "Sounds", aspects: ["sounds"], by: "group" },
   { id: "uisounds", label: "Interface sounds", rco: "sound", sections: ["sounds"] },
@@ -1207,6 +1492,7 @@ async function mixLoadRco() {
 async function openMix() {
   state.creating = false;
   state.mix = { loading: true, themes: new Map(), name: "", picks: {}, elems: {}, open: {}, rco: new Map() };
+  state.mixFocused = false;
   renderLibrary();
   try {
     await loadAssets();
@@ -1228,10 +1514,11 @@ async function openMix() {
 
 function mixForm() {
   const m = state.mix;
-  if (m.loading) return `<div class="panel mix">${loadingMarker("mix", "Reading your themes…")}</div>`;
+  const title = `<div class="form-title"><h2 id="mix-title">Mix and match</h2><span class="note">A new theme made of parts of yours. They stay as they are.</span></div>`;
+  if (m.loading) return `<div class="panel mix" aria-labelledby="mix-title">${title}${loadingMarker("mix", "Reading your themes…")}</div>`;
   const themes = [...m.themes.values()].sort((a, b) => a.name.localeCompare(b.name));
   if (themes.length < 2) {
-    return `<div class="panel mix"><p class="note">Mix and match takes each part from one of your themes for this console's firmware: make or import at least two first.</p>
+    return `<div class="panel mix" aria-labelledby="mix-title">${title}<p class="note">Mix and match takes each part from one of your themes for this console's firmware: make or import at least two first.</p>
       <div class="row"><button class="btn ghost" type="button" data-act="cancel-mix">Close</button></div></div>`;
   }
   const opt = (v, label, sel) => `<option value="${esc(v)}"${v === sel ? " selected" : ""}>${esc(label)}</option>`;
@@ -1270,15 +1557,17 @@ function mixForm() {
       ${detail}</div>`;
   }).join("");
   const chosen = MIX_PARTS.some(p => m.picks[p.id] || Object.values(m.elems[p.id] || {}).some(Boolean));
-  return `<form class="panel mix" id="mix">
+  return `<form class="panel mix" id="mix" aria-labelledby="mix-title">
+    ${title}
     <div class="mix-top">
       <label class="field">Name of the new theme<input type="text" id="mix-name" maxlength="60" required placeholder="My mix" value="${esc(m.name)}"></label>
       <label class="field">Start from<select id="mix-all">${opt("", "Choose a theme…", "")}${themes.map(i => opt(i.id, i.name, "")).join("")}</select></label>
     </div>
-    <p class="note">Take each part from one of your themes; a part left as the console's own stays stock.${m.rcoReady || ![...m.themes.values()].some(i => i.rco.length) ? "" : " Interface sounds, colours, icons and corner shapes list only what each theme changes once Element by element has read their interface files."} ${help("A new theme is made from copies of the parts you choose; the themes they come from stay as they are. Element by element takes a part's pieces from different themes: each background area, each Appearance piece, each tile, game, sound or colour palette on its own. Only themes for this console's firmware are offered.")}</p>
+    <p class="note">Choose where each part comes from. A part left at <b>Console's own</b> isn't changed.${m.rcoReady || ![...m.themes.values()].some(i => i.rco.length) ? "" : " Interface sounds, colours, icons and corner shapes list only what each theme changes once Element by element has read their interface files."} ${help("A new theme is made from copies of the parts you choose; the themes they come from stay as they are. Element by element takes a part's pieces from different themes: each background area, each Appearance piece, each tile, game, sound or colour palette on its own. Only themes for this console's firmware are offered.")}</p>
     <div class="mix-parts">${rows}</div>
-    <div class="row"><button class="btn ghost" type="button" data-act="cancel-mix">Cancel</button>
-      <button class="btn primary" type="submit"${chosen ? "" : " disabled"}>Create</button></div>
+    <div class="row" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap"><button class="btn ghost" type="button" data-act="cancel-mix">Cancel</button>
+      <button class="btn primary" type="submit"${chosen ? "" : " disabled"}>Create</button>
+      ${chosen ? "" : `<span class="note">Choose at least one part from a theme.</span>`}</div>
   </form>`;
 }
 
@@ -1665,6 +1954,20 @@ function cleanChoices(c) {
       if (typeof p.keepClear === "boolean") piece.keepClear = p.keepClear;
       if (Object.keys(piece).length) (out.pieces = out.pieces || {})[path] = piece;
     }
+  }
+  if (c.iconStyle && typeof c.iconStyle === "object" && !Array.isArray(c.iconStyle)) {
+    const st = c.iconStyle, o = {};
+    if (ICON_SHAPES.some(([v]) => v === st.shape)) o.shape = st.shape;
+    if (typeof st.scale === "number" && Number.isFinite(st.scale)) o.scale = Math.max(40, Math.min(100, Math.round(st.scale)));
+    if (["colour", "background", "picture"].includes(st.behind)) o.behind = st.behind;
+    if (typeof st.colour === "string" && /^#[0-9a-f]{6}$/i.test(st.colour)) o.colour = st.colour.toLowerCase();
+    if (typeof st.auto === "boolean") o.auto = st.auto;
+    if (typeof st.ranAs === "string" && st.ranAs.length <= 80) o.ranAs = st.ranAs;
+    if (typeof st.picAt === "number" && Number.isFinite(st.picAt)) o.picAt = st.picAt;
+    if (typeof st.mine === "boolean") o.mine = st.mine;
+    if (Array.isArray(st.titles)) o.titles = st.titles.filter(x => typeof x === "string" && /^[A-Za-z0-9_-]{1,40}$/.test(x)).slice(0, 4000);
+    if (Array.isArray(st.hand)) o.hand = st.hand.filter(x => typeof x === "string" && /^[A-Z0-9]{9}$/.test(x)).slice(0, 4000);
+    if (Object.keys(o).length) out.iconStyle = o;
   }
   if (c.songs && typeof c.songs === "object" && !Array.isArray(c.songs)) {
     for (let s = 1; s <= MUSIC_MAX_TRACKS; s++) {
@@ -2820,9 +3123,26 @@ const UI_SOUND_NAMES = {
   psvr2_room_scale_finish: "The PS VR2 play area done", set_pad_orientation_1: "Controller orientation (1)",
   set_pad_orientation_2: "Controller orientation (2)", undefined: "A sound without its own",
 };
-const UI_SOUND_FIRST = 12;  /* moving, selecting, going back, the end of a list, switching between Games and Media (L1/R1,
-                               snd_change_space: heard on 13.42), changing panel, the Control Center, the options menu (the
-                               Options button) and taking a screenshot: shown without "Show all" */
+/* The interface's sounds by where you hear them. The first three groups are open from the start (they hold the sounds
+   people change most: moving, selecting, going back, L1/R1 — snd_change_space, heard on 13.42 — the Control Center,
+   the Options button and screenshots); the others fold away, and one holding a replaced sound opens. A sound in no
+   group goes to Other. */
+const UI_SOUND_GROUPS = [
+  { id: "move", title: "Moving around", open: true, ids: ["focus_move", "enter", "cancel", "cannot_move_focus", "open_home"] },
+  { id: "tabs", title: "Tabs and panels", open: true, ids: ["change_space", "change_panel", "change_panel2"] },
+  { id: "menus", title: "Control Center, options and screenshots", open: true,
+    ids: ["open_control_center", "close_control_center", "open_option_menu", "close_option_menu", "take_screenshot"] },
+  { id: "dialogs", title: "Dialogs and errors", ids: ["open_dialog", "open_error_dialog", "yes_in_dialog", "no_in_dialog", "neutral_in_dialog", "error"] },
+  { id: "controls", title: "Switches, boxes and sliders", ids: ["switch_on", "switch_off", "checkbox_on", "checkbox_off", "slider_level_meter"] },
+  { id: "toasts", title: "Notifications and trophies",
+    ids: ["informative_toasts_something_to_read", "interactive_toasts_something_to_do", "error_toasts_something_is_broken", "trophy_toast", "platinum_trophy_toast"] },
+  { id: "keyboard", title: "Keyboard and voice",
+    ids: ["open_osk", "text_input", "focus_move_in_keyboard", "backspace", "error_in_text_box", "voice_recognition_for_osk_starts",
+      "voice_recognition_for_osk_ends", "voice_recognition_for_osk_error", "agent_wake_up", "agent_utterance_received", "agent_no_results"] },
+  { id: "account", title: "Parties, sign-in and purchases", ids: ["join_party", "leave_party", "log_out", "pass_code", "face_recognition", "purchase_universal_checkout"] },
+  { id: "setup", title: "Set-up, controller and PS VR2", ids: ["open_discover_tour", "psvr2_setup_section_finish", "psvr2_room_scale_finish", "set_pad_orientation_1", "set_pad_orientation_2"] },
+];
+const uiSoundGroup = s => /^stick_sensitivity_/.test(s.key) ? "setup" : (UI_SOUND_GROUPS.find(g => g.ids.includes(s.key)) || { id: "other" }).id;
 const UI_SOUND_SETS = { "": "Default", 1: "PlayStation", 2: "PlayStation 2", 3: "PlayStation 3", 4: "PlayStation 4" };
 
 /* The interface's sounds (default ones, then each Appearance theme's: snd_2_focus_move is the PlayStation 2
@@ -2894,16 +3214,26 @@ async function uiSoundsShow() {
             <button class="btn sm" data-act="uisnd-pick" ${at}>${mine ? "Replace" : "Attach"}</button>
             ${mine ? `<button class="btn sm ghost danger" data-act="uisnd-reset" ${at}>Reset</button>` : ""}</div></div>`;
       };
-      const defaults = list.filter(s => !s.set), all = state.uiSoundsAll;
-      const showDefaults = all ? defaults : defaults.filter((s, i) => i < UI_SOUND_FIRST || mineOf(s));
+      const defaults = list.filter(s => !s.set);
       const sets = Object.keys(UI_SOUND_SETS).filter(k => k && list.some(s => s.set === k));
+      /* A group as a fold: its name, how many sounds and how many replaced; open as it was left, or when it is one
+         of the first three or holds a replaced sound. */
+      const opened = state.uiSoundOpen || (state.uiSoundOpen = {});
+      const fold = (key, title, items, first) => {
+        if (!items.length) return "";
+        const mine = items.filter(mineOf).length;
+        const open = key in opened ? opened[key] : first || mine > 0;
+        return `<details class="fold" data-sound-group="${esc(key)}"${open ? " open" : ""}>
+          <summary><span class="fold-title">${esc(title)}</span><span class="fold-count">${plural(items.length, "sound")}${mine ? ` · ${mine} replaced` : ""}</span></summary>
+          <div class="rows">${items.map(row).join("")}</div></details>`;
+      };
+      const groups = [...UI_SOUND_GROUPS, { id: "other", title: "Other" }]
+        .map(g => fold(g.id, g.title, defaults.filter(x => uiSoundGroup(x) === g.id), !!g.open)).join("");
       replaced = list.filter(mineOf).length;
       html = `<h3 class="sub-head">Interface sounds</h3>
         <p class="note">The sounds of moving between items, selecting, going back and the rest${replaced ? ` (${replaced} replaced)` : ""}. Apply, then use rest mode.${help(`Any audio file, converted on this device to the console's own sound format, as loud as the sound it replaces and no longer: a longer one is cut with a short fade (moving between items is 0.41 s on 13.42). It starts at its hit, as the console's do: silence and quieter sound before it are cut (the last 10 ms kept, faded in), so it plays the moment you press. The PlayStation to PlayStation 4 sounds are the Appearance themes' own (Settings > Appearance and Sound). The controller's vibration patterns stay the console's. The sounds are kept in the interface's resource file (${baseName(path)}), so Interface icons shows that file as changed too.`)}</p>
-        <div class="rows">${showDefaults.map(row).join("")}</div>
-        ${defaults.length > UI_SOUND_FIRST ? `<div><button class="btn sm ghost" data-act="uisnd-all">${all ? "Show fewer" : `Show all ${defaults.length} default sounds`}</button></div>` : ""}
-        ${sets.map(k => `<p class="note" style="margin-top:14px"><b>${esc(UI_SOUND_SETS[k])}</b> Appearance theme</p>
-          <div class="rows">${list.filter(s => s.set === k).map(row).join("")}</div>`).join("")}`;
+        <div class="folds">${groups}
+        ${sets.map(k => fold(`set${k}`, `${UI_SOUND_SETS[k]} look (Appearance themes)`, list.filter(s => s.set === k), false)).join("")}</div>`;
     }
   } catch (e) {
     html = `<p class="note">The interface sounds could not be read: ${esc(e.message)} <button class="btn sm" data-act="uisnd-retry">Try again</button></p>`;
@@ -3021,7 +3351,7 @@ function tileNamesEnsure() {
       }
       state.tileNames.set(g.title, name);
     }
-  })().finally(() => { tileNamesLoading = null; renderAspect(aspectById("tiles")); });
+  })().finally(() => { tileNamesLoading = null; renderAspect(aspectById("tiles")); renderAspect(aspectById("background")); });
 }
 
 /* A tile's icon from your image (or its number, for the test), each copy in
@@ -3086,9 +3416,7 @@ function tilesBody(asp) {
         ${rep || bgRep ? `<button class="btn sm ghost danger" data-act="tile-reset" data-title="${esc(g.title)}">Reset</button>` : ""}
       </div></div>`;
   }).join("");
-  return `<p class="note">The console's own tiles on the home screen and in the Game Library. Each icon is written in
-      exactly the format of the console's; a tile's background is the picture shown while it is selected.</p>
-    <div class="toolbar"><button class="btn" data-act="tiles-number">Number tile icons</button>
+  return `<div class="toolbar"><button class="btn" data-act="tiles-number">Number tile icons</button>
       <span class="note">A test: each icon becomes the number in front of its name below, so you can see which tile is which.</span></div>
     <div class="rows">${rows}</div>`;
 }
@@ -3165,7 +3493,7 @@ function titleNamesEnsure() {
 /* One of a title's pictures from your image, in every file that holds it:
    a PNG in exactly the format of the console's, a texture (and anything
    else) through the usual conversion into the console's exact format. */
-async function titlePicture(title, stem, file) {
+async function titlePicture(title, stem, file, quiet = false) {
   const g = titleGroups().find(x => x.title === title), set = g && g.sets.find(x => x.stem === stem);
   if (!set) return;
   const label = `${(state.titleNames && state.titleNames.get(title)) || title} ${pictureName(stem)[0]}`;
@@ -3183,11 +3511,519 @@ async function titlePicture(title, stem, file) {
       written++;
     } catch (e) {
       failed = true;
-      toast(`${label} (${baseName(a.path)}): ${e.message}`, "err", 9000);
+      if (!quiet) toast(`${label} (${baseName(a.path)}): ${e.message}`, "err", 9000);   /* a batch says how many failed */
     }
   }
-  if (rest.length) await attachTo(rest, file, label, written);
-  else if (!failed) toast(`${label} replaced${written > 1 ? ` in ${plural(written, "file")}` : ""} and verified. Apply the theme to use it.`, "ok");
+  if (rest.length && (await attachTo(rest, file, label, written, false, null, quiet)) < rest.length) failed = true;
+  else if (!rest.length && !failed && !quiet) toast(`${label} replaced${written > 1 ? ` in ${plural(written, "file")}` : ""} and verified. Apply the theme to use it.`, "ok");
+  stamp = Date.now();
+  if (quiet) return !failed;
+  await refreshStatus();
+  renderAspect(aspectById("titles"));
+  return !failed;
+}
+
+/* ---- Icon style: every game's and app's icon in a shape, over a colour or a picture ----
+
+   Made in this page from each title's own icon (the console's, never one already styled, so styling again never
+   stacks), written as the icons are when you change one by hand. An icon you changed yourself is styled too (unless
+   you say not to): your picture goes in the shape, and is kept with the style first (icon-style/own/<title>.png),
+   so styling again starts from it and removing the style puts it back. The theme lists the titles its style made.
+   Games installed later are styled when the theme is opened here (and by the plugin, autostyle.c); nothing is done
+   while the console installs one, since a theme over a game's pictures keeps the console from writing them. */
+const ICON_SHAPES = [["", "None"], ["circle", "Circle"], ["rounded", "Rounded square"], ["square", "Square"], ["diamond", "Diamond"], ["hexagon", "Hexagon"], ["triangle", "Triangle"]];
+const ICON_STYLE_DEFAULT = { shape: "", scale: 72, behind: "colour", colour: "#0d1424", auto: true, mine: true, titles: [], hand: [] };
+const iconStyle = () => ({ ...ICON_STYLE_DEFAULT, ...(state.choices.iconStyle || {}) });
+function setIconStyle(change) {
+  return setChoice(c => { const st = { ...ICON_STYLE_DEFAULT, ...(c.iconStyle || {}) }; change(st); c.iconStyle = st; });
+}
+function shapePath(x, shape, cx, cy, r) {
+  x.beginPath();
+  if (shape === "circle") x.arc(cx, cy, r, 0, Math.PI * 2);
+  else if (shape === "rounded" || shape === "square") {
+    const k = shape === "rounded" ? r * 0.44 : 0;
+    x.roundRect ? x.roundRect(cx - r, cy - r, 2 * r, 2 * r, k) : x.rect(cx - r, cy - r, 2 * r, 2 * r);
+  } else {
+    const n = shape === "diamond" ? 4 : shape === "hexagon" ? 6 : 3, rot = shape === "hexagon" ? Math.PI / 6 : -Math.PI / 2;
+    const rr = shape === "triangle" ? r * 1.12 : r, dy = shape === "triangle" ? r * 0.16 : 0;
+    for (let i = 0; i < n; i++) {
+      const a = rot + i * 2 * Math.PI / n;
+      x[i ? "lineTo" : "moveTo"](cx + rr * Math.cos(a), cy + dy + rr * Math.sin(a));
+    }
+    x.closePath();
+  }
+}
+/* One styled icon, w x h, from a title's own icon: what is behind, then the icon cut to the shape, with a soft shadow. */
+function drawStyledIcon(x, w, h, icon, st, behind) {
+  x.clearRect(0, 0, w, h);
+  if (behind) {
+    const sc = Math.max(w / behind.width, h / behind.height), bw = behind.width * sc, bh = behind.height * sc;
+    x.drawImage(behind, (w - bw) / 2, (h - bh) / 2, bw, bh);
+  } else { x.fillStyle = st.colour; x.fillRect(0, 0, w, h); }
+  drawIconInShape(x, w, h, icon, st);
+}
+/* The title's icon cut to the style's shape, with its shadow, over whatever is drawn already. */
+function drawIconInShape(x, w, h, icon, st) {
+  if (!st.shape) { x.drawImage(icon, 0, 0, w, h); return; }
+  const r = Math.min(w, h) / 2 * st.scale / 100, cx = w / 2, cy = h / 2;
+  x.save();
+  x.shadowColor = "rgba(0, 0, 0, .45)"; x.shadowBlur = r * 0.18; x.shadowOffsetY = r * 0.05;
+  shapePath(x, st.shape, cx, cy, r); x.fillStyle = "#000"; x.fill();
+  x.restore();
+  x.save();
+  shapePath(x, st.shape, cx, cy, r); x.clip();
+  x.imageSmoothingQuality = "high";
+  x.drawImage(icon, cx - r, cy - r, 2 * r, 2 * r);
+  x.restore();
+}
+/* What goes behind the icons: the theme's background (its 16:9 preview), your picture, or nothing (the colour). */
+/* Pictures drawn again and again as the style's options change (a title's icon, what is behind): read once each.
+   Their addresses change when they do (the stamp), so a new one is read. */
+const imageCache = new Map();
+function cachedImage(url) {
+  if (!imageCache.has(url)) {
+    imageCache.set(url, loadImage(url).catch(e => { imageCache.delete(url); throw e; }));
+    if (imageCache.size > 32) imageCache.delete(imageCache.keys().next().value);
+  }
+  return imageCache.get(url);
+}
+async function iconBehind(st) {
+  if (st.behind === "colour") return null;
+  const t = themeById(state.editId);
+  try { return await cachedImage(`/api/theme/preview?${q({ id: state.editId, kind: st.behind === "picture" ? "iconbg" : "background" })}&v=${(t && t.coverTime) || 0}-${stamp}`); }
+  catch (e) { return null; }
+}
+/* A title's own icon: the first PNG of its icon0 set, as the console has it. */
+const titleIcon = g => { const set = g.sets.find(x => x.stem === "icon0"); return set && set.files.find(a => ext(a.path) === "png"); };
+async function titleOwnIcon(g) {
+  const a = titleIcon(g);
+  return a ? cachedImage(`/api/asset?${q({ path: a.path })}`) : null;
+}
+/* The titles the plugin styled by itself, read from the theme (merged with the page's own list). */
+let styleMadeByPlugin = { id: null, titles: [] };
+async function loadPluginStyled(id = state.editId) {
+  try {
+    const r = await api("GET", "/api/theme/icon-style", { id });
+    styleMadeByPlugin = { id, titles: r.made || [], auto: r.auto, template: r.template, own: r.own || [] };
+  } catch (e) { styleMadeByPlugin = { id, titles: [], own: [] }; }
+}
+/* The titles whose icon is the style's: styled here, or by the plugin (unless you changed one by hand since). */
+function styledTitles() {
+  const st = iconStyle(), hand = new Set(st.hand);
+  return new Set([...st.titles, ...(styleMadeByPlugin.id === state.editId ? styleMadeByPlugin.titles.filter(t => !hand.has(t)) : [])]);
+}
+/* The titles with your picture kept with the style (an icon you had changed, then styled). */
+const ownPictures = () => new Set(styleMadeByPlugin.id === state.editId ? styleMadeByPlugin.own || [] : []);
+const ownPictureUrl = title => `/api/theme/icon-style?${q({ id: state.editId, own: title })}&v=${stamp}`;
+/* Icons you changed by hand, not the style's: with "yours too", the style puts your picture in the shape. */
+function handChanged() {
+  const made = styledTitles();
+  return titleGroups().filter(g => {
+    const set = g.sets.find(x => x.stem === "icon0");
+    return set && titleIcon(g) && !made.has(g.title) && set.files.some(a => state.files.has(a.path));
+  });
+}
+
+/* Your picture for a title's icon as the theme holds it, as a PNG of at most 1024 pixels a side: the original you
+   attached if the theme kept it, else the theme's PNG, else its texture. */
+async function themeIconPng(set) {
+  const id = state.editId;
+  let img = null;
+  const kept = set.files.find(a => state.sources.has(a.path));
+  if (kept) {
+    const f = await sourceFile(kept.path).catch(() => null);
+    if (f) { const u = URL.createObjectURL(f); try { img = await loadImage(u); } catch (e) { img = null; } finally { URL.revokeObjectURL(u); } }
+  }
+  const png = !img && set.files.find(a => ext(a.path) === "png" && state.files.has(a.path));
+  if (png) { try { img = await loadImage(`/api/theme/file?${q({ id, path: png.path })}&v=${stamp}`); } catch (e) { img = null; } }
+  const tex = !img && set.files.find(a => ext(a.path) === "dds" && state.files.has(a.path));
+  if (tex) {
+    const res = await fetch(`/api/theme/file?${q({ id, path: tex.path })}&v=${stamp}`);
+    if (res.ok) { let bytes = new Uint8Array(await res.arrayBuffer()); if (bytes[0] === 0x28) bytes = unzstdStored(bytes); img = await ddsCanvas(bytes, true); }
+  }
+  if (!img) throw new Error("your picture for this icon can't be read from the theme");
+  const w = img.naturalWidth || img.width, h = img.naturalHeight || img.height, k = Math.min(1, 1024 / Math.max(w, h));
+  const c = document.createElement("canvas");
+  c.width = Math.max(16, Math.round(w * k));
+  c.height = Math.max(16, Math.round(h * k));
+  c.getContext("2d").drawImage(img, 0, 0, c.width, c.height);
+  return new Promise((done, fail) => c.toBlob(b => b ? done(b) : fail(new Error("could not make the picture")), "image/png"));
+}
+
+/* The picture a title's styled icon is made from. One the style made: your picture kept with it if it had one,
+   else the console's icon. One you changed by hand, styled now: your picture as the theme holds it, kept with the
+   style first, so styling again never puts a styled icon in the shape and removing the style puts it back. */
+async function styleSource(g) {
+  if (styledTitles().has(g.title)) return ownPictures().has(g.title) ? loadImage(ownPictureUrl(g.title)) : titleOwnIcon(g);
+  const set = g.sets.find(x => x.stem === "icon0");
+  if (!set.files.some(a => state.files.has(a.path))) return titleOwnIcon(g);
+  const blob = await themeIconPng(set);
+  await uploadVerified("/api/theme/icon-style", { id: state.editId, part: "own", title: g.title }, blob);
+  if (styleMadeByPlugin.id === state.editId) styleMadeByPlugin.own = [...new Set([...(styleMadeByPlugin.own || []), g.title])];
+  const u = URL.createObjectURL(blob);
+  try { return await loadImage(u); } finally { URL.revokeObjectURL(u); }
+}
+
+/* You changed a title's icon by hand: it is yours now, not the style's, and a picture kept for it is let go. */
+async function iconChangedByHand(title, back = false) {
+  const st = iconStyle(), plugin = styleMadeByPlugin.id === state.editId ? styleMadeByPlugin.titles : [];
+  /* (put back to the console's: still counted as the style's, so it isn't styled again behind your back) */
+  if (!back && (st.titles.includes(title) || plugin.includes(title))) {
+    await setIconStyle(x => { x.titles = x.titles.filter(t => t !== title); if (plugin.includes(title)) x.hand = [...new Set([...x.hand, title])]; });
+  }
+  if (ownPictures().has(title)) {
+    await api("POST", "/api/theme/icon-style", { id: state.editId, forget: title }).catch(() => {});
+    await loadPluginStyled();
+  }
+}
+
+/* The style's template for the plugin, which styles titles installed later by itself (autostyle.c): the backdrop
+   with the shape's shadow, the shape alone, and the titles installed now, which it leaves to you. */
+async function keepStyleTemplate(st) {
+  const id = state.editId, side = 512;
+  const behind = await iconBehind(st);
+  const base = document.createElement("canvas"), mask = document.createElement("canvas"), none = document.createElement("canvas");
+  base.width = base.height = mask.width = mask.height = side;
+  none.width = none.height = 1;
+  drawStyledIcon(base.getContext("2d"), side, side, none, st, behind);
+  const m = mask.getContext("2d"), r = side / 2 * st.scale / 100;
+  shapePath(m, st.shape, side / 2, side / 2, r);
+  m.fillStyle = "#fff"; m.fill();
+  const png = c => new Promise(res => c.toBlob(res, "image/png"));
+  await uploadVerified("/api/theme/icon-style", { id, part: "base" }, await png(base));
+  await uploadVerified("/api/theme/icon-style", { id, part: "mask" }, await png(mask));
+  /* always sent, even with no titles: without it the plugin can't tell a new title from one you had */
+  const known = [...new Set(titleGroups().map(g => g.title).filter(t => /^[A-Z0-9]{9}$/.test(t)))];
+  await uploadVerified("/api/theme/icon-style", { id, part: "known" }, new Blob([known.map(t => `${t}\n`).join("") || "\n"]));
+  await api("POST", "/api/theme/icon-style", { id, auto: st.auto ? 1 : 0, scale: st.scale });
+}
+
+/* Titles the style is for: with an icon, and not changed by hand (one the style made counts as the style's). */
+function styleTargets(onlyNew) {
+  const st = iconStyle(), made = styledTitles();
+  return titleGroups().filter(g => {
+    const set = g.sets.find(x => x.stem === "icon0");
+    if (!set || !titleIcon(g)) return false;
+    const changed = set.files.some(a => state.files.has(a.path));
+    return onlyNew ? !changed && !made.has(g.title) : !changed || made.has(g.title) || st.mine;
+  });
+}
+
+function iconStyleHtml() {
+  const st = iconStyle(), all = styleTargets(false).length, made = styledTitles().size, fresh = st.shape ? styleTargets(true).length : 0;
+  const hand = handChanged().length, own = ownPictures().size;
+  const byPlugin = styleMadeByPlugin.id === state.editId ? styleMadeByPlugin.titles.length : 0;
+  const t = themeById(state.editId);
+  const chip = (v, label, on) => `<button type="button" class="btn sm chip" data-act="istyle-behind" data-v="${v}" aria-pressed="${on}">${esc(label)}</button>`;
+  return `<section class="panel icon-style">
+    <div class="form-title"><h3 class="sub-head" style="margin:0">Icon style</h3><span class="note">Every game's and app's icon in a shape, over a colour or a picture.</span></div>
+    <div class="opts" role="radiogroup" aria-label="Shape">${ICON_SHAPES.map(([v, name]) =>
+      `<button type="button" class="opt" role="radio" aria-checked="${st.shape === v}" data-act="istyle-shape" data-v="${v}">
+        <canvas data-istyle="${v}" width="112" height="112"></canvas><b>${esc(name)}</b></button>`).join("")}</div>
+    <p class="note istyle-busy" id="istyle-busy" role="status" aria-live="polite"></p>
+    ${st.shape ? `<div class="istyle-row">
+      <label class="field">Size of the icon in the shape: <span id="istyle-scale-label">${st.scale}%</span>
+        <input type="range" min="40" max="100" step="2" value="${st.scale}" id="istyle-scale"></label>
+      <div class="field"><span>Behind it</span><div class="pv-tabs" style="flex-wrap:wrap">${chip("colour", "A colour", st.behind === "colour")}${
+        t && aspectReplaced(aspectById("background")) ? chip("background", "The theme's background", st.behind === "background") : ""}${chip("picture", "A picture of yours", st.behind === "picture")}</div>
+        ${st.behind === "colour" ? `<input type="color" id="istyle-colour" value="${esc(st.colour)}" aria-label="Colour behind the icons">` : ""}
+        ${st.behind === "picture" ? `<div class="pv-tabs" style="margin-top:8px"><button class="btn sm" type="button" data-act="istyle-adjust">Adjust picture</button>
+          <button class="btn sm ghost" type="button" data-act="istyle-picture">Choose another</button></div>` : ""}</div>
+    </div>
+    <label class="note check"><input type="checkbox" id="istyle-auto"${st.auto ? " checked" : ""}> Style games and apps installed later${help("While this theme is applied, the plugin styles a game or app on its own once its install has finished, nothing in its folders has changed for 10 minutes and no game is being played (one left on the home screen doesn't count), then applies the theme again; the console says so. It works from the template kept when you last styled the icons here. A title it can't style itself (a picture of another kind) is styled the next time you open this theme here. Titles installed when you styled the icons, and any icon you put back or changed by hand, are left as they are.")}</label>
+    ${hand ? `<label class="note check"><input type="checkbox" id="istyle-mine"${st.mine ? " checked" : ""}> The ${plural(hand, "icon")} you changed by hand too: your picture goes in the shape${help("Your picture is kept with the style first, so styling again starts from it, never from an icon already styled, and Remove the style puts it back. Unticked, the icons you changed stay as they are.")}</label>` : ""}
+    ${byPlugin ? `<p class="note">${plural(byPlugin, "icon")} styled by the console on its own after ${byPlugin === 1 ? "its game was" : "their games were"} installed.</p>` : ""}
+    <div class="toolbar">
+      <button class="btn primary" type="button" data-act="istyle-run"${all ? "" : " disabled"}>${made && !fresh ? `Style ${plural(all, "icon")} again` : `Style ${plural(all, "icon")}`}</button>${styling ? `<span class="note">Styling…</span>` : ""}
+      ${made ? `<button class="btn ghost danger" type="button" data-act="istyle-remove">Remove the style (${made})</button>` : ""}
+      <span class="note">${made && st.ranAs && st.ranAs !== styleSig(st) ? "Your icons have the earlier style until you style them again. " : ""}${fresh && made ? `${plural(fresh, "game or app", "games and apps")} installed since.` : ""}${hand && !st.mine ? " Icons you changed by hand are kept." : ""}${own ? ` Remove the style puts your own ${own === 1 ? "picture" : "pictures"} back.` : ""}</span>
+    </div>` : made ? `<div class="toolbar"><button class="btn ghost danger" type="button" data-act="istyle-remove">Remove the style (${made})</button>
+      <span class="note">${plural(made, "icon")} still ${made === 1 ? "has" : "have"} the earlier style.</span></div>` : ""}
+  </section>`;
+}
+/* The shape choices, drawn on one of your games' own icons with what is behind. */
+async function iconStyleShow() {
+  const cs = [...document.querySelectorAll("canvas[data-istyle]")];
+  if (!cs.length) return;
+  const g = titleGroups().find(x => titleIcon(x));
+  let icon = null, behind = null;
+  const st = iconStyle();
+  /* what is being read, said when it takes a moment (the first time; then each is kept in the page) */
+  const what = st.behind === "background" ? "Reading the theme's background to draw the shapes on…"
+    : st.behind === "picture" ? "Reading your picture to draw the shapes on…" : "Reading one of your games' icons to draw the shapes with…";
+  const slow = setTimeout(() => {
+    const say = $("#istyle-busy"), box = $(".icon-style .opts");
+    if (say) say.textContent = what;
+    if (box) box.setAttribute("aria-busy", "true");
+  }, 200);
+  try { [icon, behind] = await Promise.all([g ? titleOwnIcon(g) : null, iconBehind(st)]); } catch (e) { /* drawn without */ }
+  clearTimeout(slow);
+  const say = $("#istyle-busy"), box = $(".icon-style .opts");
+  if (say) say.textContent = st.behind !== "colour" && !behind ? (st.behind === "background" ? "The theme's background can't be read here: the shapes show without it." : "Your picture can't be read here: the shapes show without it.") : "";
+  if (box) box.removeAttribute("aria-busy");
+  for (const c of cs) {
+    const x = c.getContext("2d");
+    if (!icon) { x.fillStyle = "#1a2131"; x.fillRect(0, 0, c.width, c.height); continue; }
+    drawStyledIcon(x, c.width, c.height, icon, { ...st, shape: c.dataset.istyle }, behind);
+  }
+}
+/* What the icons were last styled as: when the shape, size or what is behind differs, the part says so. */
+const styleSig = st => `${st.shape}|${st.scale}|${st.behind}|${st.colour}|${st.behind === "picture" ? st.picAt || 0 : 0}`;
+let styling = false, styleStop = false;
+/* Style the icons; `note`, said at the end in place of "apply the theme". How many were styled. */
+async function styleIcons(onlyNew, note = null) {
+  if (styling) return 0;
+  const st = iconStyle();
+  if (!st.shape) return 0;
+  const targets = styleTargets(onlyNew);
+  if (!targets.length) return 0;
+  styling = true;
+  styleStop = false;
+  const p = progressToast(`Styling ${plural(targets.length, "icon")}…`);
+  /* a long run can be stopped between two titles: those done stay styled */
+  const stop = document.createElement("button");
+  stop.type = "button"; stop.className = "btn sm ghost"; stop.textContent = "Stop"; stop.style.marginTop = "8px";
+  stop.addEventListener("click", () => { styleStop = true; stop.disabled = true; stop.textContent = "Stopping after this one…"; });
+  p.el.append(stop);
+  const made = new Set(st.titles);
+  let done = 0, failed = 0;
+  try {
+    const behind = await iconBehind(st);
+    for (const g of targets) {
+      if (styleStop) break;
+      const name = (state.titleNames && state.titleNames.get(g.title)) || g.title;
+      p.set(`Styling icons: ${name} (${done + 1} of ${targets.length})…`, done / targets.length, (done + 1) / targets.length);
+      try {
+        const icon = await styleSource(g);
+        const c = document.createElement("canvas");
+        c.width = icon.naturalWidth; c.height = icon.naturalHeight;
+        drawStyledIcon(c.getContext("2d"), c.width, c.height, icon, st, behind);
+        const blob = await new Promise(r => c.toBlob(r, "image/png"));
+        if (await titlePicture(g.title, "icon0", new File([blob], `${g.title}-icon.png`, { type: "image/png" }), true)) made.add(g.title);
+        else failed++;
+      } catch (e) { failed++; }
+      done++;
+    }
+  } finally {
+    styling = false;
+    await setIconStyle(x => { x.titles = [...made]; x.hand = x.hand.filter(t => !made.has(t)); if (!styleStop) x.ranAs = styleSig(st); });
+    /* the plugin carries on from here for games installed later */
+    try { await keepStyleTemplate(iconStyle()); await loadPluginStyled(); }
+    catch (e) { toast(`The style for games installed later could not be kept: ${e.message}`, "err"); }
+    p.done(`${plural(done - failed, "icon")} styled${failed ? `, ${failed} could not be` : ""}${styleStop ? ` (stopped; ${plural(targets.length - done, "icon")} left as ${targets.length - done === 1 ? "it was" : "they were"})` : ""}. ${note || "Apply the theme to see them: the Game Library at once, the home row after rest mode."}`, failed ? "" : "ok");
+    stamp = Date.now();
+    await refreshStatus();
+    renderAspect(aspectById("titles"));
+  }
+  return done - failed;
+}
+/* ---- The picture behind the icons, placed as a profile picture is ----
+
+   Your picture with the square each icon shows outlined and the rest dimmed, the style's shape and one of your
+   games' icons on it, and the icons at the sizes the console shows them. Drag it (or the arrow keys, as a
+   controller's D-pad sends) to move it; zoom with the slider, + and − or the wheel. The zoom never goes below
+   what fills the square, so the icons never show an edge of it. "Use this picture" keeps the square as the theme's
+   picture behind the icons (1024 pixels, never applied to the console on its own). */
+const BGE_OUT = 1024;
+let bge = null;
+
+async function openBgEditor(source) {
+  bgeClose();
+  let img = null;
+  try {
+    if (source instanceof Blob) {
+      const url = URL.createObjectURL(source);
+      try { img = await loadImage(url); } finally { URL.revokeObjectURL(url); }
+    } else {
+      img = await loadImage(source);
+    }
+  } catch (e) { return toast("That picture can't be read here: use a PNG, JPEG or WebP.", "err"); }
+  const st = iconStyle(), g = titleGroups().find(x => titleIcon(x));
+  let icon = null;
+  try { icon = g ? await titleOwnIcon(g) : null; } catch (e) { icon = null; }
+  const F = Math.max(200, Math.min(400, innerWidth - 96)), M = Math.round(F * 0.14);
+  const iw = img.naturalWidth || img.width, ih = img.naturalHeight || img.height;
+  const fill = Math.max(F / iw, F / ih);   /* the smallest zoom that still fills the square */
+  bge = { img, iw, ih, F, M, fill, zoom: 1, s: fill, ox: (F - iw * fill) / 2, oy: (F - ih * fill) / 2, icon, showIcon: !!icon, st };
+  const hasBg = aspectReplaced(aspectById("background")) > 0;
+  const ov = document.createElement("div");
+  ov.id = "bge";
+  ov.className = "pv-overlay";
+  ov.innerHTML = `<div class="bge-dialog" role="dialog" aria-modal="true" aria-labelledby="bge-title">
+      <div class="pv-bar"><h2 id="bge-title">Picture behind the icons</h2><span class="spacer"></span>
+        <button class="btn ghost sm" type="button" data-act="bge-cancel">Cancel</button>
+        <button class="btn primary sm" type="button" data-act="bge-save">Use this picture</button></div>
+      <div class="bge-body">
+        <canvas id="bge-canvas" width="${F + 2 * M}" height="${F + 2 * M}" tabindex="0"
+          aria-label="The picture behind the icons. Drag it, or use the arrow keys, to move it; + and − zoom."></canvas>
+        <div class="panel bge-side">
+          <div class="field"><span>Zoom <span id="bge-zoom-label">100%</span></span>
+            <div class="bge-zoom">
+              <button class="btn sm" type="button" data-act="bge-zoom" data-v="-1" aria-label="Zoom out">−</button>
+              <input type="range" id="bge-zoom" min="100" max="400" step="1" value="100" aria-label="Zoom">
+              <button class="btn sm" type="button" data-act="bge-zoom" data-v="1" aria-label="Zoom in">+</button>
+            </div></div>
+          <div><button class="btn sm ghost" type="button" data-act="bge-reset">Centre and fit</button></div>
+          ${icon ? `<label class="note check"><input type="checkbox" id="bge-icon" checked> Show a game's icon on it</label>` : ""}
+          <div class="bge-previews">
+            <figure><canvas data-bge-pv="160" width="160" height="160"></canvas><figcaption>Home screen</figcaption></figure>
+            <figure><canvas data-bge-pv="72" width="72" height="72"></canvas><figcaption>Game Library</figcaption></figure></div>
+          <div class="bge-sources"><button class="btn sm" type="button" data-act="bge-file">Choose another picture</button>
+            ${hasBg ? `<button class="btn sm" type="button" data-act="bge-fromtheme">Use the theme's background</button>` : ""}</div>
+          <p class="note">Only the bright square shows behind the icons. Drag the picture or use the arrow keys.</p>
+        </div>
+      </div></div>`;
+  document.body.append(ov);
+  const c = $("#bge-canvas");
+  let drag = null;
+  c.addEventListener("pointerdown", e => { drag = { x: e.clientX, y: e.clientY, ox: bge.ox, oy: bge.oy }; c.setPointerCapture(e.pointerId); });
+  c.addEventListener("pointermove", e => {
+    if (!drag || !bge) return;
+    const k = c.width / c.getBoundingClientRect().width;   /* the canvas is shown smaller on a phone */
+    bge.ox = drag.ox + (e.clientX - drag.x) * k; bge.oy = drag.oy + (e.clientY - drag.y) * k;
+    bgeClamp(); bgeDraw();
+  });
+  const end = () => { drag = null; };
+  c.addEventListener("pointerup", end);
+  c.addEventListener("pointercancel", end);
+  c.addEventListener("wheel", e => {
+    e.preventDefault();
+    const r = c.getBoundingClientRect(), k = c.width / r.width;
+    bgeZoom(bge.zoom * (e.deltaY < 0 ? 1.08 : 1 / 1.08), (e.clientX - r.left) * k - bge.M, (e.clientY - r.top) * k - bge.M);
+  }, { passive: false });
+  c.addEventListener("keydown", e => {
+    const step = e.shiftKey ? 40 : 10, moves = { ArrowLeft: [step, 0], ArrowRight: [-step, 0], ArrowUp: [0, step], ArrowDown: [0, -step] };
+    if (moves[e.key]) { bge.ox += moves[e.key][0]; bge.oy += moves[e.key][1]; bgeClamp(); bgeDraw(); e.preventDefault(); }
+    else if (e.key === "+" || e.key === "=") { bgeZoom(bge.zoom * 1.1); e.preventDefault(); }
+    else if (e.key === "-" || e.key === "_") { bgeZoom(bge.zoom / 1.1); e.preventDefault(); }
+  });
+  $("#bge-zoom").addEventListener("input", e => bgeZoom(+e.target.value / 100));
+  const show = $("#bge-icon");
+  if (show) show.addEventListener("change", e => { bge.showIcon = e.target.checked; bgeDraw(); });
+  ov.addEventListener("click", e => { if (e.target === ov) bgeClose(); });
+  bgeDraw();
+  c.focus();
+}
+function bgeClose() {
+  const ov = $("#bge");
+  if (ov) ov.remove();
+  bge = null;
+}
+/* The picture always covers the square. */
+function bgeClamp() {
+  const w = bge.iw * bge.s, h = bge.ih * bge.s;
+  bge.ox = Math.min(0, Math.max(bge.F - w, bge.ox));
+  bge.oy = Math.min(0, Math.max(bge.F - h, bge.oy));
+}
+/* Zoom to `z` (1 = just fills the square), keeping the point (px, py) of the square where it is. */
+function bgeZoom(z, px = bge.F / 2, py = bge.F / 2) {
+  z = Math.max(1, Math.min(4, z));
+  const s = bge.fill * z, k = s / bge.s;
+  bge.ox = px - (px - bge.ox) * k; bge.oy = py - (py - bge.oy) * k;
+  bge.zoom = z; bge.s = s;
+  bgeClamp();
+  const r = $("#bge-zoom"), l = $("#bge-zoom-label");
+  if (r) r.value = String(Math.round(z * 100));
+  if (l) l.textContent = `${Math.round(z * 100)}%`;
+  bgeDraw();
+}
+/* The square as it is now, at `side` pixels. */
+function bgeSquare(side) {
+  const c = document.createElement("canvas");
+  c.width = c.height = side;
+  const x = c.getContext("2d"), k = side / bge.F;
+  x.imageSmoothingQuality = "high";
+  x.drawImage(bge.img, bge.ox * k, bge.oy * k, bge.iw * bge.s * k, bge.ih * bge.s * k);
+  return c;
+}
+function bgeDraw() {
+  const c = $("#bge-canvas");
+  if (!c || !bge) return;
+  const x = c.getContext("2d"), { M, F } = bge;
+  x.fillStyle = "#0b0f18"; x.fillRect(0, 0, c.width, c.height);
+  x.imageSmoothingQuality = "high";
+  x.drawImage(bge.img, M + bge.ox, M + bge.oy, bge.iw * bge.s, bge.ih * bge.s);
+  x.save();
+  x.fillStyle = "rgba(6, 9, 17, .7)";   /* what the icons leave out: the page's own colour, dimmed over it */
+  x.beginPath(); x.rect(0, 0, c.width, c.height); x.rect(M, M, F, F); x.fill("evenodd");
+  x.restore();
+  if (bge.showIcon && bge.icon && bge.st.shape) {
+    x.save(); x.translate(M, M); x.beginPath(); x.rect(0, 0, F, F); x.clip();
+    drawIconInShape(x, F, F, bge.icon, bge.st);
+    x.restore();
+  }
+  x.strokeStyle = "#fff"; x.lineWidth = 2; x.strokeRect(M - 1, M - 1, F + 2, F + 2);
+  const sq = bgeSquare(256);
+  for (const pv of document.querySelectorAll("canvas[data-bge-pv]")) {
+    const n = +pv.dataset.bgePv, px = pv.getContext("2d");
+    if (bge.icon) drawStyledIcon(px, n, n, bge.icon, bge.st, sq);
+    else px.drawImage(sq, 0, 0, n, n);
+  }
+}
+async function bgeSave() {
+  const out = bgeSquare(BGE_OUT);
+  const blob = await new Promise(r => out.toBlob(r, "image/jpeg", 0.92));
+  await uploadVerified("/api/theme/preview", { id: state.editId, kind: "iconbg" }, blob);
+  stamp = Date.now();
+  await setIconStyle(x => { x.behind = "picture"; x.picAt = Date.now(); });
+  bgeClose();
+  await refreshStatus();
+  renderAspect(aspectById("titles"));
+  toast(styledTitles().size ? "Picture kept. Style the icons again to put it behind them." : "Picture kept. Style the icons to put it behind them.", "ok");
+}
+
+async function iconBackdropKept() {
+  try { return (await fetch(`/api/theme/preview?${q({ id: state.editId, kind: "iconbg" })}`, { method: "GET" })).ok; } catch (e) { return false; }
+}
+/* Games and apps installed since the style was last used: styled as the theme opens, if it is to be. */
+async function autoStyleIcons() {
+  const st = iconStyle();
+  if (!st.shape || !st.titles.length || state.route !== "edit") return;
+  /* The console's copy of the template, kept again when it isn't whole (an upload that stopped) or its on/off
+     differs: only for the style the icons were made with, so later installs match them. */
+  const kept = styleMadeByPlugin.id === state.editId ? styleMadeByPlugin : null;
+  if (kept && "template" in kept && st.ranAs === styleSig(st) && (!kept.template || kept.auto !== !!st.auto)) {
+    try { await keepStyleTemplate(st); await loadPluginStyled(); }
+    catch (e) { toast(`The style for games installed later could not be kept: ${e.message}`, "err"); }
+  }
+  if (!st.auto) return;
+  const fresh = styleTargets(true);
+  if (!fresh.length) return;
+  /* Styled by the page on its own, as the plugin does: kept and applied again when the theme is the one applied,
+     unless you have changes of your own waiting (applying would put them on the console too, unasked). */
+  const id = state.editId, t = themeById(id);
+  const yours = !!(t && t.unsaved), applied = state.status && state.status.applied === id;
+  toast(`${plural(fresh.length, "game or app", "games and apps")} installed since this theme's icon style was used: styling ${fresh.length === 1 ? "it" : "them"}.`, "", 6000);
+  const n = await styleIcons(true, applied && !yours ? "Applying the theme again to show them…" : null);
+  if (!n || state.editId !== id || yours) return;
+  try { await api("POST", "/api/theme/save", { id }); } catch (e) { return toast(`The styled icons are in the theme but not saved: ${e.message}`, "err"); }
+  await refreshStatus();
+  if (applied && state.status.applied === id && !state.status.applying) await applyTheme(id);
+}
+
+async function removeIconStyle() {
+  const made = styledTitles(), own = ownPictures();
+  const groups = titleGroups().filter(g => made.has(g.title));
+  const p = progressToast(`Removing the style from ${plural(groups.length, "icon")}…`);
+  let yours = 0;
+  for (let i = 0; i < groups.length; i++) {
+    const g = groups[i], name = (state.titleNames && state.titleNames.get(g.title)) || g.title;
+    p.set(`Removing the style: ${name} (${i + 1} of ${groups.length})…`, i / groups.length, (i + 1) / groups.length);
+    if (own.has(g.title)) {   /* an icon you had changed: your picture again */
+      try {
+        const res = await fetch(ownPictureUrl(g.title));
+        if (!res.ok) throw new Error("not kept");
+        const file = new File([await res.blob()], `${g.title}-icon.png`, { type: "image/png" });
+        if (await titlePicture(g.title, "icon0", file, true)) { yours++; continue; }
+      } catch (e) { /* not readable: the console's own, as for the others */ }
+    }
+    await resetAssets(g.sets.find(x => x.stem === "icon0").files);
+  }
+  await setIconStyle(x => { x.titles = []; x.hand = []; x.auto = false; });
+  await api("POST", "/api/theme/icon-style", { id: state.editId, auto: 0, clear: 1 }).catch(() => {});
+  await loadPluginStyled();
+  const rest = groups.length - yours;
+  p.done(`The style is off ${plural(groups.length, "icon")}: ${yours ? `${yours} with your own picture again${rest ? `, ${rest} with the console's` : ""}` : "the console's own again in this theme"}. Apply the theme to see it.`, "ok");
   stamp = Date.now();
   await refreshStatus();
   renderAspect(aspectById("titles"));
@@ -3224,8 +4060,9 @@ function titlesBody(asp) {
         ${rep ? `<button class="btn sm ghost danger" data-act="title-reset" data-title="${esc(g.title)}">Reset</button>` : ""}
       </div></div>`;
   }).join("");
-  return `<p class="note">The Game Library shows new pictures at once; the home row after rest mode.${help("Icon: the game's tile on the home row and in the Game Library. Background: shown behind the home screen while the game is selected. Logo: the game's name as artwork. Some games also have other artwork. Each picture is written into every file that holds it, in exactly the console's format.")}</p>
-    <p class="note">Before installing an update for a game whose pictures you changed, choose <b>Restore stock</b>, then apply the theme again.${help("While a theme changes a title's pictures, the console can't update them.")}</p>
+  setTimeout(iconStyleShow);
+  return `${iconStyleHtml()}<p class="note">The Game Library shows new pictures at once; the home row after rest mode.${help("Icon: the game's tile on the home row and in the Game Library. Background: shown behind the home screen while the game is selected. Logo: the game's name as artwork. Some games also have other artwork. Each picture is written into every file that holds it, in exactly the console's format.")}</p>
+    <p class="note">Before installing an update for a game whose pictures you changed, choose <b>No theme</b> in the library, then apply the theme again.${help("While a theme changes a title's pictures, the console can't update them.")}</p>
     ${groups.length > 12 ? `<div class="toolbar"><input type="search" data-filter-aspect="${asp.id}" placeholder="Search games and apps" value="${esc(state.filters[asp.id] || "")}" aria-label="Search games and apps"></div>` : ""}
     <div class="rows">${rows || `<p class="note">Nothing matches.</p>`}</div>
     ${shown.length > page ? `<div><button class="btn sm" data-act="more" data-aspect="${asp.id}">Show more (${shown.length - page})</button></div>` : ""}`;
@@ -3525,42 +4362,42 @@ async function rcoLookup() {
 
 const ASPECTS = [
   { id: "background", title: "Background", mode: "single",
-    sub: "One image for the home screen backgrounds (and any other screens you switch on), encoded to each background's own format and size.",
+    sub: "One picture or video for the home screen. Choose below where it goes; each place gets it at its own size.",
     filter: a => (a.kind === "image" || a.kind === "video" || a.kind === "texture") && BG_RE.test(a.path), accept: "image/*,video/*" },
-  { id: "icons", title: "Icons", mode: "tiles",
-    sub: "Replace icons one by one. Each icon's size variants are filled from your one file.",
+  { id: "icons", title: "Other icons", mode: "tiles",
+    sub: "Icons in the console's own screens, one by one. Every size the console uses is made from your one picture.",
     filter: a => isImage(a) && ICON_RE.test(a.path) && !BG_RE.test(a.path), accept: "image/*,.svg" },
   { id: "music", title: "Home music", mode: "music",
-    sub: "Replaces the music the home screen plays. Any audio file, converted on this device to the console's own format." },
+    sub: "The music the home screen plays. Any audio file; you choose the part that plays and loops." },
   { id: "sounds", title: "Sounds", mode: "rows",
-    sub: "System sounds and music clips. Any audio file is converted to each sound's own format (WAV or ATRAC9) and loudness.",
+    sub: "Moving, selecting, going back and the console's other sounds. Any audio file, matched to each sound's loudness.",
     filter: a => a.kind === "audio" && a.path !== HOME_MUSIC, accept: "audio/*,.wav,.at9" },
   { id: "fonts", title: "Fonts", mode: "rows",
-    sub: "The console's text fonts: replace one with a font of your own (TTF or OTF).",
+    sub: "The fonts the home screen and Settings draw their text in. Use your own TTF or OTF font.",
     filter: a => a.kind === "font", accept: ".ttf,.otf" },
   { id: "animations", title: "Animations", mode: "rows",
-    sub: "Animation and data files (JSON). Structure and canvas size must stay the same.",
+    sub: "The interface's animation files. A replacement keeps the same structure and canvas size.",
     filter: a => a.kind === "json", accept: ".json,application/json" },
   { id: "video", title: "Video", mode: "rows",
-    sub: "Video clips other than the background, in the same container (MP4 or WebM).",
+    sub: "Video clips other than the background, as MP4 or WebM like the console's.",
     filter: a => a.kind === "video" && !BG_RE.test(a.path), accept: "video/*,.mp4,.webm,.m4v" },
   { id: "appearance", title: "Appearance themes", mode: "rows",
-    sub: "The artwork of the PlayStation, PlayStation 2, 3 and 4 themes from Settings > Appearance and Sound: the Control Center's panels and the home screen's artwork.",
+    sub: "The artwork and colours of the PlayStation, PlayStation 2, 3 and 4 looks in Settings > Appearance and Sound.",
     filter: a => APPEARANCE_RE.test(a.path), accept: "image/*" },
   { id: "textures", title: "Textures", mode: "rows",
-    sub: "Other system textures (DDS). Any image is encoded to each texture's exact format and size.",
+    sub: "The interface's other pictures. Any image is fitted to each one's size.",
     filter: a => a.kind === "texture" && !BG_RE.test(a.path) && !isTitlePicture(a.path) && !APPEARANCE_RE.test(a.path), accept: "image/*" },
   { id: "tiles", title: "Home screen tiles", mode: "systiles",
-    sub: "The console's own tiles (PlayStation Store, Game Library and others): their icons, and the background shown while each is selected.",
+    sub: "The console's own tiles, such as PlayStation Store and Game Library: their icons, and the background while each is selected.",
     filter: a => a.kind === "image" && !!tileTitle(a.path), accept: "image/*" },
   { id: "titles", title: "Games and apps", mode: "titles",
-    sub: "Installed games and apps, homebrew included: their icons and other pictures on the home screen.",
+    sub: "Installed games and apps, homebrew too: their icons and other pictures on the home screen.",
     filter: a => titlesOf(a.path).length > 0 && (a.kind === "image" || a.kind === "texture"), accept: "image/*" },
   { id: "interface", title: "Interface icons", mode: "rco",
-    sub: "The pictures the console's interface draws: icons, buttons and symbols. Includes a test that shows which picture is where.",
+    sub: "Icons, buttons and symbols in the menus, and the shape of their corners. A test shows which picture is where.",
     filter: a => a.kind === "rco" && !(state.rco && state.rco.get(a.path) === null) },
   { id: "images", title: "Other images", mode: "tiles",
-    sub: "Every other replaceable image, with search.",
+    sub: "Every other picture that can be replaced, with search.",
     filter: a => isImage(a) && !ICON_RE.test(a.path) && !BG_RE.test(a.path) && !isTitlePicture(a.path), accept: "image/*,.svg" },
 ];
 const aspectById = id => ASPECTS.find(a => a.id === id);
@@ -4373,17 +5210,20 @@ let attachProgress = null;
 /* Put one file onto a set of system assets (for example all size variants).
    `copies`: the same picture already written to that many other files, for
    a message that counts files instead of sizes. */
-async function attachTo(assets, file, label, copies = null, remake = false, shown = null) {
+/* `quiet`: part of a larger task (styling every icon) that has its own progress and says the result itself: no
+   progress of this one's and no message, only the count of files written. */
+async function attachTo(assets, file, label, copies = null, remake = false, shown = null, quiet = false) {
   const big = assets.length > 2 || assets.some(a => a.kind === "texture" || ext(a.path) === "at9");
-  const p = shown || (big ? progressToast(`Adding ${label}…`) : null);
+  const p = quiet ? null : shown || (big ? progressToast(`Adding ${label}…`) : null);
   const base = shown ? shown.frac : 0;   /* a task begun before (reading a kept picture) keeps its part of the bar */
   let ok = 0, keptFirst = null;
   const errors = [];
   for (let i = 0; i < assets.length; i++) {
     const a = assets[i], at = x => base + (1 - base) * (i + x) / assets.length;
-    attachProgress = p ? f => p.set(`Encoding ${baseName(a.path)}… ${Math.round(f * 100)}%`, at(0.7 * f)) : null;
+    const step = `${label}${assets.length > 1 ? ` (${i + 1} of ${assets.length})` : ""}`;
+    attachProgress = p ? f => p.set(`Making ${step}… ${Math.round(f * 100)}%`, at(0.7 * f)) : null;
     /* each step says what it is as it starts */
-    if (p) p.set(`${a.kind === "texture" || a.kind === "audio" || isImage(a) ? "Encoding" : "Preparing"} ${baseName(a.path)}…`, at(0));
+    if (p) p.set(`${a.kind === "texture" || a.kind === "audio" || isImage(a) ? "Making" : "Preparing"} ${step}…`, at(0));
     try {
       const blob = await fileForAsset(file, a);
       const keep = !remake && state.keepOriginals && keepsOriginal(a) && blob !== file;   /* so an option changed later needs no new upload */
@@ -4409,6 +5249,7 @@ async function attachTo(assets, file, label, copies = null, remake = false, show
     : copies !== null ? `${label} replaced in ${plural(ok + copies, "file")} and verified. ${use}`
     : `${label} ${remake ? "made again" : "added"} and verified${assets.length > 1 ? ` at ${plural(ok, "size")}` : ""}. ${use}`;
   const kind = errors.length ? (ok ? "" : "err") : "ok";
+  if (quiet) return ok;
   if (p) p.done(msg, kind); else toast(msg, kind, errors.length ? 9000 : 4500);
   await refreshStatus();
   return ok;
@@ -4451,7 +5292,7 @@ async function resetAssets(assets) {
 
 const PREVIEW_W = 1280, PREVIEW_H = 720;
 
-const PREVIEW_FILES = [["background", "preview.jpg"], ["picture", "picture.jpg"]];   /* in a theme .zip */
+const PREVIEW_FILES = [["background", "preview.jpg"], ["picture", "picture.jpg"], ["iconbg", "icon-backdrop.jpg"]];   /* in a theme .zip */
 const coverUrl = t => `/api/theme/preview?${q({ id: t.id })}&v=${t.coverTime}-${stamp}`;
 
 /* A 16:9 JPEG of an image, video frame or canvas, fitted as `fit`. */
@@ -4497,6 +5338,7 @@ async function savePreview(id, kind, blob) {
   stamp = Date.now();
   await refreshStatus();
   if (state.route === "edit" && state.editId === id && $("#cover-panel")) $("#cover-panel").innerHTML = coverPanel(themeById(id));
+  if (state.route === "edit" && state.editId === id) { syncNav("theme"); syncNav("background"); }
 }
 
 async function removePreview(id, kind) {
@@ -4504,6 +5346,7 @@ async function removePreview(id, kind) {
   stamp = Date.now();
   await refreshStatus();
   if (state.route === "edit" && state.editId === id && $("#cover-panel")) $("#cover-panel").innerHTML = coverPanel(themeById(id));
+  if (state.route === "edit" && state.editId === id) { syncNav("theme"); syncNav("background"); }
 }
 
 /* After a background is added: the same picture, fitted as the background was. */
@@ -4821,6 +5664,7 @@ function previewClose() {
   pvData = null;
 }
 function previewKey(e) { if (e.key === "Escape") previewClose(); }
+document.addEventListener("keydown", e => { if (e.key === "Escape" && $("#bge")) { bgeClose(); e.stopImmediatePropagation(); } }, true);
 
 /* Fetch the shared pieces once (background, icons, font) into pvData. */
 async function previewGather(id) {
@@ -4835,24 +5679,27 @@ async function previewGather(id) {
     previewDropFont();
     return false;
   }
-  pvData.bg = bg;
+  pvData.bg = bg || await consoleBackground();   /* the console's own, decoded by the plugin; kept with the page */
   pvData.tiles = [...fileIcons, ...rcoIcons].slice(0, 6);
-  pvData.fontFam = fontFam;
+  pvData.tiles.push(...consoleTileIcons(6 - pvData.tiles.length));   /* the system tiles' own after yours */
+  pvData.fontFam = fontFam || await consoleFont();
   pvUrls.push(...[bg, ...fileIcons, ...rcoIcons].filter(Boolean));
   return true;
 }
 async function pvArtFor(look) {
   if (look in pvData.art) return pvData.art[look];
   const u = await previewAppearancePiece(pvData.id, look, "homeui");
-  pvData.art[look] = u; if (u) pvUrls.push(u);
-  return u;
+  pvData.art[look] = u || (look === "default" ? null : await consoleTexture(apPath(look, "homeui")));
+  if (u) pvUrls.push(u);
+  return pvData.art[look];
 }
 async function pvCcFor(look, which) {
   const k = look + "/" + which;
   if (k in pvData.cc) return pvData.cc[k];
   const u = await previewAppearancePiece(pvData.id, look, which);
-  pvData.cc[k] = u; if (u) pvUrls.push(u);
-  return u;
+  pvData.cc[k] = u || (look === "default" ? null : await consoleTexture(apPath(look, which)));
+  if (u) pvUrls.push(u);
+  return pvData.cc[k];
 }
 async function pvColorsFor(look) {
   if (pvData.colors[look]) return pvData.colors[look];
@@ -4865,8 +5712,8 @@ function previewToolbar() {
   const opts = Object.keys(LOOK_NAMES).map(l =>
     `<option value="${l}" ${pvState.look === l ? "selected" : ""}>${esc(LOOK_NAMES[l])}${pvLooksArt.has(l) ? " ✦" : ""}</option>`).join("");
   return `<div class="pv-tabs">
-      <button class="btn sm ${pvState.view === "home" ? "primary" : "ghost"}" data-act="pv-view" data-view="home">Home</button>
-      <button class="btn sm ${pvState.view === "cc" ? "primary" : "ghost"}" data-act="pv-view" data-view="cc">Control Center</button></div>
+      <button class="btn sm chip" type="button" data-act="pv-view" data-view="home" aria-pressed="${pvState.view === "home"}">Home</button>
+      <button class="btn sm chip" type="button" data-act="pv-view" data-view="cc" aria-pressed="${pvState.view === "cc"}">Control Center</button></div>
     <label class="pv-looklbl">Appearance theme <select id="pv-look" style="width:auto">${opts}</select></label>`;
 }
 
@@ -4886,7 +5733,7 @@ async function openPreview() {
         <button class="btn sm" data-act="pv-close">Close</button></div>
       <div class="pv-toolbar" id="pv-toolbar"></div>
       <div class="pv-stage" id="pv-stage"><div class="pv-busy">Building the preview…</div></div>
-      <p class="pv-note">A stylized home screen and Control Center with this theme's background, colours, Appearance artwork, font and changed icons — not the console's exact layout. The real look shows on the console after you apply and use rest mode. Nothing here is sent to the console.</p>
+      <p class="pv-note">This theme's background, colours, Appearance artwork, font and icons, and the console's own where the theme leaves them, drawn from the files themselves. The layout around them is approximate; the console shows the real thing after you apply and use rest mode.</p>
     </div>`;
   document.body.append(ov);
   ov.addEventListener("click", e => { if (e.target === ov) previewClose(); });
@@ -4908,9 +5755,7 @@ async function previewHomeHtml(look, colors) {
     ${pvData.bg ? `<img class="pv-bg" alt="" src="${pvData.bg}">` : ""}
     <div class="pv-scrim"></div>
     ${art ? `<img class="pv-art" alt="" src="${art}">` : ""}
-    <div class="pv-top">
-      <div class="pv-glyphs"><span class="pv-glyph"></span><span class="pv-glyph"></span><span class="pv-glyph"></span><span class="pv-glyph pv-avatar"></span></div>
-      <span class="pv-clock">${esc(clock)}</span></div>
+    ${topBarHtml(clock)}
     <div class="pv-tiles">${tileEls.join("")}</div>
     <div class="pv-cap"><h3 class="pv-name">${esc(t.name)}</h3>
       <div class="pv-actions"><span class="pv-play">▶ Play</span><span class="pv-chip"></span><span class="pv-chip"></span></div></div>`;
@@ -4919,7 +5764,6 @@ async function previewHomeHtml(look, colors) {
 async function previewCcHtml(look, colors) {
   const [bottom, top] = await Promise.all([pvCcFor(look, "bottom"), pvCcFor(look, "top")]);
   const clock = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-  const icons = Array.from({ length: 7 }, (_, i) => `<span class="pv-cc-ic${i === 2 ? " pv-ccf" : ""}"></span>`).join("");
   return `
     ${pvData.bg ? `<img class="pv-bg" alt="" src="${pvData.bg}">` : ""}
     <div class="pv-ccbd" style="background:${pvRgba(colors.backdrop, .64)}"></div>
@@ -4928,8 +5772,168 @@ async function previewCcHtml(look, colors) {
     ${bottom ? `<img class="pv-cc-bottom" alt="" src="${bottom}">` : ""}
     <div class="pv-cc-card" style="background:${pvRgba(colors.card, .9)}"></div>
     <div class="pv-cc-clock">${esc(clock)}</div>
-    <div class="pv-cc-icons">${icons}</div>
+    ${ccIconsHtml()}
     <div class="pv-cc-label">Control Center · ${esc(LOOK_NAMES[look])}</div>`;
+}
+
+/* ---- The console's own pictures, for the previews ----
+
+   Where a theme leaves something as it is, the previews draw the console's own: its default home background and the
+   Appearance themes' artwork (textures the browser can't read, decoded by the plugin to a quarter-size picture,
+   /api/asset/picture), the system tiles' icons, its interface icons (/api/ui-icon) and its SST font. All read from
+   the console as the page runs; nothing of Sony's is in this page. */
+const consolePics = new Map();   /* asset path -> a promise of an object URL, or null if it can't be drawn */
+function consoleTexture(path) {
+  if (!path) return Promise.resolve(null);
+  if (!consolePics.has(path)) consolePics.set(path, (async () => {
+    try {
+      const res = await fetch(`/api/asset/picture?${q({ path })}`);
+      if (!res.ok) return null;
+      const b = new Uint8Array(await res.arrayBuffer()), dv = new DataView(b.buffer);
+      const w = dv.getUint32(0, true), h = dv.getUint32(4, true);
+      if (!w || !h || b.length !== 8 + w * h * 4) return null;
+      const c = document.createElement("canvas");
+      c.width = w; c.height = h;
+      c.getContext("2d").putImageData(new ImageData(new Uint8ClampedArray(b.buffer, 8, w * h * 4), w, h), 0, 0);
+      return await new Promise(r => c.toBlob(x => r(x ? URL.createObjectURL(x) : null), "image/png"));
+    } catch (e) { return null; }
+  })());
+  return consolePics.get(path);
+}
+const uiIconUrl = id => `/api/ui-icon?${q({ id })}`;
+const consoleIcon = (id, cls) => `<img class="${cls}" alt="" src="${uiIconUrl(id)}" onerror="this.style.visibility='hidden'">`;
+/* The console's default home background, as it shows with no theme. */
+function consoleBackground() {
+  const a = (state.assets || []).find(x => areaOf(x.path) === "Home: default background");
+  return consoleTexture(a && a.path);
+}
+/* The system tiles' own icons (PNG, as the browser can show them), for the home row. */
+function consoleTileIcons(max) {
+  return max > 0 ? tileGroups().slice(0, max).map(g => `/api/asset?${q({ path: g.icons[0].path })}`) : [];
+}
+/* The console's interface font, loaded once under its own name. */
+let consoleFontLoading = null;
+function consoleFont() {
+  if (consoleFontLoading) return consoleFontLoading;
+  const a = (state.assets || []).find(x => /^SST-(Roman|Regular|Light)\.otf$/i.test(baseName(x.path)));
+  if (!a || typeof FontFace !== "function") return (consoleFontLoading = Promise.resolve(null));
+  return (consoleFontLoading = new FontFace("console-sst", `url("/api/asset?${q({ path: a.path })}")`).load()
+    .then(f => { document.fonts.add(f); return "console-sst"; }).catch(() => null));
+}
+/* The Control Center's row of icons, and the home screen's top bar, as the console draws them. */
+const CC_ICONS = ["iconid_game_base", "iconid_music", "iconid_notification", "iconid_friend", "iconid_mic", "iconid_accessibility", "iconid_wifi", "iconid_power"];
+const topBarHtml = clock => `<div class="pv-top"><div class="pv-glyphs">${consoleIcon("iconid_search", "pv-ico")}${consoleIcon("iconid_settings", "pv-ico")}<span class="pv-glyph pv-avatar"></span></div>
+  <span class="pv-clock">${esc(clock)}</span></div>`;
+const ccIconsHtml = () => `<div class="pv-cc-icons">${CC_ICONS.map((id, i) => `<span class="pv-cc-ic has-ic${i === 0 ? " pv-ccf" : ""}">${consoleIcon(id, "pv-cc-img")}</span>`).join("")}</div>`;
+
+/* ---- The Appearance part's preview: each look's pieces drawn from the very textures the console will use, on a
+   sketch of the screen they belong to. A piece the theme doesn't replace shows as an outline where it sits. */
+const AP_LOOKS = ["ps", "ps2", "ps3", "ps4"];
+let apView = { look: "", view: "home" };
+const apUrls = new Map();   /* "<theme>|<path>|<stamp>" -> object URL or null; the last few kept */
+function apKeep(key, url) {
+  apUrls.set(key, url);
+  while (apUrls.size > 12) {
+    const [k, u] = apUrls.entries().next().value;
+    if (u) URL.revokeObjectURL(u);
+    apUrls.delete(k);
+  }
+  return url;
+}
+const apPath = (look, which) => `/system/vsh_asset/${which === "homeui" ? `homeui_${look}` : `control_center_${look}_${which}`}.dds`;
+/* A piece as the theme has it, decoded with its transparency: { has: the console has this piece, url: the theme's or null } */
+async function apPiece(look, which) {
+  const path = apPath(look, which);
+  const has = (state.assets || []).some(a => a.path === path);
+  if (!has || !state.files.has(path)) return { has, url: null };
+  const key = `${state.editId}|${path}|${stamp}`;
+  if (apUrls.has(key)) return { has, url: apUrls.get(key) };
+  let url = null;
+  try {
+    const res = await fetch(`/api/theme/file?${q({ id: state.editId, path })}&v=${stamp}`);
+    if (res.ok) {
+      let bytes = new Uint8Array(await res.arrayBuffer());
+      if (bytes[0] === 0x28 && bytes[1] === 0xb5 && bytes[2] === 0x2f && bytes[3] === 0xfd) bytes = unzstdStored(bytes);
+      const c = await ddsCanvas(bytes, true);
+      url = await new Promise(r => c.toBlob(b => r(b ? URL.createObjectURL(b) : null), "image/png"));
+    }
+  } catch (e) { /* a texture this page can't draw: its outline shows instead */ }
+  return { has, url: apKeep(key, url) };
+}
+const apChanged = look => ["homeui", "top", "bottom"].some(w => state.files.has(apPath(look, w)));
+
+function apPreviewBox() {
+  if (!apView.look) apView.look = AP_LOOKS.find(apChanged) || "ps";
+  const chip = (act, v, label, on, dot) => `<button type="button" class="btn sm chip" data-act="${act}" data-v="${v}" aria-pressed="${on}">${esc(label)}${dot ? `<span class="ap-dot" aria-label=", changed"></span>` : ""}</button>`;
+  return `<div class="ap-preview">
+      <div class="pv-toolbar">
+        <div class="pv-tabs">${chip("ap-view", "home", "Home screen", apView.view === "home")}${chip("ap-view", "cc", "Control Center", apView.view === "cc")}</div>
+        <div class="pv-tabs">${AP_LOOKS.map(l => chip("ap-look", l, LOOK_NAMES[l], apView.look === l, apChanged(l))).join("")}</div>
+      </div>
+      <div class="pv-stage" id="ap-stage"><div class="pv-busy">Drawing…</div></div>
+      <p class="note"><span id="ap-whose"></span> Drawn from the theme's files and the console's own, as the console will show them; only the layout around them is approximate.</p>
+    </div>`;
+}
+
+async function apPreviewShow() {
+  const stage = $("#ap-stage");
+  if (!stage) return;
+  const id = state.editId, { look, view } = apView;
+  const t = themeById(id);
+  const slot = (cls, label) => `<div class="ap-slot ${cls}">${esc(`${label}: none on this firmware`)}</div>`;
+  const own = t && aspectReplaced(aspectById("background"));
+  const consoleBg = own ? null : await consoleBackground();
+  const bg = own ? `<img class="pv-bg" alt="" src="/api/theme/preview?${q({ id, kind: "background" })}&v=${t.coverTime}-${stamp}" onerror="this.remove()">`
+    : consoleBg ? `<img class="pv-bg" alt="" src="${consoleBg}">` : "";
+  const fontFam = themeFontFamily() || await consoleFont();
+  /* a piece as the theme has it, or the console's own; what is whose, said under the picture */
+  const mine = [], theirs = [];
+  const piece = async (which, label) => {
+    const p = await apPiece(look, which);
+    if (p.url) { mine.push(label); return p; }
+    if (!p.has) return p;
+    theirs.push(label);
+    return { has: true, url: await consoleTexture(apPath(look, which)) };
+  };
+  const rco = rcoPaths()[0];
+  const colors = rco && state.rco && state.rco.get(rco) ? await previewColorsForLook(look) : PV_FALLBACK;
+  const clock = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  let html;
+  if (view === "home") {
+    const art = await piece("homeui", "Home screen artwork");
+    const icons = consoleTileIcons(6);
+    const tiles = Array.from({ length: 6 }, (_, i) => icons[i]
+      ? `<div class="pv-tile${i === 0 ? " pv-focus" : ""}"><img alt="" src="${icons[i]}"></div>`
+      : `<div class="pv-tile pv-ph${i === 0 ? " pv-focus" : ""}"></div>`).join("");
+    html = `${bg}<div class="pv-scrim"></div>
+      ${art.url ? `<img class="pv-art" alt="" src="${art.url}">` : art.has ? "" : slot("art", "Home screen artwork")}
+      ${topBarHtml(clock)}
+      <div class="pv-tiles">${tiles}</div>`;
+  } else {
+    const top = await piece("top", "Top-right corner"), bottom = await piece("bottom", "Bottom panel");
+    html = `${bg}<div class="pv-ccbd" style="background:${pvRgba(colors.backdrop, .64)}"></div><div class="pv-cc-bar"></div>
+      ${top.url ? `<img class="pv-cc-top" alt="" src="${top.url}">` : top.has ? "" : slot("top", "Top-right corner")}
+      ${bottom.url ? `<img class="pv-cc-bottom" alt="" src="${bottom.url}">` : bottom.has ? "" : slot("bottom", "Bottom panel")}
+      <div class="pv-cc-clock">${esc(clock)}</div>
+      ${ccIconsHtml()}`;
+  }
+  const now = $("#ap-stage");
+  if (!now || state.editId !== id || apView.look !== look || apView.view !== view) return;
+  now.style.setProperty("--pv-accent", pvHex(colors.accent));
+  now.style.setProperty("--pv-text", pvHex(colors.text));
+  now.style.setProperty("--pv-panel", pvHex(colors.panel));
+  now.style.fontFamily = fontFam ? `"${fontFam}", "SST", system-ui, sans-serif` : "";
+  now.innerHTML = html;
+  const whose = $("#ap-whose");
+  if (whose) whose.textContent = [mine.length ? `Yours: ${mine.join(", ")}.` : "", theirs.length ? `The console's own: ${theirs.join(", ")}.` : "",
+    own ? "" : "Background: the console's own."].filter(Boolean).join(" ");
+}
+
+/* The preview follows the piece being worked on. */
+function apFollow(path) {
+  const m = APPEARANCE_RE.exec(path || "");
+  if (!m) return;
+  apView = { look: m[2], view: m[1] === "homeui" ? "home" : "cc" };
 }
 
 async function previewRender(id) {
@@ -4958,6 +5962,7 @@ async function previewRender(id) {
 async function renderEditor() {
   const themes = state.status.themes;
   if (!themes.length) {
+    document.title = "PS5 Themes";
     view.innerHTML = `<div class="empty"><h2>Nothing to edit yet</h2>
       <p class="muted" style="margin:0">Create a theme first, then choose what it changes.</p>
       <button class="btn primary" data-act="new-from-editor">New theme</button></div>`;
@@ -4968,76 +5973,398 @@ async function renderEditor() {
   loads.set("open", -1);
   view.innerHTML = loadingMarker("open", `Opening ${t.name}…`);
   paintLoads(view);
-  await Promise.all([loadAssets(), loadThemeFiles(t.id), loadChoices(t.id)]);
+  await Promise.all([loadAssets(), loadThemeFiles(t.id), loadChoices(t.id), loadPluginStyled(t.id)]);
   const on = state.status.applied === t.id;
-  const fwAny = t.fw === "any";
-
+  const blocked = applyBlocked(t);
+  document.title = `${t.name} · PS5 Themes`;
   view.innerHTML = `
     <div class="head">
-      <h1>Edit</h1>
-      <select id="theme-select" aria-label="Theme" style="width:auto">${themes.map(x =>
-        `<option value="${esc(x.id)}" ${x.id === t.id ? "selected" : ""}>${esc(x.name)}</option>`).join("")}</select>
+      <div class="edit-title"><a class="back" href="#/library">Library</a><h1 id="edit-name">${esc(t.name)}</h1></div>
       <span class="spacer"></span>
-      <button class="btn ghost" data-act="preview" data-id="${esc(t.id)}">Preview</button>
-      <button class="btn ghost" data-act="export" data-id="${esc(t.id)}" id="edit-export" ${t.files || t.music ? "" : "disabled"}>Export</button>
-      <button class="btn primary" data-act="apply" data-id="${esc(t.id)}" id="edit-apply" ${t.compatible && (t.files || t.music) ? "" : "disabled"}>${on ? "Re-apply to console" : "Apply to console"}</button>
+      <button class="btn ghost" data-act="preview" data-id="${esc(t.id)}" title="A drawing of the home screen with this theme">Preview</button>
+      <button class="btn ghost" data-act="export" data-id="${esc(t.id)}" id="edit-export" ${t.files || t.music ? "" : `disabled title="Add something to the theme first."`}>Export</button>
+      <button class="btn primary" data-act="apply" data-id="${esc(t.id)}" id="edit-apply" ${blocked ? `disabled title="${esc(blocked)}"` : ""}>${on ? "Apply again" : "Apply"}</button>
     </div>
     ${on ? resultBanner() : ""}
     ${isLocal() && /PlayStation/i.test(navigator.userAgent)
-      ? `<div class="banner">Attaching files is easiest from a computer or phone: open <b>http://${esc(state.status.ip)}:8095</b>.</div>` : ""}
-    <div class="panel builder-head">
-      <label class="field"><span>Name${help("The theme's name, shown in the library and in the console's notifications.")}</span><input type="text" id="theme-name" maxlength="60" value="${esc(t.name)}"></label>
-      <label class="field"><span>Firmware${help("The firmware the theme is for. It is applied only on a console with that firmware, unless you choose Any firmware; then each file is still checked against the console's own, and one that no longer matches is skipped.")}</span>
-        <select id="theme-fw">
-          <option value="${esc(state.status.fw)}" ${!fwAny ? "selected" : ""}>This console (${esc(state.status.fw)})</option>
-          <option value="any" ${fwAny ? "selected" : ""}>Any firmware</option>
-        </select></label>
-      <label class="field"><span>How images are fitted${help("How a picture that isn't the shape of the file it replaces is fitted: Fill crops its edges, Fit keeps all of it with bars, Stretch squeezes it. Changing it makes the pictures and textures in this theme again from their kept originals. The Appearance pieces have their own placement.")}</span>
-        <select id="fit">${[["cover", "Fill (crop edges)"], ["contain", "Fit (keep all)"], ["stretch", "Stretch"]]
-          .map(([v, l]) => `<option value="${v}" ${state.fit === v ? "selected" : ""}>${l}</option>`).join("")}</select></label>
-      <div class="field" id="originals-field">${originalsField()}</div>
+      ? `<div class="banner">Adding pictures and music is easier from a computer or phone: open <b>http://${esc(state.status.ip)}:8095</b>.</div>` : ""}
+    ${state.assetsError ? `<div class="banner err">${esc(state.assetsError)}. Choose No theme in the library and restart the plugin once, so it can list the console's files.</div>` : ""}
+    ${!t.compatible ? `<div class="banner warn">${esc(blocked)}</div>` : ""}
+    <div class="editor${state.section ? " picked" : ""}" id="editor">
+      <nav class="secnav" id="secnav" aria-label="Parts of ${esc(t.name)}">${secNavHtml()}</nav>
+      <div class="pane" id="pane"></div>
     </div>
-    <section class="panel cover-panel" id="cover-panel">${coverPanel(t)}</section>
-    ${state.assetsError ? `<div class="banner err">${esc(state.assetsError)}. Restart the plugin once with the stock theme to list the system assets.</div>` : ""}
-    <div class="aspects">${ASPECTS.map(a => `<section class="aspect" id="aspect-${a.id}"></section>`).join("")}</div>
     <div class="savebar" id="savebar" role="region" aria-label="Unsaved changes" ${t.unsaved ? "" : "hidden"}>
       <div class="text"><b>Unsaved changes</b><span>Save to keep them, or discard them to go back to the last save.</span></div>
       <button class="btn ghost" data-act="discard" data-id="${esc(t.id)}" id="discard-btn">Discard</button>
       <button class="btn primary" data-act="save" data-id="${esc(t.id)}">Save</button>
-    </div>
-    <p class="note" style="margin-top:18px">Only media can be themed. ${state.protectedCount ? `${plural(state.protectedCount, "system file")} (code and libraries) are protected and never changed. ` : ""}Every file is checked against the system file it replaces, on upload and again when the theme is applied.</p>`;
-  ASPECTS.forEach(renderAspect);
+    </div>`;
+  showPane(false);
+  setTimeout(autoStyleIcons, 400);
+}
+
+/* ---- The edit page: a list of the theme's parts beside the part you're changing, as the console's Settings are laid
+   out. Each part has its own address (#/edit/<theme>/<part>), so Back and Forward step between the parts you opened.
+   On a phone the list comes first and a part opens on its own. */
+
+const ASPECT_GROUPS = [
+  { id: "home", title: "Home screen", ids: ["background", "tiles", "titles"] },
+  { id: "sound", title: "Music and sounds", ids: ["music", "sounds"] },
+  { id: "look", title: "Fonts, colours and icons", ids: ["fonts", "appearance", "interface", "icons"] },
+  { id: "advanced", title: "Advanced", ids: ["textures", "video", "animations", "images"], advanced: true },
+];
+const SECTION_NAMES = { theme: "Name and picture", tiles: "Tiles" };
+
+/* Small line drawings for the parts that have no picture of their own (24×24, drawn in the text colour). */
+const GLYPHS = {
+  theme: `<rect x="3.5" y="5" width="17" height="14" rx="2.5"/><path d="M3.5 15l4.5-4 3.5 3 3-2.5 6 5"/><circle cx="15.5" cy="9" r="1.4"/>`,
+  background: `<rect x="3.5" y="5" width="17" height="14" rx="2.5"/><path d="M3.5 15l4.5-4 3.5 3 3-2.5 6 5"/>`,
+  tiles: `<rect x="3.5" y="3.5" width="7" height="7" rx="1.6"/><rect x="13.5" y="3.5" width="7" height="7" rx="1.6"/><rect x="3.5" y="13.5" width="7" height="7" rx="1.6"/><rect x="13.5" y="13.5" width="7" height="7" rx="1.6"/>`,
+  titles: `<path d="M7 8.5h10a4 4 0 014 4v1.5a3 3 0 01-5.3 1.9L14.5 14.5h-5l-1.2 1.4A3 3 0 013 14v-1.5a4 4 0 014-4z"/><path d="M7.5 11v3M6 12.5h3"/>`,
+  music: `<path d="M9 18V6l10-2v12"/><circle cx="6.5" cy="18" r="2.5"/><circle cx="16.5" cy="16" r="2.5"/>`,
+  sounds: `<path d="M4 9.5h3.5L12 5.5v13l-4.5-4H4z"/><path d="M15.5 9a4 4 0 010 6M18 6.5a7.5 7.5 0 010 11"/>`,
+  fonts: `<path d="M4 19l5-14h1l5 14M6 14h7"/><path d="M20 19v-4.5a2.5 2.5 0 00-5 0M15 16.5c0 1.4 1.1 2.5 2.5 2.5S20 17.9 20 16.5"/>`,
+  appearance: `<circle cx="12" cy="12" r="8.5"/><path d="M12 3.5a8.5 8.5 0 000 17z" fill="currentColor" stroke="none" opacity=".35"/>`,
+  interface: `<circle cx="7.5" cy="7.5" r="3.5"/><rect x="13" y="4" width="7" height="7" rx="1.5"/><path d="M4 20l3.5-6 3.5 6zM13 16.5h7M16.5 13v7"/>`,
+  icons: `<path d="M12 3.8l2.4 4.9 5.4.8-3.9 3.8.9 5.4L12 16.2l-4.8 2.5.9-5.4-3.9-3.8 5.4-.8z"/>`,
+  textures: `<path d="M12 4l8.5 4.5L12 13 3.5 8.5z"/><path d="M3.5 12.5L12 17l8.5-4.5M3.5 16.5L12 21l8.5-4.5"/>`,
+  video: `<rect x="3.5" y="5" width="17" height="14" rx="2.5"/><path d="M10.5 9.2v5.6l4.5-2.8z"/>`,
+  animations: `<path d="M3.5 17c3-9 6-9 8.5-4s5.5 5 8.5-4"/><circle cx="20.5" cy="9" r="1.2"/>`,
+  images: `<rect x="6.5" y="3.5" width="14" height="11" rx="2"/><path d="M3.5 7.5v10a2 2 0 002 2h11"/>`,
+};
+const glyph = id => `<svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">${GLYPHS[id] || GLYPHS.images}</svg>`;
+
+/* The console's own icon for each part, read from the console as the page runs (/api/ui-icon): nothing of Sony's
+   is in this page. A firmware without one shows the drawing above instead. */
+const PART_ICONS = {
+  theme: "iconid_edit", background: "iconid_photo", tiles: "iconid_app_all_apps", titles: "iconid_games_and_apps",
+  music: "iconid_music", sounds: "iconid_sound", fonts: "iconid_text_format_clear", appearance: "iconid_ps_shapes",
+  interface: "iconid_customize_menu", icons: "iconid_grid", textures: "iconid_image_and_video",
+  video: "iconid_screen_and_video", animations: "iconid_av_transition_effect", images: "iconid_app_media_gallery",
+};
+const partIcon = id => PART_ICONS[id]
+  ? `<img class="ci" alt="" src="/api/ui-icon?${q({ id: PART_ICONS[id] })}" onerror="this.nextElementSibling.hidden=false;this.remove()"><span class="ci-fb" hidden>${glyph(id)}</span>`
+  : glyph(id);
+
+function advancedShown() {
+  return !!state.showAdvanced || ASPECT_GROUPS.find(g => g.advanced).ids.some(id => id === state.section || aspectOn(aspectById(id)));
+}
+/* The parts in the order the list shows them: Previous and Next follow it. */
+function sectionOrder() {
+  const adv = advancedShown();
+  return ["theme", ...ASPECT_GROUPS.filter(g => !g.advanced || adv).flatMap(g => g.ids)];
+}
+const sectionName = id => SECTION_NAMES[id] || (aspectById(id) || {}).title || id;
+const UNCHANGED = new Set(["Console's own", "None on this firmware"]);
+const sectionHref = id => `#/edit/${encodeURIComponent(state.editId)}${id ? `/${id}` : ""}`;
+
+/* What a part holds in this theme, in a few words. */
+function sectionStatus(id) {
+  const t = themeById(state.editId);
+  if (id === "theme") return t.fw === "any" ? "Any firmware" : `Firmware ${t.fw}`;
+  const asp = aspectById(id);
+  if (asp.mode === "music") {
+    if (!t.music && !state.files.has(HOME_MUSIC)) return "Console's own";
+    return isPlaylist(t) ? `${plural(themeTracks(t).length, "song")}, ${fmtTime(playlistSeconds(t))}` : t.music ? fmtTime(t.music) : "Changed";
+  }
+  if (!aspectAssets(asp).length) return "None on this firmware";
+  const n = aspectReplaced(asp);
+  const ui = id === "sounds" && uiSoundsLast && uiSoundsLast.id === state.editId ? uiSoundsLast.replaced : 0;
+  const total = n + ui;
+  return total ? `${total} changed` : aspectOn(asp) ? "Changed" : "Console's own";
+}
+
+/* The part's picture in the list: the theme's own where it has one the browser can show, otherwise its drawing. */
+function sectionThumb(id) {
+  const t = themeById(state.editId);
+  const img = (src, cls = "") => `<img alt="" loading="lazy" class="${cls}" src="${esc(src)}" onerror="this.remove()">`;
+  if (id === "theme") return t.cover ? img(coverUrl(t), "cover") : "";
+  if (id === "background") {
+    return aspectReplaced(aspectById(id)) ? img(`/api/theme/preview?${q({ id: t.id, kind: "background" })}&v=${t.coverTime}-${stamp}`, "cover") : "";
+  }
+  if (id === "fonts") {
+    const f = themeFontFamily();
+    return f ? `<span class="aa" style="font-family:'${f}'">Aa</span>` : "";
+  }
+  const asp = aspectById(id);
+  if (!asp || !asp.filter || asp.mode === "rco") return "";
+  for (const a of aspectAssets(asp)) {
+    if (!state.files.has(a.path)) continue;
+    if (isImage(a)) return img(`/api/theme/file?${q({ id: t.id, path: a.path })}&v=${stamp}`);
+    if (state.sources.has(a.path)) return img(`/api/theme/source?${q({ id: t.id, path: a.path })}&v=${stamp}`);
+  }
+  return "";
+}
+
+function secNavItem(id) {
+  const sel = (state.section || (wideEditor() ? "theme" : "")) === id;
+  const status = sectionStatus(id), changed = id !== "theme" && !UNCHANGED.has(status);
+  return `<a class="nav-item${sel ? " sel" : ""}${changed ? " on" : ""}" href="${sectionHref(id)}" data-section="${id}"${sel ? ` aria-current="page"` : ""}>
+      <span class="nav-thumb">${sectionThumb(id) || partIcon(id)}</span>
+      <span class="nav-text"><span class="nav-name">${esc(sectionName(id))}</span><span class="nav-status">${esc(status)}</span></span>
+    </a>`;
+}
+function secNavHtml() {
+  const adv = advancedShown();
+  return `${secNavItem("theme")}${ASPECT_GROUPS.map(g => {
+    const used = g.ids.some(id => aspectOn(aspectById(id)) || id === state.section);
+    const head = `<div class="nav-group"><span>${esc(g.title)}</span>${g.advanced && !used
+      ? `<button type="button" class="nav-more" data-act="advanced" aria-expanded="${adv}">${adv ? "Hide" : "Show"}</button>` : ""}</div>`;
+    return g.advanced && !adv ? `${head}<p class="nav-hint">Textures, video, animations and other images.</p>` : head + g.ids.map(secNavItem).join("");
+  }).join("")}`;
+}
+/* One part's line in the list follows what it holds. */
+function syncNav(id) {
+  const el = document.querySelector(`#secnav [data-section="${id}"]`);
+  if (!el) return;
+  const tmp = document.createElement("div");
+  tmp.innerHTML = secNavItem(id);
+  const now = tmp.firstElementChild, had = document.activeElement === el;
+  el.replaceWith(now);
+  if (had) now.focus({ preventScroll: true });   /* a controller's place in the list stays where it was */
+}
+const wideEditor = () => matchMedia("(min-width: 900px)").matches;
+
+/* The part shown beside the list: the theme's name and picture, or one section, with the way to the parts before and
+   after it. `focus`: move to its title, after choosing it. */
+function showPane(focus = true) {
+  const pane = $("#pane"), ed = $("#editor");
+  if (!pane || !ed) return;
+  const id = state.section || "theme";
+  ed.classList.toggle("picked", !!state.section);
+  for (const a of document.querySelectorAll("#secnav .nav-item")) {
+    const sel = a.dataset.section === (state.section || (wideEditor() ? "theme" : ""));
+    a.classList.toggle("sel", sel);
+    if (sel) a.setAttribute("aria-current", "page"); else a.removeAttribute("aria-current");
+  }
+  const t = themeById(state.editId);
+  pane.innerHTML = `
+    <a class="back list-back" href="${sectionHref("")}">All parts</a>
+    ${id === "theme" ? themePaneHtml(t) : `<section class="aspect" id="aspect-${id}"></section>`}
+    <nav class="steps" id="steps" aria-label="Previous and next part">${stepsHtml(id)}</nav>`;
+  if (id !== "theme") renderAspect(aspectById(id)); else setTimeout(optionsShow);
+  if (focus) {
+    const h = pane.querySelector("h2");
+    if (h) { h.setAttribute("tabindex", "-1"); h.focus({ preventScroll: true }); }
+    const top = ed.getBoundingClientRect().top;
+    if (top < 0 || !wideEditor()) ed.scrollIntoView({ block: "start" });
+  }
+}
+
+/* ---- Fitting options, each drawn on your own picture in the exact shape of what it replaces ----
+
+   The same arithmetic as the encoder (imageForAsset, textureForAsset and textureDraw), at a small size, so a choice
+   can be judged before it is made. With no picture of yours kept yet, a sample stands in, and says so. */
+const FITS_SHOWN = [["cover", "Fill", "Crops the edges"], ["contain", "Fit", "All of it, with bars"], ["stretch", "Stretch", "Squeezed to the shape"]];
+const PLACES_SHOWN = [["fill", "Fill", "Cropped to the piece"], ["pad", "With padding", "Clear at the screen's edge"], ["fit", "Fit", "All of it"], ["stretch", "Stretch", "Squeezed to the piece"]];
+
+function fitOptionsHtml() {
+  return `<div class="field fit-field"><span>Pictures of another shape${help("How a picture that isn't the shape of what it replaces is fitted. Changing it remakes this theme's pictures from the ones you attached. Appearance pieces have their own placement.")}</span>
+    <div class="opts" role="radiogroup" aria-label="Pictures of another shape">${FITS_SHOWN.map(([v, name, what]) =>
+      `<button type="button" class="opt" role="radio" aria-checked="${state.fit === v}" data-act="fit-pick" data-v="${v}">
+        <canvas data-opt="fit" data-v="${v}" width="176" height="99"></canvas><b>${esc(name)}</b><small>${esc(what)}</small></button>`).join("")}</div>
+    <span class="note" id="fit-sample"></span></div>`;
+}
+
+function placeOptionsHtml(path) {
+  const pl = placementFor(path);
+  return `<div class="opts place" role="radiogroup" aria-label="Placement of ${esc(appearanceName(path))}">${PLACES_SHOWN
+    .filter(([v]) => v !== "pad" || pl.hasEdge).map(([v, name, what]) =>
+      `<button type="button" class="opt" role="radio" aria-checked="${pl.mode === v}" data-act="place-pick" data-path="${esc(path)}" data-v="${v}">
+        <canvas data-opt="place" data-path="${esc(path)}" data-v="${v}" width="176" height="60"></canvas><b>${esc(name)}</b><small>${esc(what)}</small></button>`).join("")}</div>`;
+}
+
+const optPictures = new Map();   /* "<theme>|<path>|<stamp>" -> the kept picture, decoded; the last few */
+async function keptPicture(path) {
+  const key = `${state.editId}|${path}|${stamp}`;
+  if (optPictures.has(key)) return optPictures.get(key);
+  const res = await fetch(`/api/theme/source?${q({ id: state.editId, path })}&v=${stamp}`);
+  if (!res.ok) throw new Error("no picture kept");
+  const url = URL.createObjectURL(await res.blob());
+  let img;
+  try { img = await loadImage(url); } finally { URL.revokeObjectURL(url); }
+  optPictures.set(key, img);
+  while (optPictures.size > 6) optPictures.delete(optPictures.keys().next().value);
+  return img;
+}
+const targetSizes = new Map();
+/* The size of the file a picture replaces: a texture's from its header, an image's from the console's own. */
+async function targetSize(path) {
+  if (targetSizes.has(path)) return targetSizes.get(path);
+  let size = null;
+  const a = mixAsset(path);
+  if (a && a.kind === "texture") {
+    const info = await api("GET", "/api/asset/texture", { path });
+    size = { w: info.width, h: info.height };
+  } else {
+    const img = await loadImage(`/api/asset?${q({ path })}`);
+    size = { w: img.naturalWidth, h: img.naturalHeight };
+  }
+  targetSizes.set(path, size);
+  return size;
+}
+/* A stand-in picture for a theme with none of yours kept: tall, so each option shows its difference. */
+let samplePicture = null;
+function sampleImage() {
+  if (samplePicture) return samplePicture;
+  const c = document.createElement("canvas");
+  c.width = 600; c.height = 800;
+  const x = c.getContext("2d"), g = x.createLinearGradient(0, 0, 0, 800);
+  g.addColorStop(0, "#2a5bd7"); g.addColorStop(1, "#c3426f");
+  x.fillStyle = g; x.fillRect(0, 0, 600, 800);
+  x.fillStyle = "rgba(255,255,255,.9)";
+  x.beginPath(); x.arc(300, 330, 150, 0, Math.PI * 2); x.fill();
+  x.fillStyle = "rgba(0,0,0,.35)"; x.fillRect(0, 640, 600, 160);
+  return (samplePicture = c);
+}
+function checker(ctx, w, h) {
+  ctx.fillStyle = "#1a2131"; ctx.fillRect(0, 0, w, h);
+  ctx.fillStyle = "#232c40";
+  for (let y = 0; y < h; y += 8) for (let x = (y / 8) % 2 ? 8 : 0; x < w; x += 16) ctx.fillRect(x, y, 8, 8);
+}
+
+/* Draw every option shown on the page. */
+async function optionsShow() {
+  const id = state.editId;
+  const fits = [...document.querySelectorAll('canvas[data-opt="fit"]')];
+  if (fits.length) {
+    /* your first kept picture that the theme-wide fit applies to, in the shape it replaces */
+    const path = [...state.sources].find(p => state.files.has(p) && !APPEARANCE_RE.test(p) && mixAsset(p));
+    let img = null, size = { w: 1920, h: 1080 };
+    try { if (path) [img, size] = await Promise.all([keptPicture(path), targetSize(path)]); } catch (e) { img = null; }
+    if (state.editId !== id) return;
+    const note = $("#fit-sample");
+    if (note) note.textContent = img ? `Shown on your picture for ${mixElementOf(MIX_PARTS.find(p => p.id === mixPartOf(path)) || {}, path)[1] || baseName(path)}.`
+      : "Shown on a sample picture until you attach one of yours.";
+    const pic = img || sampleImage(), iw = img ? img.naturalWidth : pic.width, ih = img ? img.naturalHeight : pic.height;
+    for (const c of fits) {
+      const cw = c.width, ch = Math.max(24, Math.round(cw * size.h / size.w));
+      c.height = Math.min(ch, 132);
+      const x = c.getContext("2d"), w = c.width, h = c.height, fit = c.dataset.v;
+      x.fillStyle = "#000"; x.fillRect(0, 0, w, h);
+      let dw = w, dh = h;
+      if (fit !== "stretch") { const sc = (fit === "cover" ? Math.max : Math.min)(w / iw, h / ih); dw = iw * sc; dh = ih * sc; }
+      x.imageSmoothingQuality = "high";
+      x.drawImage(pic, (w - dw) / 2, (h - dh) / 2, dw, dh);
+    }
+  }
+  for (const c of document.querySelectorAll('canvas[data-opt="place"]')) {
+    const path = c.dataset.path;
+    let img, size;
+    try { [img, size] = await Promise.all([keptPicture(path), targetSize(path)]); } catch (e) { continue; }
+    if (state.editId !== id || !c.isConnected) return;
+    const k = c.width / size.w;
+    c.height = Math.max(24, Math.round(size.h * k));
+    const x = c.getContext("2d"), pl = placementFor(path), place = placementParams(c.dataset.v, pl.pad), keep = keepClearFor(path);
+    checker(x, c.width, c.height);   /* what the picture leaves bare is see-through on the console */
+    const d = textureDraw(path, place.pad, place.fit, size.w, size.h, img.naturalWidth, img.naturalHeight, keep);
+    x.save(); x.scale(k, k);
+    x.beginPath(); x.rect(d.box.x, d.box.y, d.box.w, d.box.h); x.clip();
+    x.imageSmoothingQuality = "high";
+    x.drawImage(img, d.x, d.y, d.dw, d.dh);
+    x.restore();
+    const band = textureAnchor(path).band;
+    if (band && keep) {   /* where the clock and icons are drawn: left clear */
+      x.strokeStyle = "rgba(255,255,255,.55)"; x.setLineDash([3, 3]);
+      x.beginPath(); x.moveTo(0, band * c.height + .5); x.lineTo(c.width, band * c.height + .5); x.stroke();
+      x.setLineDash([]); x.fillStyle = "rgba(255,255,255,.85)"; x.font = `${Math.max(8, Math.round(band * c.height * .55))}px system-ui`;
+      x.textAlign = "right"; x.textBaseline = "middle"; x.fillText("12:00", c.width - 6, band * c.height / 2);
+    }
+  }
+}
+
+/* Previous and Next: the parts either side of this one in the list. */
+function stepsHtml(id) {
+  const order = sectionOrder(), i = order.indexOf(id);
+  const step = (to, dir) => to ? `<a class="step ${dir}" href="${sectionHref(to)}"><span class="note">${dir === "prev" ? "Previous" : "Next"}</span>${esc(sectionName(to))}</a>` : `<span></span>`;
+  return step(order[i - 1], "prev") + step(order[i + 1], "next");
+}
+
+/* When a part's change shows on the console, where it isn't as soon as the theme is applied. */
+const SHOWS_WHEN = {
+  fonts: ["After rest mode", "The home screen reads its fonts as it starts: apply, then put the console in rest mode and wake it."],
+  appearance: ["After rest mode", "Shows once that look is chosen in Settings > Appearance and Sound, after rest mode."],
+  interface: ["After rest mode", "The interface reads these pictures as it starts: apply, then put the console in rest mode and wake it."],
+  tiles: ["Home row after rest mode", "The Game Library shows a new icon at once; the home row after rest mode."],
+  titles: ["Home row after rest mode", "The Game Library shows a new picture at once; the home row after rest mode."],
+  music: ["After a game's music", "The home screen starts its music again only after another app's music has played: highlight a game with music, let it play, then go back."],
+};
+
+/* For a theme with nothing in it yet: the three steps from an empty theme to seeing it on the console. */
+function startHereHtml(t) {
+  if (t.files || t.music) return "";
+  const to = (id, label) => `<a href="${sectionHref(id)}">${esc(label)}</a>`;
+  return `<section class="panel start">
+      <h2>Start here</h2>
+      <ol>
+        <li>Choose what to change from the list: ${to("background", "Background")}, ${to("tiles", "Tiles")}, ${to("music", "Home music")}, ${to("sounds", "Sounds")} and more.</li>
+        <li>Press <b>Apply</b>. The home screen changes in a few seconds.</li>
+        <li>Fonts, Appearance artwork, interface icons and the home row's icons show after rest mode: put the console in rest mode and wake it.</li>
+      </ol>
+    </section>`;
+}
+
+function themePaneHtml(t) {
+  const fwAny = t.fw === "any";
+  return `${startHereHtml(t)}
+    <section class="panel builder-head">
+      <h2 class="pane-title">Name and picture</h2>
+      <label class="field"><span>Name${help("Shown in the library and in the console's notifications.")}</span><input type="text" id="theme-name" maxlength="60" value="${esc(t.name)}"></label>
+      <label class="field"><span>Firmware${help("A theme is applied only on a console with its firmware. With Any firmware it is applied anywhere, and each file that no longer matches that console's is skipped.")}</span>
+        <select id="theme-fw">
+          <option value="${esc(state.status.fw)}" ${!fwAny ? "selected" : ""}>This console (${esc(state.status.fw)})</option>
+          <option value="any" ${fwAny ? "selected" : ""}>Any firmware</option>
+        </select></label>
+      ${fitOptionsHtml()}
+      <div class="field" id="originals-field">${originalsField()}</div>
+    </section>
+    <section class="panel cover-panel" id="cover-panel">${coverPanel(t)}</section>
+    <p class="note">Only pictures, sounds, fonts and other media can be changed. ${state.protectedCount ? `${plural(state.protectedCount, "system file")} (code and libraries) are protected and never touched. ` : ""}Each file is checked against the one it replaces when you add it, and again when the theme is applied.</p>`;
 }
 
 function renderAspect(asp) {
   const el = $(`#aspect-${asp.id}`);
-  if (!el) return;
-  const on = aspectOn(asp);
+  if (!el) { syncNav(asp.id); return; }
   const replaced = aspectReplaced(asp);
-  let summary;
-  if (asp.mode === "music") {
-    const t = themeById(state.editId);
-    const length = isPlaylist(t) ? `Playlist of ${plural(themeTracks(t).length, "song")}, ${fmtTime(playlistSeconds(t))}` : t.music ? fmtTime(t.music) : "";
-    summary = state.files.has(HOME_MUSIC) ? `${length ? length + " · " : ""}${gainLabel(t.gain || 0)}`
-      : t.music ? "Not converted to home music yet" : "No music yet";
-  } else {
-    const total = aspectAssets(asp).length;
-    summary = total ? `${replaced} of ${plural(total, "file")} replaced` : "None on this firmware";
-    const sounds = asp.id === "sounds" && uiSoundsLast && uiSoundsLast.id === state.editId ? uiSoundsLast.replaced : 0;
-    if (sounds) summary += ` · ${plural(sounds, "interface sound")} replaced`;
-  }
+  const status = sectionStatus(asp.id);
   const confirming = state.confirming === asp.id;
+  const canReset = asp.mode !== "music" && replaced > 0;
   el.innerHTML = `
     <div class="aspect-head">
-      <button class="switch" role="switch" aria-checked="${on}" aria-label="${esc(asp.title)}" data-act="toggle" data-aspect="${asp.id}"></button>
-      <div class="text"><h2>${esc(asp.title)}${help(asp.sub)}</h2><div class="sub">${esc(on ? summary : asp.sub)}</div></div>
-      ${confirming ? `<div class="confirm">Remove ${asp.mode === "music" ? "the music" : plural(replaced, "replaced file")}?
-        <button class="btn sm danger armed" data-act="confirm-off" data-aspect="${asp.id}">Remove</button>
-        <button class="btn sm ghost" data-act="cancel-off" data-aspect="${asp.id}">Keep</button></div>` : ""}
+      <div class="text"><h2>${esc(asp.title)}</h2><div class="sub">${esc(asp.sub)}</div></div>
+      ${SHOWS_WHEN[asp.id] ? `<span class="tag" title="${esc(SHOWS_WHEN[asp.id][1])}">${esc(SHOWS_WHEN[asp.id][0])}</span>` : ""}
+      <span class="tag${UNCHANGED.has(status) ? "" : " on"}">${esc(status)}</span>
+      ${confirming ? `<div class="confirm">Put back the console's own ${esc(asp.title.toLowerCase())}? ${plural(replaced, "file")} will be removed from this theme.
+        <button class="btn sm danger armed" data-act="confirm-off" data-aspect="${asp.id}">Reset</button>
+        <button class="btn sm ghost" data-act="cancel-off" data-aspect="${asp.id}">Keep</button></div>`
+      : canReset ? `<button class="btn sm ghost danger" data-act="reset-all" data-aspect="${asp.id}">Reset all</button>` : ""}
     </div>
-    <div class="aspect-body" ${on ? "" : "hidden"}>${on ? aspectBody(asp) : ""}</div>`;
+    <div class="aspect-body">${aspectBody(asp)}</div>`;
   paintLoads(el);
+  syncNav(asp.id);
   if (asp.mode === "music" && state.trim) setupTrim();
+}
+
+/* A font of this theme, loaded so the page can draw with it (the list's "Aa", the Fonts part's samples): its record
+   { family, ready, failed }, loading it the first time. With no path, the font the home screen uses most. */
+const fontFaces = new Map();
+function fontRec(path = null) {
+  const a = path ? { path } : aspectAssets(aspectById("fonts")).filter(x => state.files.has(x.path))
+    .sort((x, y) => fontRank(x) - fontRank(y))[0];
+  if (!a || typeof FontFace !== "function") return null;
+  const key = `${state.editId}|${a.path}|${stamp}`;
+  if (fontFaces.has(key)) return fontFaces.get(key);
+  const rec = { family: `theme-font-${fontFaces.size + 1}`, ready: false, failed: false };
+  fontFaces.set(key, rec);
+  const redraw = () => { syncNav("fonts"); if ($("#aspect-fonts")) renderAspect(aspectById("fonts")); };
+  new FontFace(rec.family, `url("/api/theme/file?${q({ id: state.editId, path: a.path })}&v=${stamp}")`).load()
+    .then(face => { document.fonts.add(face); rec.ready = true; redraw(); })
+    .catch(() => { rec.failed = true; redraw(); });   /* this browser can't draw it; the console may still */
+  return rec;
+}
+function themeFontFamily(path = null) {
+  const rec = fontRec(path);
+  return rec && rec.ready ? rec.family : "";
 }
 
 /* What a piece in a list is and what replacing it changes, for its help mark. */
@@ -5054,8 +6381,8 @@ function assetHelp(asp, a) {
     return `${fontName(a.path)} (${baseName(a.path)}). ${FONT_HOME.test(baseName(a.path)) ? "The home screen and Settings draw their text in it." : "Web pages use it; the home screen doesn't."} Replace it with a TTF or OTF font: it goes only into the home screen, never into games, and shows after rest mode.`;
   }
   const kinds = {
-    audio: "A system sound or music clip. Your audio is converted to its format (WAV or ATRAC9) and loudness.",
-    texture: "A texture the interface draws. Your picture is encoded to its exact format and size.",
+    audio: "One of the console's sounds. Your audio is converted to its format and loudness.",
+    texture: "A picture the interface draws. Yours is made in its exact format and size.",
     image: "A picture the interface shows. Your image is fitted to its size and written in its exact format.",
     svg: "A vector picture the interface shows. Your image is drawn inside the console's own SVG.",
     video: "A video clip. Use a clip in the same container (MP4 or WebM).",
@@ -5071,11 +6398,80 @@ function dropZone(asp, title, detail) {
     </div>`;
 }
 
+/* A piece's picture: the theme's, the one you attached (kept with the theme) where the browser can't show the console's
+   format, or the console's own. A piece with no picture to show has a drawing of its kind. */
+const KIND_GLYPH = { texture: "images", audio: "sounds", font: "fonts", video: "video", json: "animations", rco: "interface" };
 function thumbFor(a) {
   const rep = state.files.has(a.path);
-  if (!isImage(a)) return `<div class="thumb${rep ? " replaced" : ""}"><span>${esc(a.kind === "texture" ? "DDS" : ext(a.path) || "file")}</span></div>`;
+  const cls = `thumb${rep ? " replaced" : ""}`;
+  if (!isImage(a)) {
+    if (rep && state.sources.has(a.path)) {
+      return `<div class="${cls}"><img loading="lazy" alt="" src="${esc(`/api/theme/source?${q({ id: state.editId, path: a.path })}&v=${stamp}`)}"></div>`;
+    }
+    const what = a.kind === "texture" ? (rep ? "Your picture (not kept with the theme)" : "The console's picture") : ext(a.path).toUpperCase() || "File";
+    return `<div class="${cls} glyph" title="${esc(what)}">${partIcon(KIND_GLYPH[a.kind] || "images")}</div>`;
+  }
   const src = rep ? `/api/theme/file?${q({ id: state.editId, path: a.path })}&v=${stamp}` : `/api/asset?${q({ path: a.path })}`;
-  return `<div class="thumb${rep ? " replaced" : ""}"><img loading="lazy" alt="" src="${esc(src)}"></div>`;
+  return `<div class="${cls}"><img loading="lazy" alt="" src="${esc(src)}" onerror="this.remove()"></div>`;
+}
+
+/* A background area's name as people know it: a tile's area by the tile's name once it is read. */
+function areaLabel(name) {
+  const m = /^Home: (NPXS\d+) tile$/.exec(name);
+  if (m) {
+    const t = state.tileNames && state.tileNames.get(m[1]);
+    return t ? `Home: ${t} tile` : `Home: a system tile (${m[1]})`;
+  }
+  if (name === "Image load error placeholder") return "Shown when a picture can't load";
+  if (name === "System (VSH)") return "Other system backgrounds";
+  return name;
+}
+
+/* A sound file by when it plays, where that's known (docs/home-music.md); otherwise its file name. */
+const SOUND_FILES = {
+  "sfx_warmboot.at9": "Waking from rest mode", "sfx_coldboot.at9": "Switching on (plays before the plugin starts)",
+  "sfx_initialboot.at9": "First start, during set-up", "sfx_transition.at9": "A soft swell (when it plays isn't known yet)",
+};
+const soundName = path => SOUND_FILES[baseName(path)] || baseName(path);
+
+/* A part's rows in groups people look for them by: fonts by where they are used, Appearance pieces by look. Each
+   group folds; it opens when it is the first one or holds something replaced, and stays as it was left. A search
+   shows its matches in one list. */
+const FONT_LANGS = /^(Arabic|Thai|Vietnamese|Japanese|Korean|Chinese)/;
+const ROW_GROUPS = {
+  fonts: {
+    of: g => { const b = baseName(g.assets[0].path), n = fontName(g.assets[0].path);
+      return FONT_HOME.test(b) && FONT_LATIN.test(b) ? "home" : FONT_LANGS.test(n) ? "langs" : FONT_LATIN.test(b) || /^Interface text/.test(n) ? "latin" : "other"; },
+    groups: [["home", "Home screen and Settings (Latin)"], ["latin", "Other Latin weights, for web pages"], ["langs", "Other languages"], ["other", "Other fonts"]],
+  },
+  appearance: {
+    of: g => (APPEARANCE_RE.exec(g.assets[0].path) || [])[2] || "other",
+    groups: [["ps", "PlayStation look"], ["ps2", "PlayStation 2 look"], ["ps3", "PlayStation 3 look"], ["ps4", "PlayStation 4 look"], ["other", "Other"]],
+  },
+};
+function rowsGrouped(asp, list, filter, render) {
+  const spec = ROW_GROUPS[asp.id];
+  const flat = () => `<div class="rows">${list.map(render).join("")}</div>`;
+  if (!spec || filter) return flat();
+  const parts = spec.groups.map(([key, title]) => ({ key, title, items: list.filter(g => spec.of(g) === key) })).filter(x => x.items.length);
+  if (parts.length < 2) return flat();
+  const opened = state.foldOpen || (state.foldOpen = {});
+  return `<div class="folds">${parts.map((x, i) => {
+    const rep = x.items.filter(g => g.assets.some(a => state.files.has(a.path))).length;
+    const key = `${asp.id}:${x.key}`;
+    const open = key in opened ? opened[key] : i === 0 || rep > 0 || (asp.id === "appearance" && x.key === apView.look);
+    return `<details class="fold" data-fold="${esc(key)}"${open ? " open" : ""}>
+      <summary><span class="fold-title">${esc(x.title)}</span><span class="fold-count">${plural(x.items.length, asp.id === "fonts" ? "font" : "piece")}${rep ? ` · ${rep} replaced` : ""}</span></summary>
+      <div class="rows">${x.items.map(render).join("")}</div></details>`;
+  }).join("")}</div>`;
+}
+
+/* A line of the console's own words in a font the theme gives it. */
+function fontSample(path) {
+  const rec = fontRec(path);
+  if (!rec || rec.failed) return `<div class="note">This browser can't draw this font, so there is no sample.</div>`;
+  return rec.ready ? `<div class="font-sample" style="font-family:'${rec.family}'">Game Library  ·  Settings  ·  12:45</div>`
+    : `<div class="note">Loading a sample…</div>`;
 }
 
 function aspectBody(asp) {
@@ -5091,6 +6487,7 @@ function aspectBody(asp) {
   if (!all.length) return `<p class="note">This firmware has no ${esc(asp.title.toLowerCase())} that can be themed. Anything else replaceable is under Other images.</p>${uiBox}`;
 
   if (asp.mode === "single") {
+    tileNamesEnsure();
     const off = bgOff();
     const areas = new Map();
     for (const a of all) {
@@ -5099,7 +6496,6 @@ function aspectBody(asp) {
       areas.get(k).push(a);
     }
     const chosen = all.filter(a => !off.has(areaOf(a.path)));
-    const replaced = all.filter(a => state.files.has(a.path)).length;
     return `${dropZone(asp, "Drop an image or video here",
         chosen.length ? `Goes to ${plural(chosen.length, "file")} in the areas switched on below, each at its own size.` : "Switch on at least one area below.")}
       <p class="note">Choose where your background is used:${help("Each area is a place the home screen shows a background: the default background, the Game Library, a tile's background while that tile is selected, and others. Your picture goes to the areas switched on, made at each one's own size.")}</p>
@@ -5107,14 +6503,14 @@ function aspectBody(asp) {
         const on = !off.has(name), rep = list.filter(a => state.files.has(a.path)).length;
         return `<div class="row-item${rep ? " replaced" : ""}">
           <div class="info" style="display:flex;gap:14px;align-items:center;min-width:0">
-            <button class="switch" role="switch" aria-checked="${on}" aria-label="${esc(name)}" data-act="toggle-area" data-area="${esc(name)}"></button>
-            <div style="min-width:0"><div class="file">${esc(name)}${rep ? ` <span class="tag on">Replaced</span>` : ""}</div>
+            <button class="switch" role="switch" aria-checked="${on}" aria-label="${esc(areaLabel(name))}" data-act="toggle-area" data-area="${esc(name)}"></button>
+            <div style="min-width:0"><div class="file">${esc(areaLabel(name))}${rep ? ` <span class="tag on">Replaced</span>` : ""}</div>
               <div class="dir">${plural(list.length, "file")}</div></div>
           </div>
           <div class="strip">${list.slice(0, 4).map(thumbFor).join("")}</div>
         </div>`;
       }).join("")}</div>
-      ${replaced ? `<div><button class="btn sm ghost danger" data-act="reset-aspect" data-aspect="${asp.id}">Reset background</button></div>` : ""}`;
+`;
   }
 
   const groupsAll = groupAssets(all);
@@ -5128,7 +6524,7 @@ function aspectBody(asp) {
   if (!groups.length) return `${search}<p class="note">Nothing matches.</p>`;
 
   if (asp.mode === "tiles") {
-    return `${search}<p class="note">Click an item to attach a file, or drop one on it.</p>
+    return `${search}<p class="note">Select one to replace it, or drop a picture on it.</p>
       <div class="tiles">${shown.map(g => {
         const rep = g.assets.filter(a => state.files.has(a.path)).length;
         return `<button class="tile${rep ? " replaced" : ""}" data-group="${esc(g.key)}" data-aspect="${asp.id}" title="${esc(g.key)}">
@@ -5138,28 +6534,35 @@ function aspectBody(asp) {
           <div class="meta">${g.assets.length > 1 ? plural(g.assets.length, "size") : fmtSize(g.assets[0].size)}</div>
         </button>`;
       }).join("")}</div>${more}
-      ${all.some(a => state.files.has(a.path)) ? `<div><button class="btn sm ghost danger" data-act="reset-aspect" data-aspect="${asp.id}">Reset all ${esc(asp.title.toLowerCase())}</button></div>` : ""}`;
+`;
   }
 
-  const appearanceNote = asp.id === "appearance" ? `<p class="note">Shown only while that theme is selected in <b>Settings &gt; Appearance and Sound</b>, after rest mode. A PNG keeps its see-through parts.${help("Each picture is encoded to the texture's exact format and size (the panels are about 2560 pixels wide) and keeps its transparency. A change to Placement, padding or the clock band takes effect at once: the texture is made again from the original the theme keeps. If one doesn't, change the option and attach the picture again.")}</p>` : "";
-  const fontNote = asp.id === "fonts" ? `<p class="note">A .ttf or .otf font, for the home screen only (never games). The home screen draws in the weights marked <b>Home screen</b>; it shows after rest mode.${help("The font needs the full Latin alphabet, digits and punctuation; fonts in other formats, damaged ones and ones without those characters are refused. On firmware 13.42 the home screen and Settings use the light and bold weights; the regular and medium Latin fonts are used by web pages only. If the home screen keeps restarting with a font, the plugin takes the theme down by itself.")}</p>
+  const appearanceNote = asp.id === "appearance" ? `<p class="note">Each piece shows only while its look is chosen on the console. A PNG keeps its see-through parts.${help("Each picture is encoded to the texture's exact format and size (the panels are about 2560 pixels wide) and keeps its transparency. A change to Placement, padding or the clock band takes effect at once: the texture is made again from the original the theme keeps. If one doesn't, change the option and attach the picture again.")}</p>` : "";
+  const fontNote = asp.id === "fonts" ? `<p class="note">Your font goes into the home screen only, never into games, and shows after rest mode. The home screen draws in the weights marked <b>Home screen</b>.${help("The font needs the full Latin alphabet, digits and punctuation; fonts in other formats, damaged ones and ones without those characters are refused. On firmware 13.42 the home screen and Settings use the light and bold weights; the regular and medium Latin fonts are used by web pages only. If the home screen keeps restarting with a font, the plugin takes the theme down by itself.")}</p>
     <div class="toolbar"><button class="btn" data-act="fonts-latin" data-aspect="fonts">Use one font for all Latin interface text</button></div>` : "";
   const list = asp.id === "fonts"
     ? shown.slice().sort((x, y) => fontRank(x.assets[0]) - fontRank(y.assets[0]) || fontName(x.assets[0].path).localeCompare(fontName(y.assets[0].path)))
     : shown;
   if (asp.id === "appearance") setTimeout(appearanceColorsShow);
-  return `${search}${fontNote}${appearanceNote}<div class="rows">${list.map(g => {
+  /* Sounds: the interface's sounds (moving, selecting, going back) first, as people mean them; the sound files after */
+  const soundsFirst = asp.id === "sounds" ? `${uiBox}<h3 class="sub-head">Other sounds</h3>` : "";
+  if (asp.id === "appearance") { setTimeout(apPreviewShow); setTimeout(optionsShow); }
+  return `${soundsFirst}${search}${fontNote}${appearanceNote}${asp.id === "appearance" ? apPreviewBox() : ""}${rowsGrouped(asp, list, filter, g => {
       const rep = g.assets.filter(a => state.files.has(a.path)).length;
       const a0 = g.assets[0];
-      const isFont = asp.id === "fonts", isAppearance = asp.id === "appearance";
+      const isFont = asp.id === "fonts", isAppearance = asp.id === "appearance", isSound = asp.id === "sounds";
       const play = asp.id === "sounds" && ext(a0.path) === "wav"
         ? `<audio controls preload="none" src="${esc(rep ? `/api/theme/file?${q({ id: state.editId, path: a0.path })}&v=${stamp}` : `/api/asset?${q({ path: a0.path })}`)}"></audio>` : "";
       return `<div class="row-item${rep ? " replaced" : ""}" data-drop-group="${esc(g.key)}" data-aspect="${asp.id}">
-        <div class="info"><div class="file">${esc(isFont ? fontName(a0.path) : isAppearance ? appearanceName(a0.path) : g.name)}${help(assetHelp(asp, a0))}${isFont && FONT_HOME.test(baseName(a0.path)) ? ` <span class="tag">Home screen</span>` : ""}${rep ? ` <span class="tag on">Replaced</span>` : ""}</div>
-          <div class="dir">${isFont || isAppearance ? `${esc(baseName(a0.path))} · ${fmtSize(a0.size)}` : esc(g.dir)}${g.assets.length > 1 ? ` · ${plural(g.assets.length, "variant")}` : ""}</div>${
+        <div class="info"><div class="file">${esc(isFont ? fontName(a0.path) : isAppearance ? appearanceName(a0.path) : isSound ? soundName(a0.path) : g.name)}${help(assetHelp(asp, a0))}${isFont && FONT_HOME.test(baseName(a0.path)) ? ` <span class="tag">Home screen</span>` : ""}${rep ? ` <span class="tag on">Replaced</span>` : ""}</div>
+          <div class="dir">${isFont || isAppearance || isSound ? `${esc(baseName(a0.path))} · ${fmtSize(a0.size)}` : esc(g.dir)}${g.assets.length > 1 ? ` · ${plural(g.assets.length, "variant")}` : ""}</div>${isFont && rep ? fontSample(a0.path) : ""}${
           isAppearance && textureAnchor(a0.path).band ? `<label class="note check"><input type="checkbox" data-keep="${esc(a0.path)}"${keepClearFor(a0.path) ? " checked" : ""}> Keep the clock and icons clear${help("The clock and the search and settings icons are drawn over the top of this piece: a white or solid picture there hides them. On, the top 26% is left empty and the picture goes below it.")}</label>` : ""}</div>
         <div class="acts">${play}${isAppearance ? (() => {
           const pl = placementFor(a0.path);
+          if (rep && state.sources.has(a0.path)) {
+            return pl.mode === "pad" ? `<label class="note">Padding${help("Space left clear where the picture meets the screen's edge, in percent of the piece (0 to 40).")}
+            <input type="number" min="0" max="40" step="1" value="${pl.pad}" data-pad="${esc(a0.path)}" style="width:64px" aria-label="Padding in percent"> %</label>` : "";
+          }
           return `<label class="note">Placement${help("How your picture is placed on this piece. Fill crops it, keeping the part against the screen's edge the piece meets; Fill with padding leaves a clear margin there; Fit shows all of it; Stretch squeezes it. Changing it makes the texture again at once from the picture kept in the theme.")}
             <select data-place="${esc(a0.path)}" aria-label="Placement">
               <option value="fill"${pl.mode === "fill" ? " selected" : ""}>Fill (crop to the piece)</option>
@@ -5175,8 +6578,8 @@ function aspectBody(asp) {
         })() : ""}
           <button class="btn sm" data-act="attach-group" data-group="${esc(g.key)}" data-aspect="${asp.id}">${rep ? "Replace" : "Attach"}</button>
           ${rep ? `<button class="btn sm ghost danger" data-act="reset-group" data-group="${esc(g.key)}" data-aspect="${asp.id}">Reset</button>` : ""}
-        </div></div>`;
-    }).join("")}</div>${more}${asp.id === "appearance" ? `<div id="appearance-colors">${colorsBox()}</div>` : ""}${uiBox}`;
+        </div>${isAppearance && rep && state.sources.has(a0.path) ? placeOptionsHtml(a0.path) : ""}</div>`;
+    })}${more}${asp.id === "appearance" ? `<div id="appearance-colors">${colorsBox()}</div>` : ""}${soundsFirst ? "" : uiBox}`;
 }
 
 const gainLabel = g => (g ? `${g > 0 ? "+" : "−"}${Math.abs(g)} dB` : "same loudness as the console's music");
@@ -5191,7 +6594,7 @@ function musicBody() {
   const converted = state.files.has(HOME_MUSIC);
   if (!t.music && !converted) {
     return dropZone(aspectById("music"), "Drop a music file here",
-      "MP3, M4A, OGG, WAV, FLAC and more. You choose the part that plays and loops.");
+      "MP3, M4A, OGG, WAV, FLAC and more.");
   }
   const status = !converted ? "Added with an earlier version. Convert it to make it the home music."
     : "Checking the home music file…";
@@ -5808,8 +7211,13 @@ async function attachToAspect(asp, file) {
 async function attachToGroup(asp, key, file) {
   const g = findGroup(asp, key);
   if (!g) return;
-  await attachTo(g.assets, file, g.name);
+  await attachTo(g.assets, file, pieceLabel(asp, g));
   renderAspect(asp);
+}
+/* A piece by the name its part shows, for messages. */
+function pieceLabel(asp, g) {
+  const path = g.assets[0].path;
+  return asp.id === "appearance" ? appearanceName(path) : asp.id === "fonts" ? fontName(path) : asp.id === "sounds" ? soundName(path) : g.name;
 }
 
 /* Ask the console whether the theme's home music file still passes its
@@ -6311,6 +7719,7 @@ async function renderActivity() {
   view.innerHTML = `
     <div class="head"><h1>Activity</h1><span class="spacer"></span>
       <button class="btn" data-act="refresh-log">Refresh</button></div>
+    <p class="note" style="margin:-12px 0 18px">What the plugin did, newest at the bottom. Include it when you ask for help with a theme.</p>
     <div class="activity"><div id="crashes"></div><pre class="log" id="log">Loading…</pre></div>`;
   await loadLog();
 }
@@ -6639,7 +8048,7 @@ document.addEventListener("click", async e => {
     case "pv-refresh": pvData = null; return previewRender(state.editId);
     case "export": return exportTheme(id);
     case "duplicate": return duplicateTheme(id);
-    case "save": return saveTheme(id);
+    case "save": return saveTheme(id, el);
     case "discard": return discardTheme(id, el);
     case "delete": return armDelete(el, id);
     case "new": state.creating = true; state.mix = null; return renderLibrary();
@@ -6661,15 +8070,11 @@ document.addEventListener("click", async e => {
       if (file) importFile(file).catch(err => toast(err.message, "err", 9000));
       return;
     }
-    case "toggle": {
-      if (aspectOn(asp)) {
-        if (aspectReplaced(asp)) { state.confirming = asp.id; renderAspect(asp); return; }
-        setAspectFlag(asp, false);
-      } else {
-        setAspectFlag(asp, true);
-      }
+    case "reset-all": {
+      state.confirming = asp.id;
       renderAspect(asp);
-      $(`#aspect-${asp.id} .switch`).focus();
+      const keep = $(`#aspect-${asp.id} [data-act="cancel-off"]`);
+      if (keep) keep.focus();
       return;
     }
     case "confirm-off":
@@ -6679,9 +8084,14 @@ document.addEventListener("click", async e => {
       else await resetAssets(aspectAssets(asp));
       await refreshStatus();
       setAspectFlag(asp, false);
-      toast(`${asp.title} is back to stock in this theme.`, "ok");
+      toast(`${asp.title}: the console's own again in this theme.`, "ok");
       return renderAspect(asp);
-    case "cancel-off": state.confirming = ""; return renderAspect(asp);
+    case "cancel-off": {
+      state.confirming = ""; renderAspect(asp);
+      const b = $(`#aspect-${asp.id} [data-act="reset-all"]`);
+      if (b) b.focus();
+      return;
+    }
     case "attach-aspect": {
       const file = await pickFile(asp.mode === "music" ? "audio/*" : asp.accept);
       if (file) attachToAspect(asp, file);
@@ -6695,6 +8105,7 @@ document.addEventListener("click", async e => {
     }
     case "attach-group": {
       const file = await pickFile(asp.accept);
+      if (asp.id === "appearance") { const g = findGroup(asp, el.dataset.group); if (g) apFollow(g.assets[0].path); }
       if (file) attachToGroup(asp, el.dataset.group, file);
       return;
     }
@@ -6711,7 +8122,7 @@ document.addEventListener("click", async e => {
       if (!armed.get("originals")) {
         armed.set("originals", true);
         el.classList.add("armed");
-        el.textContent = "Click again to remove";
+        el.textContent = "Press again to remove";
         setTimeout(() => { armed.delete("originals"); if (el.isConnected) { el.classList.remove("armed"); el.textContent = "Remove them"; } }, 4000);
         return;
       }
@@ -6759,7 +8170,6 @@ document.addEventListener("click", async e => {
     }
     case "uisnd-hit": el.disabled = true; el.textContent = "Trimming…"; return startUiSoundAtHit(el.dataset.path, el.dataset.id);
     case "uisnd-reset": el.disabled = true; el.textContent = "Resetting…"; return resetUiSound(el.dataset.path, el.dataset.id);
-    case "uisnd-all": state.uiSoundsAll = !state.uiSoundsAll; uiSoundsLast = null; return renderAspect(aspectById("sounds"));
     case "uisnd-retry": rcoFailed.clear(); uiSoundsLast = null; return renderAspect(aspectById("sounds"));
     case "shapes-save": return saveShapes(el.dataset.path, false);
     case "shapes-reset": return saveShapes(el.dataset.path, true);
@@ -6771,14 +8181,48 @@ document.addEventListener("click", async e => {
     case "colors-close": state.colorEdit = null; return renderAspect(aspectById("appearance"));
     case "colors-save": el.disabled = true; el.textContent = "Saving…"; return saveColorEdit(el.dataset.path, el.dataset.palette);
     case "tiles-number": return numberTileIcons();
-    case "title-pic": {
+    case "istyle-shape": {   /* shown at once; kept on the console as it goes (setChoice says if it can't be) */
+      const kept = setIconStyle(x => { x.shape = el.dataset.v; });
+      renderAspect(aspectById("titles"));
+      const b = document.querySelector(`[data-act="istyle-shape"][data-v="${el.dataset.v}"]`);
+      if (b) b.focus();
+      return kept;
+    }
+    case "istyle-behind": {
+      if (el.dataset.v === "picture" && !await iconBackdropKept()) {   /* no picture yet: choose one and place it */
+        const file = await pickFile("image/*");
+        if (file) await openBgEditor(file);
+        return;
+      }
+      const kept = setIconStyle(x => { x.behind = el.dataset.v; });
+      renderAspect(aspectById("titles"));
+      const b = document.querySelector(`[data-act="istyle-behind"][data-v="${el.dataset.v}"]`);
+      if (b) b.focus();
+      return kept;
+    }
+    case "istyle-picture": {
       const file = await pickFile("image/*");
-      if (file) titlePicture(el.dataset.title, el.dataset.stem, file);
+      if (file) await openBgEditor(file);
+      return;
+    }
+    case "istyle-adjust": return openBgEditor(`/api/theme/preview?${q({ id: state.editId, kind: "iconbg" })}&v=${stamp}`);
+    case "bge-cancel": return bgeClose();
+    case "bge-save": el.disabled = true; el.textContent = "Keeping…"; return bgeSave().catch(e => { el.disabled = false; el.textContent = "Use this picture"; toast(e.message, "err"); });
+    case "bge-zoom": return bge && bgeZoom(bge.zoom * (+el.dataset.v > 0 ? 1.15 : 1 / 1.15));
+    case "bge-reset": if (bge) { bge.zoom = 1; bge.s = bge.fill; bge.ox = (bge.F - bge.iw * bge.s) / 2; bge.oy = (bge.F - bge.ih * bge.s) / 2; bgeZoom(1); } return;
+    case "bge-file": { const file = await pickFile("image/*"); if (file) await openBgEditor(file); return; }
+    case "bge-fromtheme": return openBgEditor(`/api/theme/preview?${q({ id: state.editId, kind: "background" })}&v=${stamp}`);
+    case "istyle-run": return styleIcons(false);
+    case "istyle-remove": el.disabled = true; el.textContent = "Removing…"; return removeIconStyle();
+    case "title-pic": {
+      const file = await pickFile("image/*"), title = el.dataset.title, stem = el.dataset.stem;
+      if (!file || !(await titlePicture(title, stem, file))) return;
+      if (stem === "icon0") { await iconChangedByHand(title); renderAspect(aspectById("titles")); }
       return;
     }
     case "title-reset": {
       const g = titleGroups().find(x => x.title === el.dataset.title);
-      if (g) { await resetAssets(g.pictures); renderAspect(aspectById("titles")); }
+      if (g) { await resetAssets(g.pictures); await iconChangedByHand(g.title, true); renderAspect(aspectById("titles")); }
       return;
     }
     case "tile-icon": {
@@ -6817,6 +8261,37 @@ document.addEventListener("click", async e => {
       return;
     }
     case "refresh-log": return loadLog();
+    case "fit-pick": {
+      if (state.fit === el.dataset.v) return;
+      state.fit = el.dataset.v;
+      setChoice(c => { c.fit = state.fit; });
+      for (const b of document.querySelectorAll('[data-act="fit-pick"]')) b.setAttribute("aria-checked", String(b.dataset.v === state.fit));
+      return refitPictures();
+    }
+    case "place-pick": {
+      const path = el.dataset.path, mode = el.dataset.v;
+      if (placementFor(path).mode === mode) return;
+      apFollow(path);
+      setChoice(c => { pieceChoice(c, path).place = mode; });
+      return placementChanged(path, true);
+    }
+    case "ap-view": case "ap-look": {
+      apView = { ...apView, [el.dataset.act === "ap-view" ? "view" : "look"]: el.dataset.v };
+      const box = el.closest(".ap-preview");
+      if (box) box.outerHTML = apPreviewBox();
+      apPreviewShow();
+      const again = document.querySelector(`.ap-preview [data-act="${el.dataset.act}"][data-v="${el.dataset.v}"]`);
+      if (again) again.focus();
+      return;
+    }
+    case "advanced": {
+      state.showAdvanced = !advancedShown();
+      $("#secnav").innerHTML = secNavHtml();
+      if ($("#steps")) $("#steps").innerHTML = stepsHtml(state.section || "theme");
+      const first = state.showAdvanced && $('#secnav [data-section="textures"]');
+      if (first) first.focus(); else { const m = $('#secnav [data-act="advanced"]'); if (m) m.focus(); }
+      return;
+    }
     case "view-crash":
       try { $("#log").textContent = await api("GET", "/api/crash", { name: el.dataset.name }); }
       catch (err) { toast(err.message, "err"); }
@@ -6882,6 +8357,11 @@ async function placementChangedNow(path) {
 
 document.addEventListener("input", e => {
   if (e.target.id === "mix-name" && state.mix) { state.mix.name = e.target.value; return; }
+  if (e.target.id === "istyle-scale") {   /* the shapes redraw at the new size as the slider moves; kept when let go */
+    $("#istyle-scale-label").textContent = `${e.target.value}%`;
+    state.choices.iconStyle = { ...iconStyle(), scale: +e.target.value };
+    return iconStyleShow();
+  }
   if (e.target.dataset && e.target.dataset.pad) {
     const v = Math.max(0, Math.min(40, Math.round(+e.target.value || 0)));
     pieceChoice(state.choices, e.target.dataset.pad).pad = v;
@@ -6932,6 +8412,7 @@ document.addEventListener("change", async e => {
     return placementChanged(e.target.dataset.keep, false);
   }
   if (e.target.dataset && e.target.dataset.place) {
+    apFollow(e.target.dataset.place);
     const mode = e.target.value;
     setChoice(c => { pieceChoice(c, e.target.dataset.place).place = mode; });
     return placementChanged(e.target.dataset.place, true);   /* "Fill with padding" shows its padding box */
@@ -6939,9 +8420,16 @@ document.addEventListener("change", async e => {
   if (e.target.dataset && e.target.dataset.pad) { setChoice(() => {}); return placementChanged(e.target.dataset.pad, false); }
   const t = e.target;
   if (t.id === "pv-look") { pvState.look = t.value; return previewRender(state.editId); }
+  if (t.id === "istyle-scale") { const kept = setIconStyle(x => { x.scale = +t.value; }); iconStyleShow(); return kept; }
+  if (t.id === "istyle-colour") { const kept = setIconStyle(x => { x.colour = t.value; }); iconStyleShow(); return kept; }
+  if (t.id === "istyle-mine") { await setIconStyle(x => { x.mine = t.checked; }); return renderAspect(aspectById("titles")); }
+  if (t.id === "istyle-auto") {
+    await setIconStyle(x => { x.auto = t.checked; });
+    await api("POST", "/api/theme/icon-style", { id: state.editId, auto: t.checked ? 1 : 0 }).catch(err => toast(err.message, "err"));
+    return;
+  }
   if (t.id === "pl-join") return setPlaylistJoin(+t.value);
   if (t.id === "pl-end") return setPlaylistEnd(t.value);
-  if (t.id === "theme-select") { location.hash = `#/edit/${encodeURIComponent(t.value)}`; return; }
   if (t.id === "keep-originals") {
     try {
       await api("POST", "/api/theme/settings", { id: state.editId, keep_originals: t.checked ? 1 : 0 });
@@ -6958,7 +8446,9 @@ document.addEventListener("change", async e => {
     if (t.id === "theme-name" && t.value.trim()) {
       await api("POST", "/api/theme/settings", { id: state.editId, name: t.value.trim() });
       await refreshStatus();
-      $("#theme-select").querySelector(`option[value="${CSS.escape(state.editId)}"]`).textContent = t.value.trim();
+      const h = $("#edit-name");
+      if (h) h.textContent = t.value.trim();
+      document.title = `${t.value.trim()} · PS5 Themes`;
       toast("Name saved.", "ok");
     }
     if (t.id === "theme-fw") {
@@ -7028,22 +8518,49 @@ window.addEventListener("drop", e => {
   if (target && file) {
     const asp = aspectById(target.dataset.drop || target.dataset.aspect);
     if (target.dataset.drop) attachToAspect(asp, file);
-    else attachToGroup(asp, target.dataset.group || target.dataset.dropGroup, file);
+    else {
+      const key = target.dataset.group || target.dataset.dropGroup;
+      if (asp.id === "appearance") { const g = findGroup(asp, key); if (g) apFollow(g.assets[0].path); }
+      attachToGroup(asp, key, file);
+    }
   } else if (state.route === "library") {
     importDrop(e.dataTransfer);
   }
 });
 
 window.addEventListener("hashchange", () => {
+  bgeClose();   /* a dialog of the page being left goes with it */
+  if ($("#pv-overlay")) previewClose();
   const left = state.route === "edit" ? themeById(state.editId) : null;
   state.confirming = "";
   stopPreview();
   state.trim = null;
+  /* Another part of the theme being edited: only the part beside the list changes */
+  const was = state.route === "edit" && $("#editor") ? state.editId : null;
+  parseRoute();
+  if (was && state.route === "edit" && state.editId === was && themeById(was)) return showPane(true);
   render();
   view.focus({ preventScroll: true });
   if (left && left.unsaved && !(state.route === "edit" && state.editId === left.id)) {
     toast(`${left.name} has unsaved changes. Open it again to save or discard them.`, "", 7000);
   }
+});
+
+/* Closing or reloading the page while something is being made or sent would cut it off: the browser asks first. */
+addEventListener("beforeunload", e => {
+  if (!progressStack.some(p => p.el.isConnected)) return;
+  e.preventDefault();
+  e.returnValue = "";
+});
+
+/* Escape closes the library's New theme and Mix and match forms, as Circle backs out of a menu on the console. */
+document.addEventListener("keydown", e => {
+  if (e.key !== "Escape" || state.route !== "library" || $("#pv-overlay") || !(state.creating || state.mix)) return;
+  state.creating = false;
+  state.mix = null;
+  renderLibrary();
+  const b = $('.head [data-act="new"]');
+  if (b) b.focus();
 });
 
 /* Handles of the part editor: arrow keys move by 0.1 s (Shift: 1 s), Page keys
@@ -7070,7 +8587,7 @@ window.addEventListener("resize", () => { if (state.trim) drawTrim(); });
   let tick = 0;
   setInterval(async () => {
     tick++;
-    if (document.hidden || state.route !== "library" || state.creating) return;
+    if (document.hidden || state.route !== "library" || state.creating || state.mix) return;   /* a form open keeps its focus */
     if (!state.status.applying && tick % 4) return;   /* every second while a theme is being applied */
     const before = JSON.stringify(state.status);
     if (await refreshStatus() && JSON.stringify(state.status) !== before) renderLibrary();

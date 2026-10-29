@@ -51,7 +51,6 @@ def check_links():
 
 def check_version():
     tests = read("tests/host/test_e2e.py")
-    remembered = re.search(r'r"(\d+)\\\.(\d+)r\\d\+', tests)
     found = {
         "Makefile VERSION": re.search(r"^VERSION\s*:=\s*(\S+)", read("Makefile"), re.M),
         "src/theme.h PLUGIN_VERSION": re.search(r'#define PLUGIN_VERSION "([^"]+)"', read("src/theme.h")),
@@ -60,11 +59,7 @@ def check_version():
         "tests: the start-up line": re.search(r'"ps5-theme ([\d.]+) starting"', tests),
     }
     versions = {k: m.group(1) for k, m in found.items() if m}
-    if remembered:
-        versions["tests: remembered checks"] = f"{remembered.group(1)}.{remembered.group(2)}"
     problems = [f"{k}: version not found" for k, m in found.items() if not m]
-    if not remembered:
-        problems.append("tests: remembered checks: version not found")
     if len(set(versions.values())) > 1:
         problems.append("the version differs: " + ", ".join(f"{k} {v}" for k, v in versions.items()))
     return problems, versions.get("Makefile VERSION", "?")

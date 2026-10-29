@@ -6,8 +6,8 @@ Any installed game or app, homebrew included, can get its own icon,
 background and logo in a theme.
 
 1. Open the manager and press **Edit** on a theme, or create one first.
-2. Switch on **Games and apps**. Your installed games and apps are listed by
-   name; when there are many, type in the search box.
+2. Open **Games and apps** in the list of parts. Your installed games and
+   apps are listed by name; when there are many, type in the search box.
 3. Press the button for the picture you want to change:
    - **Change icon**: the game's tile on the home screen and in the Game
      Library.
@@ -17,11 +17,11 @@ background and logo in a theme.
    - **Change other artwork**: other pictures some games keep.
 
    Hold the pointer over a button to see where its picture appears.
-4. Choose an image. Any size works: it's fitted as set in **How images are
-   fitted** at the top of the page (fill, fit or stretch), then written in
+4. Choose an image. Any size works: it's fitted as set in **Pictures of
+   another shape** under **Name and picture** (fill, fit or stretch), then written in
    exactly the console's format into every file that holds that picture. The
    message says how many files were changed.
-5. Do the same for other games, then press **Save** and **Apply to console**.
+5. Do the same for other games, then press **Save** and **Apply**.
 6. The Game Library and the backgrounds show the new pictures straight away.
    For the icons on the home screen, **put the console in rest mode and wake
    it**; the notification after applying says so too. After a console
@@ -33,15 +33,15 @@ background and logo in a theme.
 *Black Myth: Wukong with an icon and a background chosen in a theme. The
 game's artwork belongs to its publisher.*
 
-![The Games and apps section of the manager, searched for one game](screenshots/manager-games.png)
+![The Games and apps part of the manager: Icon style, then the list searched for two games](screenshots/manager-games.png)
 
 **To undo** one game's pictures, press **Reset** on its row, then **Save**
-and **Apply to console**. **Restore stock** takes the whole theme off.
+and **Apply**. **No theme** in the library takes the whole theme off.
 
 **Good to know:**
 
 - Before installing an update for a game whose pictures the theme changes,
-  choose **Restore stock**, then apply the theme again afterwards: while the
+  choose **No theme** in the library, then apply the theme again afterwards: while the
   theme is applied, the console can't update that game's pictures.
 - Some games' pictures come from PlayStation Network as WebP files. Safari
   can't make those, so use Chrome, Edge or Firefox for them.
@@ -51,15 +51,51 @@ and **Apply to console**. **Restore stock** takes the whole theme off.
   game and app icons safely](challenges.md#changing-game-and-app-icons-safely) explains
   how.
 
+## One look for every icon: Icon style
+
+![Icon style: the shapes drawn on the theme's background, the size of the icon, what is behind it, and the two options](screenshots/icon-style.png)
+
+Icon style puts every game's and app's icon in the same shape, over the same
+colour or picture, without choosing each one by hand (since 1.66).
+
+1. In **Games and apps**, choose a shape: circle, rounded square, square,
+   diamond, hexagon or triangle. Each is drawn on one of your own games'
+   icons, with what will be behind it.
+2. Choose the size of the icon in the shape, and what's behind it: **A
+   colour**, **The theme's background**, or **A picture of yours**.
+3. For a picture, place it as you would a profile picture: drag it (or use
+   the arrow keys or D-pad) and zoom until the bright square shows the part
+   you want, then press **Use this picture**. The icon is shown on it at the
+   sizes the home screen and the Game Library use.
+
+   ![The picture behind the icons: the bright square is what shows, the rest dimmed, with the icon at home-screen and Game Library sizes](screenshots/picture-editor.png)
+
+4. Press **Style N icons**, then **Save** and **Apply**, and use rest mode to
+   see the home row.
+
+- **Icons you changed by hand** are styled too: your picture goes in the
+  shape. Untick **The N icons you changed by hand too** to leave them as they
+  are.
+- **Games installed later:** with **Style games and apps installed later**
+  ticked, the plugin styles a new game by itself while the theme is applied,
+  once its install or download has finished and no game is being played (a
+  game left on the home screen doesn't count), then applies the theme again;
+  the console says so. Opening the theme in the manager does the same for
+  any it couldn't style itself.
+- **Remove the style** puts back each icon as it was: your own picture where
+  you had changed one, the console's icon for the rest.
+
+The [manager tour](manager.md#games-and-apps) has the details.
+
 ## The console's own tiles and interface icons
 
 - **Home screen tiles** (PlayStation Store, Game Library, the Media tab's
-  tiles and others): switch on **Home screen tiles**, then press **Change
+  tiles and others): open **Tiles** in the list of parts, then press **Change
   icon** or **Change background** on a tile. Not sure which tile is which?
   **Number tile icons** turns each icon into the number shown in front of its
   name.
 - **Interface icons** (search, settings, the Control Center and more):
-  switch on **Interface icons**, type a picture's name (search, settings,
+  open **Interface icons**, type a picture's name (search, settings,
   power and so on) in the lookup box, then choose an image. To find a
   picture by sight, use **Number vector icons**: apply the theme, use rest
   mode, then type the number you see into the lookup box.
@@ -83,6 +119,6 @@ and **Apply to console**. **Restore stock** takes the whole theme off.
 
 ![The Welcome tile on the console with its own icon from a theme](screenshots/console-welcome-tile.jpg)
 
-![The Home screen tiles section of the manager, with Number tile icons](screenshots/manager-tiles.png)
+![The Home screen tiles part of the manager, with Number tile icons](screenshots/manager-tiles.png)
 
-![The Interface icons section of the manager: the interface's resource files, numbering, and corner shapes](screenshots/manager-interface.png)
+![The Interface icons part of the manager: the interface's resource files, numbering, the picture lookup and corner shapes](screenshots/manager-interface.png)

@@ -59,8 +59,19 @@ void     plat_set_name(const char *name);
 int      plat_watch_files(const char *const *paths, int n, int seconds,
                           void (*seen)(int index, const char *what, long ms, void *ctx), void *ctx);
 
+/* Bytes free to an ordinary writer on the filesystem holding `path`, or UINT64_MAX when it can't be told. */
+uint64_t plat_free_bytes(const char *path);
+
 /* The process whose kernel command name is `name`, or -1. */
 int      plat_find_process(const char *name);
+
+/* A live process: its pid, when it started (as plat_process_start tells it) and the processor time it has used,
+   in microseconds (0 where that can't be told). */
+typedef struct { int pid; unsigned long long start; unsigned long long cpu_us; } plat_proc_t;
+
+/* The live processes whose kernel command name is `name`, up to `max` of them: how many, or -1 if the
+   process list can't be read. */
+int      plat_processes_named(const char *name, plat_proc_t *out, int max);
 
 /* The live process with a thread named `name` (see plat_set_name), other
    than `except`, or -1: how another program finds the running plugin, as
@@ -77,10 +88,15 @@ unsigned long long plat_process_start(int pid);
    mount table. -1 where it can't be listed that way (emulated mounts). */
 int      plat_our_mounts(const char *stage_prefix, const char *under, char (*out)[1024], int max);
 
+/* The same, but only overlays with no mount but ours made over them at their point: unmounting that path, newest
+   first, takes exactly ours off (the kernel unmounts the newest mount there), never a mount of the system's made
+   over one of ours. *buried counts those of ours under such a mount, left alone. -1 where it can't be listed. */
+int      plat_our_top_mounts(const char *stage_prefix, const char *under, char (*out)[1024], int max, int *buried);
+
 /* Every thread: "pid tid name / process name" lines, for diagnosis. */
 void     plat_dump_threads(FILE *out);
 
-/* Every process, one "pid name" line each, for diagnosis. */
+/* Every process, one "pid name cpu=<seconds>s" line each (the processor time it has used), for diagnosis. */
 void     plat_dump_processes(FILE *out);
 
 /* Wait up to `ms` for a mount or unmount anywhere (PLAT_EV_MOUNTS), or for

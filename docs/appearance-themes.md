@@ -52,16 +52,19 @@ numbers are the interface icons' numbered test, applied at the same time.*
    The home screen artwork is the Appearance theme's own layer, not the
    **Background** section's picture; the two are changed separately.
 2. **Open the manager** at `http://<console-ip>:8095` on a computer or
-   phone, make a theme (or press **Edit** on an existing one), and switch on
-   **Appearance themes**. Each piece is a row named after its theme, for
+   phone, make a theme (or press **Edit** on an existing one), and open
+   **Appearance themes** in the list of parts. Each piece is a row named after its theme, for
    example **PlayStation 2: Control Center, bottom panel**, **PlayStation 2:
    Control Center, top-right corner** and **PlayStation 2: Home screen
    artwork**. Use the rows of the theme you have selected on the console.
 
-   ![The Appearance themes section of the manager: each piece with its Placement and, for the corner pieces, Keep the clock and icons clear; the Colours at the end](screenshots/manager-appearance.png)
+   ![The Appearance themes part of the manager: the preview of the chosen look drawn from the theme's artwork, then each look's pieces, with each placement drawn on the picture attached](screenshots/manager-appearance.png)
 
 3. **Choose how the picture is placed**, on the row, before or after
-   attaching:
+   attaching. Once a piece has your picture, its row shows each placement
+   drawn on that picture, at the piece's own shape, with the see-through
+   parts and the band kept clear for the clock, using the encoder's own
+   placement: choose one by its picture (since 1.66):
    - **Fill** crops the picture to the piece and keeps the part against the
      screen's edge it meets (the bottom for the panel, the top for the
      artwork and the corner piece).
@@ -75,21 +78,33 @@ numbers are the interface icons' numbered test, applied at the same time.*
 4. **Attach the picture:** press **Attach** on the row, or drop the file on
    it. The page makes the texture, the plugin checks it, and the row shows
    **Replaced** with a message that it was added and verified.
-5. **Adjust it.** Change the placement, the padding or the clock band and the
+5. **Check it in the preview.** Above the rows, the part shows the home
+   screen or the Control Center of one look (**PlayStation** to
+   **PlayStation 4**, a dot marking those the theme changes) with your
+   pieces drawn from the very textures the console will use, transparency
+   included (since 1.66). A piece the theme doesn't replace is the console's
+   own artwork, decoded from the console's texture by the plugin, and so is
+   the background when the theme has none; a line under the picture says
+   which pieces are yours and which the console's. The search, settings and
+   Control Center icons and the tiles are the console's own too; only the
+   layout around them is approximate. The preview follows the piece you
+   attach or place.
+6. **Adjust it.** Change the placement, the padding or the clock band and the
    texture is made again at once from the original the theme keeps (see
    [Changing a piece later](#changing-a-piece-later) for when it isn't,
-   and what to do). Judge the result on the console.
-6. **Save** the theme (the bar at the bottom) when you are happy, or
+   and what to do). The preview shows the new texture; judge the final
+   result on the console.
+7. **Save** the theme (the bar at the bottom) when you are happy, or
    **Discard** to go back to the last save.
-7. **Apply to console**, then select the same Appearance theme in
+8. **Apply**, then select the same Appearance theme in
    **Settings > Appearance and Sound** if it isn't, and put the console in
    **rest mode** and wake it. Press the PS button for the Control Center, and
    look at the home screen for the artwork. The manager says this after every
    change to a piece (attach, option change or reset), and the console shows
    a notification when the theme is applied.
-8. **Go back.** **Reset** on a row removes your picture (and its kept
-   original) from the theme; apply again. **Restore stock** takes the whole
-   theme off the console.
+9. **Go back.** **Reset** on a row removes your picture (and its kept
+   original) from the theme; apply again. **No theme** in the library takes
+   the whole theme off the console.
 
 If it doesn't look right: a piece that stays as it was usually means a
 different Appearance theme is selected on the console or the console wasn't

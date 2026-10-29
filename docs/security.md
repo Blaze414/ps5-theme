@@ -23,7 +23,9 @@ Who can reach the plugin, what protects the system, and the fuzzing results. Par
 - **What it can read back.** Beyond themes and the files they replace,
   anyone on the network can read the plugin's log, the mount table, and the
   names (not contents) of the files the system keeps for one game, with the
-  database lines that mention that game.
+  database lines that mention that game. Since 1.66 also the console's interface
+  icons and small pictures of its system textures, for the manager's
+  previews.
 - **Nothing outside your network.** The plugin sends nothing over the
   internet.
 
@@ -45,6 +47,15 @@ console with those rights. So that code gets the most testing.
   same way.
 - Themes are read-only overlays held in memory, so a restart always brings
   back the stock console.
+- The storage the plugin writes to is the console's own, shared with saves,
+  app data and the system's records. Every upload and every copy (staging a
+  theme's folders, Mix and match) first checks that 1 GB stays free, and is
+  refused before anything is written when it wouldn't (since 1.66).
+- The icon style for games installed later (since 1.66) reads a newly
+  installed title's icon, which a homebrew package can supply, so it is
+  untrusted input: only 8-bit PNGs of at most 2048 pixels a side are read,
+  through the same inflate the checks use, and every file made from it is
+  checked as an upload is before it goes into a theme.
 - Only media can be replaced, never code, and each file is checked against
   the system file it replaces (see
   [What the checks cover, and what they don't](how-it-works.md#what-the-checks-cover-and-what-they-dont)).
@@ -70,9 +81,16 @@ are the numbers from those runs, made after the fixes below:
 | PNG pictures against the console's own (with the plugin's inflate) | 26,897,248 in 3 min | no findings |
 | Interface resource files, with the sound checks (26 October) | 10,444,860 in 3 min | no findings |
 | Interface resource files, structure kept (only pointers and embedded files vary), with the sound checks (26 October) | 7,377,665 in 3 min | no findings |
+| Texture pictures for the previews: BC7 in all eight modes, BC1, RGBA (29 October) | 1,598,218 in 2 min | no findings |
+| Interface icons by id, from a damaged or hostile interface file (29 October) | 14,216,034 in 2 min | no findings |
+| A title's icon decoded, written back in the same form and decoded again, the pixels compared (29 October) | 4,828,964 in 2 min | no findings |
+| PNG pictures against the console's own, past the checksums (29 October) | 17,399,801 in 2 min | no findings |
+| Textures written like the console's (BC7, BC1, every mip), then read back (29 October) | 1,128,718 in 2 min | no findings |
 
 "No findings" means no crash, no sanitizer report and no input taking more
-than 10 seconds. The runs used a Linux x86-64 build of the same source, not
+than 10 seconds. Since 29 October the fuzz build gets past PNG checksums (the
+`FUZZING_BUILD_MODE_UNSAFE_FOR_PRODUCTION` convention; never in a real build),
+so the fuzzer reaches the image data instead of stopping at the checksum. The runs used a Linux x86-64 build of the same source, not
 the console's build.
 
 ## Bugs found, and proof they're fixed

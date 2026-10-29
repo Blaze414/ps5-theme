@@ -11,5 +11,5 @@ cd "$(dirname "$0")/../.."
 docker build --platform linux/amd64 -f tests/fuzz/Dockerfile -t ps5-theme-fuzz .
 mkdir -p tests/fuzz/out
 exec docker run --rm --platform linux/amd64 -e FUZZ_SECONDS="${FUZZ_SECONDS:-60}" \
-  -e FUZZ_TARGETS="${FUZZ_TARGETS:-zstd texture at9 wav image json svg png rco rco-data font}" \
+  -e FUZZ_TARGETS="${FUZZ_TARGETS:-zstd texture preview tex-encode at9 wav image json svg png png-pixels rco rco-data rco-icon font}" \
   -v "$PWD/tests/fuzz/out:/out" ps5-theme-fuzz

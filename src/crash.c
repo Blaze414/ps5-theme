@@ -29,6 +29,12 @@ static char crumbs[CRUMB_COUNT][CRUMB_SIZE];
 static pthread_t threads[CRUMB_COUNT];
 static int thread_known[CRUMB_COUNT];
 static volatile sig_atomic_t in_crash;
+static void (*volatile on_fatal)(void);   /* see crash_on_fatal */
+
+void
+crash_on_fatal(void (*fn)(void)) {
+  on_fatal = fn;
+}
 
 /* Present when the linker puts the ELF header in a loaded segment (lld does). */
 extern const char __ehdr_start[] __attribute__((weak));
@@ -117,6 +123,11 @@ fatal_handler(int sig, siginfo_t *info, void *ucontext) {
   if(in_crash) _exit(71);
   in_crash = 1;
 
+  /* First, before the report (whose stack walk may fault again): what must not be left behind with no copy
+     running, the overlays in the home screen's sandbox (main.c). */
+  int released = 0;
+  if(on_fatal) { on_fatal(); released = 1; }
+
   struct timespec ts;
   clock_gettime(CLOCK_REALTIME, &ts);
 
@@ -173,7 +184,9 @@ fatal_handler(int sig, siginfo_t *info, void *ucontext) {
     if(next <= fp) break;
     fp = next;
   }
-  put(&o, "\nThe theme mounts are read-only and disappear on reboot; the console is unchanged.\n");
+  put(&o, released ? "\nThe theme's overlays in the home screen's sandbox were taken out, so the home screen and apps start after rest mode.\n"
+                       "The rest are read-only and go at the next restart; the console's own files are unchanged.\n"
+                     : "\nThe theme mounts are read-only and disappear on reboot; the console's own files are unchanged.\n");
   if(o.fd != 2) close(o.fd);
 
   /* Tell the next start which report to announce. */

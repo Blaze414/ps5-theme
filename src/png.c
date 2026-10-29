@@ -37,7 +37,9 @@ png_chunks(const uint8_t *b, size_t n, chunk_t *out) {
     if(n - pos < 12) return -1;
     uint32_t len = be32(b + pos);
     if(len > n - pos - 12) return -1;
+#ifndef FUZZING_BUILD_MODE_UNSAFE_FOR_PRODUCTION   /* (fuzzing gets past the checksum to what follows it) */
     if(crc32_update(0, b + pos + 4, 4 + (size_t)len) != be32(b + pos + 8 + len)) return -1;
+#endif
     out[k].at = pos;
     out[k].len = len;
     memcpy(out[k].type, b + pos + 4, 4);
@@ -179,4 +181,133 @@ done_why:
   free(cz);
   free(raw);
   return ret;
+}
+
+
+/* ---- Decoding and writing pictures, for icons the plugin makes by itself ----
+
+   For the icon style of games installed later (autostyle.c): a title's icon is read as pixels, and the styled one
+   written back in exactly the console's form. Only 8-bit RGB and RGBA pictures without interlacing, which is what
+   the console's game icons are; anything else is left to the manager's page. A title's icon can come from a homebrew
+   package, so it is untrusted: its size is capped and it goes through the same inflate as every check. */
+
+#define PNG_DECODE_MAX_SIDE 2048   /* game icons are 512; at most 16 MB of pixels for a hostile one */
+
+/* The picture's pixels as RGBA (alpha 255 for RGB), or NULL. */
+uint8_t *
+png_decode_rgba(const uint8_t *b, size_t n, uint32_t *ow, uint32_t *oh) {
+  chunk_t *c = malloc(sizeof(chunk_t) * PNG_CHUNKS);
+  uint8_t *z = NULL, *raw = NULL, *out = NULL;
+  int nc = c ? png_chunks(b, n, c) : -1;
+  if(nc < 2 || strcmp(c[0].type, "IHDR") || c[0].len != 13) goto done;
+  const uint8_t *ihdr = b + c[0].at + 8;
+  uint32_t w = be32(ihdr), h = be32(ihdr + 4);
+  unsigned depth = ihdr[8], type = ihdr[9], ch = type == 2 ? 3 : type == 6 ? 4 : 0;
+  if(!ch || depth != 8 || ihdr[12] || !w || !h || w > PNG_DECODE_MAX_SIDE || h > PNG_DECODE_MAX_SIDE) goto done;
+  int from = -1, to = -1;
+  for(int i = 0; i < nc; i++) {
+    if(strcmp(c[i].type, "IDAT")) { if(from >= 0 && to < 0) to = i; continue; }
+    if(from < 0) from = i;
+    else if(to >= 0) goto done;   /* IDAT chunks must be one run */
+  }
+  if(from < 0) goto done;
+  if(to < 0) to = nc;
+  size_t zl, used, rowbytes = (size_t)w * ch, rawlen = (size_t)h * (1 + rowbytes);
+  if(!(z = png_idat(b, c, from, to, &zl)) || zl < 6 || (z[0] & 15) != 8 || ((z[0] << 8) | z[1]) % 31 || (z[1] & 0x20)) goto done;
+  if(!(raw = malloc(rawlen))) goto done;
+  long got = inflate_raw(z + 2, zl - 6, &used, raw, rawlen, (size_t)1 << (((z[0] >> 4) & 7) + 8));
+  if(got != (long)rawlen) goto done;
+#ifndef FUZZING_BUILD_MODE_UNSAFE_FOR_PRODUCTION
+  if(adler32(raw, rawlen) != be32(z + used + 2)) goto done;
+#endif
+  if(!(out = malloc((size_t)w * h * 4))) goto done;
+  uint8_t *prev = NULL;
+  for(uint32_t y = 0; y < h; y++) {
+    uint8_t *row = raw + (size_t)y * (1 + rowbytes), f = row[0], *cur = row + 1;
+    if(f > 4) { free(out); out = NULL; goto done; }
+    for(size_t x = 0; x < rowbytes; x++) {
+      int a = x >= ch ? cur[x - ch] : 0, bb = prev ? prev[x] : 0, cc = prev && x >= ch ? prev[x - ch] : 0;
+      cur[x] = (uint8_t)(cur[x] + (f == 1 ? a : f == 2 ? bb : f == 3 ? (a + bb) / 2 : f == 4 ? paeth(a, bb, cc) : 0));
+    }
+    for(uint32_t x = 0; x < w; x++) {
+      uint8_t *o = out + ((size_t)y * w + x) * 4;
+      o[0] = cur[x * ch]; o[1] = cur[x * ch + 1]; o[2] = cur[x * ch + 2]; o[3] = ch == 4 ? cur[x * ch + 3] : 255;
+    }
+    prev = cur;
+  }
+  *ow = w;
+  *oh = h;
+done:
+  free(c);
+  free(z);
+  free(raw);
+  return out;
+}
+
+static void
+put_be32(uint8_t *p, uint32_t v) { p[0] = (uint8_t)(v >> 24); p[1] = (uint8_t)(v >> 16); p[2] = (uint8_t)(v >> 8); p[3] = (uint8_t)v; }
+
+/* `rgba` (the stock picture's size) as a PNG of exactly the stock's kind: every chunk but the image data copied byte
+   for byte and in order, the image data as one IDAT with the stock's zlib header and stored (uncompressed) blocks,
+   every row unfiltered. NULL if the stock isn't an 8-bit RGB or RGBA picture without interlacing. */
+uint8_t *
+png_encode_like(const uint8_t *stock, size_t sl, const uint8_t *rgba, size_t *outlen) {
+  chunk_t *c = malloc(sizeof(chunk_t) * PNG_CHUNKS);
+  uint8_t *out = NULL, *raw = NULL;
+  *outlen = 0;
+  int nc = c ? png_chunks(stock, sl, c) : -1;
+  if(nc < 2 || strcmp(c[0].type, "IHDR") || c[0].len != 13) goto done;
+  const uint8_t *ihdr = stock + c[0].at + 8;
+  uint32_t w = be32(ihdr), h = be32(ihdr + 4);
+  unsigned type = ihdr[9], ch = type == 2 ? 3 : type == 6 ? 4 : 0;
+  if(!ch || ihdr[8] != 8 || ihdr[12] || !w || !h || w > PNG_DECODE_MAX_SIDE || h > PNG_DECODE_MAX_SIDE) goto done;
+  int first_idat = -1;
+  for(int i = 0; i < nc; i++) if(!strcmp(c[i].type, "IDAT")) { first_idat = i; break; }
+  if(first_idat < 0) goto done;
+  const uint8_t *zhead = stock + c[first_idat].at + 8;
+  if(c[first_idat].len < 2) goto done;
+  size_t rowbytes = (size_t)w * ch, rawlen = (size_t)h * (1 + rowbytes);
+  if(!(raw = malloc(rawlen))) goto done;
+  for(uint32_t y = 0; y < h; y++) {
+    uint8_t *row = raw + (size_t)y * (1 + rowbytes);
+    row[0] = 0;
+    for(uint32_t x = 0; x < w; x++) memcpy(row + 1 + (size_t)x * ch, rgba + ((size_t)y * w + x) * 4, ch);
+  }
+  size_t blocks = (rawlen + 65534) / 65535, zlen = 2 + rawlen + 5 * blocks + 4;
+  size_t total = 8;
+  for(int i = 0; i < nc; i++) if(strcmp(c[i].type, "IDAT")) total += 12 + c[i].len;
+  total += 12 + zlen;
+  if(zlen > 0x7fffffff || !(out = malloc(total))) goto done;
+  size_t pos = 8;
+  memcpy(out, png_sig, 8);
+  for(int i = 0; i < nc; i++) {
+    if(!strcmp(c[i].type, "IDAT")) {
+      if(i != first_idat) continue;
+      put_be32(out + pos, (uint32_t)zlen);
+      memcpy(out + pos + 4, "IDAT", 4);
+      uint8_t *z = out + pos + 8;
+      z[0] = zhead[0]; z[1] = zhead[1];
+      size_t at = 2;
+      for(size_t done = 0; done < rawlen;) {
+        size_t n = rawlen - done > 65535 ? 65535 : rawlen - done;
+        z[at] = done + n == rawlen;   /* the last block says so */
+        z[at + 1] = (uint8_t)n; z[at + 2] = (uint8_t)(n >> 8); z[at + 3] = (uint8_t)~n; z[at + 4] = (uint8_t)(~n >> 8);
+        memcpy(z + at + 5, raw + done, n);
+        at += 5 + n;
+        done += n;
+      }
+      put_be32(z + at, adler32(raw, rawlen));
+      put_be32(out + pos + 8 + zlen, crc32_update(0, out + pos + 4, 4 + zlen));
+      pos += 12 + zlen;
+    } else {
+      memcpy(out + pos, stock + c[i].at, 12 + (size_t)c[i].len);
+      pos += 12 + c[i].len;
+    }
+  }
+  *outlen = pos;
+done:
+  free(c);
+  free(raw);
+  if(out && !*outlen) { free(out); out = NULL; }
+  return out;
 }

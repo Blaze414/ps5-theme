@@ -16,16 +16,17 @@ the plugin stops, and the plugin puts your theme back each time etaHEN starts.
 
 ![The theme library](docs/screenshots/library.png)
 
-Version 1.65. Developed and tested on a PS5 with firmware 13.42, both with
+Version 1.69. Developed and tested on a PS5 with firmware 13.42, both with
 etaHEN 2.5B (unified build) and on its own from PS5 Payload Manager.
 
 > **About the screenshots.** They were taken from the author's own console.
-> The test themes in them use Peanuts artwork, and the games shown use their
-> publishers' artwork; both belong to their rights holders and are not part of
-> this project. In the manager's screenshots the console's own pictures are
-> blurred on purpose: system files stay on the console and are never
-> redistributed. The photos of the console's screen show its interface as it
-> appears.
+> The test themes in them use Peanuts and Yakuza 0 artwork, and the games
+> shown in the photos use their publishers' artwork; all of it belongs to its
+> rights holders and is not part of this project. In the manager's screenshots
+> the console's own pictures (its interface icons and artwork) and games' and
+> apps' icons are shown as plain striped stand-ins on purpose: system files
+> stay on the console and are never redistributed. The photos of the
+> console's screen show its interface as it appears.
 
 ## Contents
 
@@ -46,10 +47,17 @@ etaHEN 2.5B (unified build) and on its own from PS5 Payload Manager.
 - **Themes tile and web manager.** A **Themes** tile on the home screen opens
   the manager in the console's browser. The same manager works from any
   phone or computer on your network at `http://<console-ip>:8095`.
-- **Build a theme from parts.** Switch on what you want to change and add a
-  file: background, icons, home music, system sounds, fonts, animations,
-  video, textures and other images, the home screen's own tiles and the
-  interface's icons.
+- **Build a theme from parts.** Pick a part from the list, as in the
+  console's Settings, and add a file: background, icons, home music, system
+  sounds, fonts, animations, video, textures and other images, the home
+  screen's own tiles and the interface's icons. Each part in the list shows
+  a small picture of what the theme puts there, and Previous, Next and the
+  browser's Back step between parts.
+- **Icon style.** Give every game's and app's icon one look: its own icon in
+  a circle, rounded square, hexagon or other shape over a colour, the
+  theme's background or a picture of yours. Games installed later are styled
+  by the plugin itself once their install is over, never while you play (see
+  [Games and apps](docs/manager.md#games-and-apps)).
 - **Game and app icons.** Change the icon, background and logo of any
   installed game or app, homebrew and PlayStation Network artwork included.
   The Game Library shows them at once, and the home screen after rest mode;
@@ -61,7 +69,8 @@ etaHEN 2.5B (unified build) and on its own from PS5 Payload Manager.
   and the console checks every file again.
 - **Appearance themes.** Replace the Control Center's bottom panel, the
   corner piece by the clock and the home screen artwork of the PlayStation,
-  PlayStation 2, 3 and 4 themes, with placement and see-through parts (see
+  PlayStation 2, 3 and 4 themes, with placement and see-through parts, and a
+  preview drawn from the very textures the console will use (see
   [Appearance themes](docs/appearance-themes.md)).
 - **Fonts.** Replace the text fonts the home screen and Settings draw with,
   for the home screen only (see [Fonts](docs/fonts.md)).
@@ -88,8 +97,16 @@ etaHEN 2.5B (unified build) and on its own from PS5 Payload Manager.
 - **Library tools.** Duplicate, export to a `.zip`, import a `.zip` or a folder
   (drag it in), and delete.
 - **Comes back by itself.** The applied theme is put back every time etaHEN
-  starts the plugin, after a reboot or an update. Only **Restore stock**
+  starts the plugin, after a reboot or an update. Only **No theme**
   stops it.
+- **Leaves room for the console.** The plugin keeps 1 GB of the console's
+  storage free for its own saves and records, and refuses a file that would
+  eat into it (see
+  [When the console's storage is nearly full](docs/manager.md#when-the-consoles-storage-is-nearly-full)).
+- **Safe through rest mode.** Nothing of a theme goes into the home screen
+  while the console is starting it, and all of it comes out the moment the
+  home screen stops, the plugin crashing included (see
+  [A home screen that never came back](docs/challenges.md#a-home-screen-that-never-came-back)).
 - **Never writes the system.** Nothing under `/system` or `/system_ex` is
   opened for writing, only media files can be themed, and every file is
   checked against the system file it replaces (see
@@ -185,13 +202,13 @@ what happened.
 1. Open the **Themes** tile, or `http://<console-ip>:8095` on a phone or
    computer.
 2. Press **New theme**, give it a name and press **Create**.
-3. Press **Edit** on its card, switch on **Background** and drop in a picture.
-   Add home music, icons or sounds the same way. The guides to
+3. Its edit page opens. Choose **Background** in the list and drop in a
+   picture. Add home music, icons or sounds the same way. The guides to
    [backgrounds](docs/backgrounds.md) and [home music](docs/home-music.md)
    go step by step.
-4. Press **Save** in the bar at the bottom, then **Apply to console**.
-5. Give it a few seconds. The home screen may show the stock look for a
-   moment while it switches.
+4. Press **Save** in the bar at the bottom, then **Apply**.
+5. Give it a few seconds. The home screen may show the console's own look
+   for a moment while it switches.
 6. **To hear new home music,** move to a game or app on the home screen that
    has its own music, so the console switches to that music, then come back.
    The console keeps playing the music it already had loaded and only picks
@@ -236,7 +253,7 @@ the table says where each one is now.
 - After rest mode, the plugin covers the new views ShellUI's restarted apps
   make (see [Stock again after rest mode](docs/challenges.md#stock-again-after-rest-mode)). An
   app that read its background before the overlay arrived may show stock
-  until it reloads; **Re-apply** brings it back at once. etaHEN's own Toolbox
+  until it reloads; **Apply again** brings it back at once. etaHEN's own Toolbox
   stopping after rest mode is outside this plugin.
 - Background and icon sorting is by file name. Anything it misses is under
   **Other images**.
@@ -251,12 +268,16 @@ the table says where each one is now.
   numbered test drew nothing beside the **Games** and **Media** tabs on 13.42.
   Whether the console draws your own picture inside a vector icon hasn't
   been seen on the console yet.
-- etaHEN's plugin **Stop** ends the plugin at once: overlays stay until you
-  choose **Restore stock**, start the plugin again, or reboot.
+- etaHEN's plugin **Stop** ends the plugin at once, with no chance to tidy
+  up: overlays stay until you choose **No theme** in the library, start the
+  plugin again, or reboot. With games' icons or a font in the theme, choose
+  **No theme** (or use `ps5-theme-stop`) before stopping it that way: an
+  overlay left in the home screen's own folders when it restarts at rest mode
+  can keep it, or every app, from starting until the console restarts.
 
 ## Removing
 
-1. Choose **Restore stock**.
+1. Choose **No theme** in the library.
 2. Delete `/data/etaHEN/plugins/ps5-theme.plugin*` and `/data/ps5-theme/`.
 3. Delete the **Themes** tile from the home screen.
 
@@ -355,5 +376,6 @@ Copyright (C) 2026 Blaze414
   Entertainment Inc. or Sony Group Corporation. This project is not
   affiliated with or endorsed by Sony.
 - The screenshots in `docs/screenshots/` show the author's own test themes.
-  The Peanuts characters in them belong to their rights holders, are not part
-  of this project and are not covered by its licence.
+  The Peanuts characters and the Yakuza 0 artwork in them belong to their
+  rights holders, are not part of this project and are not covered by its
+  licence.

@@ -60,15 +60,18 @@ title_mount_point(const char *on) {
    accepts. They are found in the console's mount table, so an overlay
    missing from the records comes out too; where the table can't be listed
    that way, `recorded` (mount points, oldest first) is used. Never forced:
-   one in use stays and is counted in *stuck. The number taken out. */
+   one in use stays and is counted in *stuck. Only the newest mount at its
+   point is taken off: an unmount by path takes the newest there, which for
+   one of ours under a mount the system made later would be the system's, so
+   such a one stays (counted in *stuck too). The number taken out. */
 int
 release_overlays(const char *under, int (*match)(const char *on), char (*recorded)[1024], int nrecorded, int *stuck) {
   char (*live)[1024] = malloc(sizeof(*live) * RELEASE_MAX);   /* per call: two threads use this */
-  int n = -1, out = 0;
-  if(live) n = plat_our_mounts(BASE_DIR "/", under, live, RELEASE_MAX);
+  int n = -1, out = 0, buried = 0;
+  if(live) n = plat_our_top_mounts(BASE_DIR "/", under, live, RELEASE_MAX, &buried);
   char (*list)[1024] = n >= 0 ? live : recorded;
-  if(n < 0) n = nrecorded;
-  *stuck = 0;
+  if(n < 0) n = nrecorded, buried = 0;
+  *stuck = buried;
   for(int i = n - 1; i >= 0; i--) {
     if(strncmp(list[i], under, strlen(under)) || (match && !match(list[i]))) continue;
     if(list == recorded && !plat_is_our_mount(list[i], BASE_DIR "/")) continue;

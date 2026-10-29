@@ -3,7 +3,7 @@
 #   crash: plain build with a debug crash route, for the crash-handler test
 
 SRCS := src/main.c src/web.c src/tile.c src/log.c src/fsguard.c src/verify.c \
-        src/crash.c src/policy.c src/atrac9.c src/texture.c src/zstd.c src/update.c src/rco.c src/font.c src/png.c src/inflate.c src/running.c tests/host/platform_linux.c
+        src/crash.c src/policy.c src/atrac9.c src/texture.c src/zstd.c src/update.c src/rco.c src/font.c src/png.c src/inflate.c src/running.c src/autostyle.c tests/host/platform_linux.c
 DEPS := $(SRCS) src/theme.h src/platform.h src/atrac9_tables.h web/index.html web/atrac9.js assets/icon0.png
 
 CFLAGS := -std=gnu11 -D_GNU_SOURCE -DTEST_HOOKS -Isrc -g -O1 -fno-omit-frame-pointer \
@@ -15,6 +15,11 @@ build-host/ps5-theme-asan: $(DEPS)
 	mkdir -p build-host
 	$(CC) $(CFLAGS) -fsanitize=address,undefined -fno-sanitize-recover=all \
 	      -o $@ $(SRCS) -lpthread -lm
+
+# ThreadSanitizer, for tests/host/run.sh tsan: the same suite, stopping at the first data race between threads.
+build-host/ps5-theme-tsan: $(DEPS)
+	mkdir -p build-host
+	$(CC) $(CFLAGS) -fsanitize=thread -o $@ $(SRCS) -lpthread -lm
 
 build-host/ps5-theme-crash: $(DEPS)
 	mkdir -p build-host

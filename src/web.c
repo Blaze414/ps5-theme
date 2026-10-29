@@ -169,7 +169,10 @@ status_text(int status) {
   case 404: return "Not Found";
   case 409: return "Conflict";
   case 413: return "Payload Too Large";
+  case 414: return "URI Too Long";
   case 422: return "Unprocessable Entity";
+  case 503: return "Service Unavailable";
+  case 507: return "Insufficient Storage";
   default:  return "Internal Server Error";
   }
 }
@@ -213,6 +216,26 @@ respond_error(int fd, int status, const char *msg) {
   if(status >= 500) log_err("web: %d %s", status, msg);
   else if(status == 409 || status == 413 || status == 414 || status == 422) log_msg("web: refused (%d): %s", status, msg);
   respond_json(fd, status, &sb);
+}
+
+
+/* One of the console's own pictures (an interface icon, a texture's preview): it may be kept for an hour (the
+   console's own copy changes only with the firmware), and as an SVG it can never run anything, even opened on its
+   own. */
+static void
+respond_icon(int fd, const char *ctype, const void *body, size_t len) {
+  char head[384];
+  int n = snprintf(head, sizeof(head),
+                   "HTTP/1.1 200 OK\r\n"
+                   "Content-Type: %s\r\n"
+                   "Content-Length: %zu\r\n"
+                   "Cache-Control: private, max-age=3600\r\n"
+                   "Content-Security-Policy: default-src 'none'; style-src 'unsafe-inline'\r\n"
+                   "X-Content-Type-Options: nosniff\r\n"
+                   "Connection: close\r\n\r\n",
+                   ctype, len);
+  if(send_all(fd, head, n)) return;
+  send_all(fd, body, len);
 }
 
 
@@ -312,7 +335,7 @@ get_param(const char *query, const char *key, char *out, size_t size) {
 
 /* A replaceable asset: allowed prefix, existing regular file, sane name, and
    its real location is also inside an allowed prefix. */
-static int
+int
 asset_path_valid(const char *path) {
   char real[PATH_MAX];
   struct stat st;
@@ -422,6 +445,65 @@ static const char *shown_preview(const char *id, char *path, size_t size, long l
 static int theme_unsaved(const char *id);
 static void drop_snapshot(const char *id);
 
+/* The slow part of the status: walking each theme's files to count them and pick up to three for its card. The
+   manager asks every few seconds (every second during an apply), from every device that has it open; the walk is
+   kept until the plugin writes anything (fs_generation, so a change made here shows at once) or for
+   WALK_KEEP_SECONDS (a change made from outside, over FTP). Everything else in the status is read every time. */
+#define WALK_KEEP_SECONDS 10
+#define WALK_SLOTS        128
+typedef struct { char id[128]; unsigned gen; time_t at; int count; char *preview; size_t len; } walk_t;
+static walk_t walks[WALK_SLOTS];
+static pthread_mutex_t walks_lock = PTHREAD_MUTEX_INITIALIZER;
+
+static void
+theme_walk(const char *id, const char *files, int *count, strbuf_t *sb) {
+  unsigned gen = fs_generation();   /* read before the walk: a write during it makes it stale */
+  time_t now = time(NULL);
+  pthread_mutex_lock(&walks_lock);
+  for(int i = 0; i < WALK_SLOTS; i++) {
+    walk_t *w = &walks[i];
+    if(!w->id[0] || strcmp(w->id, id)) continue;
+    if(w->gen == gen && now - w->at < WALK_KEEP_SECONDS && now >= w->at) {
+      *count = w->count;
+      if(w->len) sb_append(sb, w->preview, w->len);
+      pthread_mutex_unlock(&walks_lock);
+      return;
+    }
+    break;
+  }
+  pthread_mutex_unlock(&walks_lock);
+
+  int first = 1, n = 0, shown = 0;
+  strbuf_t pv = {0};
+  list_files(NULL, files, "", &first, &n, 0);
+  preview_images(&pv, files, "", &shown, 3, 0);
+  *count = n;
+  if(pv.len && !pv.failed) sb_append(sb, pv.data, pv.len);
+
+  pthread_mutex_lock(&walks_lock);
+  walk_t *slot = NULL;
+  for(int i = 0; i < WALK_SLOTS && !slot; i++) if(!strcmp(walks[i].id, id)) slot = &walks[i];
+  for(int i = 0; i < WALK_SLOTS && !slot; i++) if(!walks[i].id[0]) slot = &walks[i];
+  if(!slot) {   /* full: the one kept longest goes */
+    slot = &walks[0];
+    for(int i = 1; i < WALK_SLOTS; i++) if(walks[i].at < slot->at) slot = &walks[i];
+  }
+  free(slot->preview);
+  memset(slot, 0, sizeof(*slot));
+  if(!pv.failed) {
+    snprintf(slot->id, sizeof(slot->id), "%s", id);
+    slot->gen = gen;
+    slot->at = now;
+    slot->count = n;
+    slot->preview = pv.data;
+    slot->len = pv.len;
+    pv.data = NULL;
+  }
+  pthread_mutex_unlock(&walks_lock);
+  free(pv.data);
+}
+
+
 static void
 api_status(request_t *req) {
   char fw[16], active[128], applied[128], applying[128], ip[32], result[RESULT_MAX];
@@ -455,6 +537,10 @@ api_status(request_t *req) {
   }
   SB_LIT(&sb, ",\"result\":");
   sb_json_str(&sb, result);
+  /* How much a theme can still take, keeping the console's share free: the page checks a file against it before
+     sending it (a refusal after the start of a large upload can reach the browser as a dropped connection). */
+  uint64_t avail = plat_free_bytes(BASE_DIR);
+  if(avail != UINT64_MAX) sb_printf(&sb, ",\"room\":%llu", (unsigned long long)(avail > FS_RESERVE ? avail - FS_RESERVE : 0));
   SB_LIT(&sb, ",\"themes\":[");
 
   DIR *d = opendir(THEMES_DIR);
@@ -463,13 +549,14 @@ api_status(request_t *req) {
     struct dirent *e;
     while((e = readdir(d))) {
       char ini[PATH_MAX], files[PATH_MAX], name[128], tfw[64];
-      int nfirst = 1, count = 0, shown = 0;
+      int count = 0;
       if(!theme_name_valid(e->d_name)) continue;
       snprintf(ini, sizeof(ini), "%s/%s/theme.ini", THEMES_DIR, e->d_name);
       if(read_ini_value(ini, "name", name, sizeof(name))) snprintf(name, sizeof(name), "%s", e->d_name);
       if(read_ini_value(ini, "fw", tfw, sizeof(tfw))) tfw[0] = 0;
       snprintf(files, sizeof(files), "%s/%s/files", THEMES_DIR, e->d_name);
-      list_files(NULL, files, "", &nfirst, &count, 0);
+      strbuf_t walked = {0};
+      theme_walk(e->d_name, files, &count, &walked);
 
       if(!first) SB_LIT(&sb, ",");
       first = 0;
@@ -481,7 +568,8 @@ api_status(request_t *req) {
       sb_json_str(&sb, tfw);
       sb_printf(&sb, ",\"compatible\":%s,\"files\":%d,\"preview\":[",
                 fw_matches(tfw, fw) ? "true" : "false", count);
-      preview_images(&sb, files, "", &shown, 3, 0);
+      if(walked.len && !walked.failed) sb_append(&sb, walked.data, walked.len);
+      free(walked.data);
       char mpath[PATH_MAX];
       wav_info_t wav;
       char why[160];
@@ -970,6 +1058,10 @@ part_name(char *out, size_t size, const char *dst) {
 static int
 receive_upload(request_t *req, const char *part, uint32_t *crc_out, char crc_hex[9]) {
   char want_crc[16];
+  if(fs_room_for((uint64_t)req->content_length)) {
+    respond_error(req->fd, 507, STORAGE_FULL);
+    return -1;
+  }
   int out = fs_open_write(part);
   if(out < 0) {
     respond_error(req->fd, 500, "could not open file");
@@ -1214,13 +1306,16 @@ api_get_music(request_t *req) {
 
 /* A theme's preview picture for the library: made from its background
    (preview.jpg) or chosen by the user (picture.jpg, shown first). Neither is
-   ever applied to the console. */
+   ever applied to the console. The same store keeps the picture an icon style
+   puts behind the games' and apps' icons (icon-backdrop.jpg, since 1.66),
+   kept so the style can make the icons of games installed later. */
 #define PREVIEW_MAX_BYTES (4u << 20)
 #define PREVIEW_MAX_SIDE  4096
 
 static int
 preview_path(const char *id, const char *kind, char *out, size_t size) {
-  const char *f = !strcmp(kind, "background") ? "preview.jpg" : !strcmp(kind, "picture") ? "picture.jpg" : NULL;
+  const char *f = !strcmp(kind, "background") ? "preview.jpg" : !strcmp(kind, "picture") ? "picture.jpg"
+                : !strcmp(kind, "iconbg") ? "icon-backdrop.jpg" : NULL;
   if(!f) return -1;
   snprintf(out, size, "%s/%s/%s", THEMES_DIR, id, f);
   return 0;
@@ -1276,7 +1371,7 @@ api_put_preview(request_t *req) {
   get_param(req->query, "id", id, sizeof(id));
   get_param(req->query, "kind", kind, sizeof(kind));
   if(!theme_exists(id)) return respond_error(req->fd, 404, "no such theme");
-  if(preview_path(id, kind, dst, sizeof(dst))) return respond_error(req->fd, 400, "kind: background or picture");
+  if(preview_path(id, kind, dst, sizeof(dst))) return respond_error(req->fd, 400, "kind: background, picture or iconbg");
   if(req->content_length <= 0) return respond_error(req->fd, 400, "empty upload");
   if((uint64_t)req->content_length > PREVIEW_MAX_BYTES) {
     return respond_error(req->fd, 413, "the preview picture is larger than 4 MB");
@@ -1287,7 +1382,8 @@ api_put_preview(request_t *req) {
     fs_unlink(part);
     return respond_error(req->fd, 422, msg);
   }
-  if(place_upload(req, id, part, dst, crc, &size, !strcmp(kind, "picture"), (uint64_t)req->content_length)) return;
+  /* (the background's preview is made by the page as the background changes: only the others are changes of yours) */
+  if(place_upload(req, id, part, dst, crc, &size, !!strcmp(kind, "background"), (uint64_t)req->content_length)) return;
 
   strbuf_t sb = {0};
   sb_printf(&sb, "{\"ok\":true,\"size\":%llu,\"crc32\":\"%s\"}", (unsigned long long)size, crc_hex);
@@ -1302,9 +1398,9 @@ api_delete_preview(request_t *req) {
   get_param(req->query, "id", id, sizeof(id));
   get_param(req->query, "kind", kind, sizeof(kind));
   if(!theme_exists(id)) return respond_error(req->fd, 404, "no such theme");
-  if(preview_path(id, kind, path, sizeof(path))) return respond_error(req->fd, 400, "kind: background or picture");
+  if(preview_path(id, kind, path, sizeof(path))) return respond_error(req->fd, 400, "kind: background, picture or iconbg");
   themes_lock();
-  int rc = access(path, F_OK) || (!strcmp(kind, "picture") && keep_snapshot(id)) || fs_unlink(path);
+  int rc = access(path, F_OK) || (strcmp(kind, "background") && keep_snapshot(id)) || fs_unlink(path);
   themes_unlock();
   if(rc) return respond_error(req->fd, 404, "no such preview picture");
   respond_ok(req->fd);
@@ -1599,6 +1695,188 @@ api_get_preview(request_t *req) {
     return respond_error(req->fd, 404, "no preview picture");
   }
   respond_file(req, path);
+}
+
+
+/* ---- A theme's icon style, for games and apps installed later (autostyle.c) ----
+
+   The page keeps the style's template with the theme when it styles the icons: base.png (the backdrop with the
+   shape's shadow), mask.png (the shape), known.txt (the titles installed then, perhaps none) and style.ini (auto,
+   scale). Each upload is answered with the size and checksum stored, as every upload is. The plugin's background
+   styler reads them, and lists the titles it styled in made.txt, which the page reads back.
+
+   own/<title>.png: for an icon you changed by hand and then styled, your picture as it was, so styling again puts
+   it in the shape again (never a styled icon inside another), and removing the style puts it back. */
+#define STYLE_TEMPLATE_MAX (8u << 20)
+#define STYLE_KNOWN_MAX    (128u << 10)
+#define STYLE_OWN_MAX      4096   /* pictures listed */
+
+/* A title ID as the console's folders name them: four capital letters and five digits, or letters and digits. */
+static int
+style_title_ok(const char *t) {
+  if(strlen(t) != 9) return 0;
+  for(const char *c = t; *c; c++) if(!((*c >= 'A' && *c <= 'Z') || (*c >= '0' && *c <= '9'))) return 0;
+  return 1;
+}
+
+static void
+style_path(const char *id, const char *file, char *out, size_t size) {
+  snprintf(out, size, "%s/%s/icon-style%s%s", THEMES_DIR, id, file[0] ? "/" : "", file);
+}
+
+static void
+api_put_icon_style(request_t *req) {
+  char id[128], part_kind[16], title[16], dir[PATH_MAX], dst[PATH_MAX], part[PATH_MAX + 24], crc_hex[9];
+  uint32_t crc;
+  uint64_t size = 0;
+  get_param(req->query, "id", id, sizeof(id));
+  get_param(req->query, "part", part_kind, sizeof(part_kind));
+  get_param(req->query, "title", title, sizeof(title));
+  if(!theme_exists(id)) return respond_error(req->fd, 404, "no such theme");
+  int known = !strcmp(part_kind, "known"), own = !strcmp(part_kind, "own");
+  int picture = !strcmp(part_kind, "base") || !strcmp(part_kind, "mask");
+  if(!known && !picture && !own) return respond_error(req->fd, 400, "part: base, mask, known or own");
+  if(own && !style_title_ok(title)) return respond_error(req->fd, 400, "title must be a title ID such as PPSA01234");
+  if(req->content_length <= 0) return respond_error(req->fd, 400, "empty upload");
+  if((uint64_t)req->content_length > (known ? STYLE_KNOWN_MAX : STYLE_TEMPLATE_MAX)) return respond_error(req->fd, 413, "too large");
+  style_path(id, own ? "own" : "", dir, sizeof(dir));
+  char name[32];
+  if(own) snprintf(name, sizeof(name), "own/%s.png", title);
+  else snprintf(name, sizeof(name), "%s.%s", part_kind, known ? "txt" : "png");
+  style_path(id, name, dst, sizeof(dst));
+  if(fs_mkdirs(dir)) return respond_error(req->fd, 500, "could not create folder");
+  part_name(part, sizeof(part), dst);
+  if(receive_upload(req, part, &crc, crc_hex)) return;
+  size_t len = 0;
+  uint8_t *b = NULL;
+  int fd = open(part, O_RDONLY);
+  if(fd >= 0) {
+    b = malloc((size_t)req->content_length);
+    while(b && len < (size_t)req->content_length) { ssize_t n = read(fd, b + len, (size_t)req->content_length - len); if(n <= 0) break; len += (size_t)n; }
+    close(fd);
+  }
+  const char *bad = !b || len != (size_t)req->content_length ? "could not read it back" : NULL;
+  if(!bad && picture) {
+    uint32_t w, h;
+    uint8_t *px = png_decode_rgba(b, len, &w, &h);
+    if(!px || w != h || w < 128 || w > 1024) bad = "a square 8-bit PNG of 128 to 1024 pixels";
+    free(px);
+  }
+  if(!bad && own) {   /* read back as the page reads it: any 8-bit PNG this decodes, 16 to 2048 pixels a side */
+    uint32_t w = 0, h = 0;
+    uint8_t *px = png_decode_rgba(b, len, &w, &h);
+    if(!px || w < 16 || h < 16) bad = "an 8-bit PNG of 16 to 2048 pixels a side";
+    free(px);
+  }
+  for(size_t i = 0, line = 0; !bad && known && i < len; i++) {   /* title IDs, one a line */
+    if(b[i] == '\n') { if(line && line != 9) bad = "title IDs, one a line"; line = 0; continue; }
+    if(!((b[i] >= 'A' && b[i] <= 'Z') || (b[i] >= '0' && b[i] <= '9')) || ++line > 9) bad = "title IDs, one a line";
+  }
+  free(b);
+  if(bad) { fs_unlink(part); return respond_error(req->fd, 422, bad); }
+  /* The template is made from your choices (as the background's preview is), not a change of yours for Discard; your
+     picture kept for an icon is part of styling it, which is. */
+  if(place_upload(req, id, part, dst, crc, &size, own, (uint64_t)req->content_length)) return;
+
+  strbuf_t sb = {0};   /* what was stored, as every upload answers: the page checks it against what it sent */
+  sb_printf(&sb, "{\"ok\":true,\"size\":%llu,\"crc32\":\"%s\"}", (unsigned long long)size, crc_hex);
+  log_msg("theme %s: icon style %s%s%s kept (%llu bytes, crc %s, verified)", id, part_kind, own ? " picture of " : "", own ? title : "",
+          (unsigned long long)size, crc_hex);
+  respond_json(req->fd, 200, &sb);
+}
+
+static void
+api_post_icon_style(request_t *req) {
+  char id[128], dir[PATH_MAX], path[PATH_MAX], line[64], forget[16];
+  int on, has_on, scale, has_scale, clear, has_clear;
+  get_param(req->query, "id", id, sizeof(id));
+  if(!theme_exists(id)) return respond_error(req->fd, 404, "no such theme");
+  if(!get_param(req->query, "forget", forget, sizeof(forget)) && forget[0]) {   /* one title's kept picture: you changed its icon */
+    if(!style_title_ok(forget)) return respond_error(req->fd, 400, "forget must be a title ID such as PPSA01234");
+    char name[32];
+    snprintf(name, sizeof(name), "own/%s.png", forget);
+    style_path(id, name, path, sizeof(path));
+    themes_lock();
+    int rc = !access(path, F_OK) && fs_unlink(path);
+    themes_unlock();
+    if(rc) return respond_error(req->fd, 500, "could not forget the picture");
+    return respond_ok(req->fd);
+  }
+  if(int_param(req->query, "auto", 0, 1, &on, &has_on) || int_param(req->query, "scale", 40, 100, &scale, &has_scale) ||
+     int_param(req->query, "clear", 0, 1, &clear, &has_clear)) {
+    return respond_error(req->fd, 400, "auto 0 or 1, scale 40 to 100, clear 0 or 1");
+  }
+  style_path(id, "", dir, sizeof(dir));
+  style_path(id, "style.ini", path, sizeof(path));
+  char cur[16];
+  themes_lock();   /* read and written together: two changes at once never lose one */
+  if(!has_on) on = !read_ini_value(path, "auto", cur, sizeof(cur)) && !strcmp(cur, "1");
+  if(!has_scale) scale = !read_ini_value(path, "scale", cur, sizeof(cur)) ? atoi(cur) : 72;
+  int n = snprintf(line, sizeof(line), "auto=%d\nscale=%d\n", on, scale);
+  int rc = fs_mkdirs(dir) || fs_write_file(path, line, (size_t)n);
+  if(!rc && has_clear && clear) {   /* the list of titles styled, and your pictures kept for them (back in the theme now) */
+    style_path(id, "made.txt", path, sizeof(path));
+    if(!access(path, F_OK)) rc = fs_unlink(path);
+    style_path(id, "own", path, sizeof(path));
+    if(!rc && fs_is_dir(path)) rc = fs_rm_rf_under(dir, path);
+  }
+  themes_unlock();
+  if(rc) return respond_error(req->fd, 500, "could not keep the icon style");
+  log_msg("theme %s: icon style for titles installed later %s (size %d%%)%s", id, on ? "on" : "off", scale, has_clear && clear ? ", its list cleared" : "");
+  respond_ok(req->fd);
+}
+
+static void
+api_get_icon_style(request_t *req) {
+  char id[128], path[PATH_MAX], cur[16], line[64], title[16];
+  get_param(req->query, "id", id, sizeof(id));
+  if(!theme_exists(id)) return respond_error(req->fd, 404, "no such theme");
+  if(!get_param(req->query, "own", title, sizeof(title)) && title[0]) {   /* your picture kept for a title */
+    if(!style_title_ok(title)) return respond_error(req->fd, 400, "own must be a title ID such as PPSA01234");
+    char name[32];
+    snprintf(name, sizeof(name), "own/%s.png", title);
+    style_path(id, name, path, sizeof(path));
+    return respond_file(req, path);
+  }
+  style_path(id, "style.ini", path, sizeof(path));
+  int on = !read_ini_value(path, "auto", cur, sizeof(cur)) && !strcmp(cur, "1");
+  int scale = !read_ini_value(path, "scale", cur, sizeof(cur)) ? atoi(cur) : 0;
+  char base[PATH_MAX], mask[PATH_MAX], known[PATH_MAX];
+  style_path(id, "base.png", base, sizeof(base));
+  style_path(id, "mask.png", mask, sizeof(mask));
+  style_path(id, "known.txt", known, sizeof(known));
+  strbuf_t sb = {0};   /* the template is whole with all three: the styler uses none of them without the others */
+  sb_printf(&sb, "{\"auto\":%s,\"scale\":%d,\"template\":%s,\"made\":[", on ? "true" : "false", scale,
+            !access(base, F_OK) && !access(mask, F_OK) && !access(known, F_OK) ? "true" : "false");
+  style_path(id, "made.txt", path, sizeof(path));
+  FILE *f = fopen(path, "r");
+  for(int first = 1, k = 0; f && k < 4096 && fgets(line, sizeof(line), f); k++) {
+    line[strcspn(line, "\r\n")] = 0;
+    if(!line[0]) continue;
+    if(!first) SB_LIT(&sb, ",");
+    first = 0;
+    sb_json_str(&sb, line);
+  }
+  if(f) fclose(f);
+  SB_LIT(&sb, "],\"own\":[");
+  style_path(id, "own", path, sizeof(path));
+  DIR *d = opendir(path);
+  struct dirent *e;
+  for(int first = 1, k = 0; d && k < STYLE_OWN_MAX && (e = readdir(d)); ) {
+    size_t n = strlen(e->d_name);
+    if(n != 13 || strcmp(e->d_name + 9, ".png")) continue;   /* <title>.png; never a .part */
+    char t[10];
+    memcpy(t, e->d_name, 9);
+    t[9] = 0;
+    if(!style_title_ok(t)) continue;
+    if(!first) SB_LIT(&sb, ",");
+    first = 0;
+    k++;
+    sb_json_str(&sb, t);
+  }
+  if(d) closedir(d);
+  SB_LIT(&sb, "]}");
+  respond_json(req->fd, 200, &sb);
 }
 
 
@@ -2020,8 +2298,9 @@ mix_copy(const char *from, const char *dst) {
   struct stat st;
   snprintf(dir, sizeof(dir), "%s", dst);
   *strrchr(dir, '/') = 0;
-  if(lstat(from, &st) || !S_ISREG(st.st_mode)) return -1;
-  return fs_mkdirs(dir) || fs_copy_file(from, dst) ? -1 : 0;
+  errno = 0;
+  if(lstat(from, &st) || !S_ISREG(st.st_mode)) { errno = ENOENT; return -1; }
+  return fs_mkdirs(dir) || fs_copy_file(from, dst) ? -1 : 0;   /* ENOSPC: no room left (fs_room_for) */
 }
 
 /* One line of a mix into `tmp`: 0, or -1 with `why`. */
@@ -2052,8 +2331,10 @@ mix_line(char *line, const char *id, const char *tmp, music_settings_t *m, int *
       if(source_path(from, arg, src, sizeof(src))) { snprintf(why, len, "path too long"); return -1; }
       snprintf(dst, sizeof(dst), "%s/sources/%s", tmp, strrchr(src, '/') + 1);
     }
+    errno = 0;
     if(!fs_read_within(src, root) || mix_copy(src, dst)) {
-      snprintf(why, len, "%s has no %s %s", from, file ? "file" : "original of", arg);
+      if(errno == ENOSPC) snprintf(why, len, "%s", STORAGE_FULL);
+      else snprintf(why, len, "%s has no %s %s", from, file ? "file" : "original of", arg);
       return -1;
     }
     if(file) (*files)++;
@@ -2070,7 +2351,8 @@ mix_line(char *line, const char *id, const char *tmp, music_settings_t *m, int *
     music_source_file(slot, file, sizeof(file));
     snprintf(dst, sizeof(dst), "%s/%s", tmp, file);
     if(mix_copy(src, dst)) {
-      snprintf(why, len, "%s has no song %d", from, slot);
+      if(errno == ENOSPC) snprintf(why, len, "%s", STORAGE_FULL);
+      else snprintf(why, len, "%s has no song %d", from, slot);
       return -1;
     }
     return 0;
@@ -2083,7 +2365,10 @@ mix_line(char *line, const char *id, const char *tmp, music_settings_t *m, int *
   if(!strcmp(kind, "preview") && !arg) {
     snprintf(src, sizeof(src), "%s/preview.jpg", root);
     snprintf(dst, sizeof(dst), "%s/preview.jpg", tmp);
-    return access(src, F_OK) ? 0 : mix_copy(src, dst);
+    if(access(src, F_OK)) return 0;
+    if(!mix_copy(src, dst)) return 0;
+    snprintf(why, len, "%s", errno == ENOSPC ? STORAGE_FULL : "could not copy the preview picture");
+    return -1;
   }
   snprintf(why, len, "unknown part %s", kind);
   return -1;
@@ -2092,6 +2377,7 @@ mix_line(char *line, const char *id, const char *tmp, music_settings_t *m, int *
 static void
 api_mix_themes(request_t *req) {
   char id[128], name[128], fw[64], tmp[PATH_MAX], dst[PATH_MAX], part[PATH_MAX + 24], crc_hex[9], why[256] = "", msg[320];
+  int full = 0;
   uint32_t crc;
 
   get_param(req->query, "id", id, sizeof(id));
@@ -2146,8 +2432,11 @@ api_mix_themes(request_t *req) {
     char text[64];
     snprintf(text, sizeof(text), "%.60s", line);
     if(mix_line(line, id, tmp, &m, &settings, &files, why, sizeof(why))) {
-      snprintf(msg, sizeof(msg), "line %d (%s): %s", at, text, why);
-      snprintf(why, sizeof(why), "%s", msg);
+      if(!strcmp(why, STORAGE_FULL)) full = 1;   /* said as it is: no line of the list is at fault */
+      else {
+        snprintf(msg, sizeof(msg), "line %d (%s): %s", at, text, why);
+        snprintf(why, sizeof(why), "%s", msg);
+      }
       ok = 0;
     }
   }
@@ -2156,7 +2445,7 @@ api_mix_themes(request_t *req) {
   if(!ok) {
     fs_rm_rf_under(THEMES_DIR, tmp);
     themes_unlock();
-    return respond_error(req->fd, 422, why);
+    return respond_error(req->fd, full ? 507 : 422, why);
   }
   drop_snapshot(id);   /* left by a theme of the same id */
   if(settings && write_theme_ini(id, name, fw, &m)) log_err("theme %s: could not write its music settings", id);
@@ -2245,6 +2534,49 @@ api_get_asset(request_t *req) {
   char stock[PATH_MAX];
   stock_path(asset, stock, sizeof(stock));
   respond_file(req, stock);
+}
+
+
+/* The manager draws its list of a theme's parts with the console's own icons (iconid_*), read from the console's
+   copy of its main interface file: a theme's version of the file is never used for them, and nothing is written. */
+#define UI_RCO "/system_ex/vsh_asset/Sce.PlayStation.PUI_UI3.rco"
+static void
+api_ui_icon(request_t *req) {
+  char id[64], stock[PATH_MAX];
+  uint8_t *d;
+  size_t n;
+  get_param(req->query, "id", id, sizeof(id));
+  if(strncmp(id, "iconid_", 7) || !id[7] || strspn(id, "abcdefghijklmnopqrstuvwxyz0123456789_") != strlen(id)) {
+    return respond_error(req->fd, 400, "not an interface icon");
+  }
+  stock_path(UI_RCO, stock, sizeof(stock));
+  if(rco_icon(stock, id, &d, &n)) return respond_error(req->fd, 404, "no such icon on this firmware");
+  static const uint8_t png_sig[8] = {0x89, 'P', 'N', 'G', '\r', '\n', 0x1a, '\n'};
+  respond_icon(req->fd, n >= 8 && !memcmp(d, png_sig, 8) ? "image/png" : "image/svg+xml", d, n);
+  free(d);
+}
+
+
+/* A quarter-size picture of one of the console's own textures (texture_preview), from its own copy: the manager's
+   previews draw the console's artwork where a theme leaves it. Sent as its width and height (32-bit, little-endian)
+   followed by RGBA pixels. */
+static void
+api_texture_picture(request_t *req) {
+  char asset[512], stock[PATH_MAX];
+  uint8_t *rgba;
+  uint32_t w, h;
+  get_param(req->query, "path", asset, sizeof(asset));
+  if(!asset_path_valid(asset) || asset_kind(asset) != KIND_TEXTURE) return respond_error(req->fd, 403, "not a system texture");
+  stock_path(asset, stock, sizeof(stock));
+  if(texture_preview(stock, &rgba, &w, &h)) return respond_error(req->fd, 422, "this texture can't be drawn");
+  size_t n = (size_t)w * h * 4 + 8;
+  uint8_t *out = malloc(n);
+  if(!out) { free(rgba); return respond_error(req->fd, 500, "out of memory"); }
+  for(int i = 0; i < 4; i++) { out[i] = (uint8_t)(w >> (8 * i)); out[4 + i] = (uint8_t)(h >> (8 * i)); }
+  memcpy(out + 8, rgba, n - 8);
+  free(rgba);
+  respond_icon(req->fd, "application/octet-stream", out, n);
+  free(out);
 }
 
 
@@ -2389,6 +2721,9 @@ route(request_t *req) {
   if(get && !strcmp(p, "/api/status"))      return api_status(req);
   if(get && !strcmp(p, "/api/assets"))      return api_assets(req);
   if(get && !strcmp(p, "/api/asset"))       return api_get_asset(req);
+  if(get && !strcmp(p, "/api/ui-icon"))     return api_ui_icon(req);
+  if(get && !strcmp(p, "/api/theme/icon-style")) return api_get_icon_style(req);
+  if(get && !strcmp(p, "/api/asset/picture")) return api_texture_picture(req);
   if(get && !strcmp(p, "/api/asset/texture")) return api_texture(req);
   if(get && !strcmp(p, "/api/asset/audio"))  return api_audio(req);
   if(get && !strcmp(p, "/api/theme/files")) return api_theme_files(req);
@@ -2420,6 +2755,8 @@ route(request_t *req) {
   if(put && !strcmp(p, "/api/theme/music")) return api_put_music(req);
   if(del && !strcmp(p, "/api/theme/music")) return api_delete_music(req);
   if(put && !strcmp(p, "/api/theme/preview")) return api_put_preview(req);
+  if(put && !strcmp(p, "/api/theme/icon-style")) return api_put_icon_style(req);
+  if(post && !strcmp(p, "/api/theme/icon-style")) return api_post_icon_style(req);
   if(put && !strcmp(p, "/api/theme/choices")) return api_put_choices(req);
   if(del && !strcmp(p, "/api/theme/preview")) return api_delete_preview(req);
   if(post && !strcmp(p, "/api/theme/settings")) return api_theme_settings(req);

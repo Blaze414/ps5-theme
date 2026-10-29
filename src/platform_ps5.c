@@ -197,15 +197,18 @@ plat_watch_files(const char *const *paths, int n, int seconds,
 
 /* The kernel's process list (kern.proc), walked by each record's own size:
    the console's records may be a different size from this SDK's. */
-static void
-each_process(void (*fn)(int pid, const char *name, void *ctx), void *ctx) {
+/* Each record is whole up to its command name (ki_comm), and so are the fields before it the callers read: ki_pid,
+   ki_runtime, ki_start and ki_stat. 0, or -1 if the list can't be read. */
+static int
+each_process(void (*fn)(const struct kinfo_proc *p, const char *name, void *ctx), void *ctx) {
   int mib[4] = {CTL_KERN, KERN_PROC, KERN_PROC_PROC, 0};
   size_t len = 0;
-  if(sysctl(mib, 4, NULL, &len, NULL, 0) || !len) return;
+  if(sysctl(mib, 4, NULL, &len, NULL, 0) || !len) return -1;
   len += len / 4;   /* processes may start meanwhile */
   char *buf = malloc(len);
-  if(!buf) return;
-  if(!sysctl(mib, 4, buf, &len, NULL, 0)) {
+  if(!buf) return -1;
+  int rc = sysctl(mib, 4, buf, &len, NULL, 0) ? -1 : 0;
+  if(!rc) {
     size_t need = offsetof(struct kinfo_proc, ki_comm) + COMMLEN + 1;
     for(size_t at = 0; at + need <= len;) {
       const struct kinfo_proc *p = (const struct kinfo_proc *)(buf + at);
@@ -213,19 +216,25 @@ each_process(void (*fn)(int pid, const char *name, void *ctx), void *ctx) {
       char name[COMMLEN + 1];
       memcpy(name, p->ki_comm, COMMLEN);
       name[COMMLEN] = 0;
-      fn(p->ki_pid, name, ctx);
+      fn(p, name, ctx);
       at += (size_t)p->ki_structsize;
     }
   }
   free(buf);
+  return rc;
 }
 
 typedef struct { const char *name; int pid; } find_t;
 
+#ifndef SZOMB
+#define SZOMB 5   /* ki_stat of a process that has exited (FreeBSD's sys/proc.h) */
+#endif
+
+/* (not one that has exited and is waiting to be reaped: the guard would watch a ShellUI already gone) */
 static void
-find_one(int pid, const char *name, void *ctx) {
+find_one(const struct kinfo_proc *p, const char *name, void *ctx) {
   find_t *f = ctx;
-  if(f->pid < 0 && !strcmp(name, f->name)) f->pid = pid;
+  if(f->pid < 0 && p->ki_stat != SZOMB && !strcmp(name, f->name)) f->pid = p->ki_pid;
 }
 
 int
@@ -235,9 +244,6 @@ plat_find_process(const char *name) {
   return f.pid;
 }
 
-#ifndef SZOMB
-#define SZOMB 5   /* ki_stat of a process that has exited (FreeBSD's sys/proc.h) */
-#endif
 
 /* Every thread of every process comes with KERN_PROC_ALL, each with its
    own name; records are walked by their size here too. */
@@ -283,6 +289,25 @@ plat_find_named_thread(const char *name, int except) {
   return found;
 }
 
+/* (ki_runtime: the processor time of all its threads, kept by the kernel as they run, in microseconds) */
+typedef struct { const char *name; plat_proc_t *out; int max, n; } named_t;
+
+static void
+named_one(const struct kinfo_proc *p, const char *name, void *ctx) {
+  named_t *f = ctx;
+  if(f->n >= f->max || p->ki_stat == SZOMB || strcmp(name, f->name)) return;
+  plat_proc_t *o = &f->out[f->n++];
+  o->pid = p->ki_pid;
+  o->start = (unsigned long long)p->ki_start.tv_sec * 1000000ull + (unsigned long long)p->ki_start.tv_usec + 1;
+  o->cpu_us = (unsigned long long)p->ki_runtime;
+}
+
+int
+plat_processes_named(const char *name, plat_proc_t *out, int max) {
+  named_t f = {name, out, max, 0};
+  return each_process(named_one, &f) ? -1 : f.n;
+}
+
 unsigned long long
 plat_process_start(int pid) {
   int mib[4] = {CTL_KERN, KERN_PROC, KERN_PROC_PID, pid};
@@ -317,6 +342,29 @@ mount_table(int *n) {
   return NULL;
 }
 
+
+int
+plat_our_top_mounts(const char *stage_prefix, const char *under, char (*out)[1024], int max, int *buried) {
+  int n, count = 0;
+  *buried = 0;
+  struct statfs *sf = mount_table(&n);   /* in the order mounts were made: a later one at a point is over it */
+  if(!sf) return -1;
+  for(int i = 0; i < n && count < max; i++) {
+    if(strcmp(sf[i].f_fstypename, "nullfs") || strncmp(sf[i].f_mntfromname, stage_prefix, strlen(stage_prefix)) ||
+       strncmp(sf[i].f_mntonname, under, strlen(under))) {
+      continue;
+    }
+    int top = 1;   /* nothing but ours over it */
+    for(int k = i + 1; k < n && top; k++) {
+      top = strcmp(sf[k].f_mntonname, sf[i].f_mntonname) ||
+            (!strcmp(sf[k].f_fstypename, "nullfs") && !strncmp(sf[k].f_mntfromname, stage_prefix, strlen(stage_prefix)));
+    }
+    if(top) snprintf(out[count++], 1024, "%s", sf[i].f_mntonname);
+    else (*buried)++;
+  }
+  free(sf);
+  return count;
+}
 
 int
 plat_our_mounts(const char *stage_prefix, const char *under, char (*out)[1024], int max) {
@@ -370,8 +418,9 @@ plat_dump_threads(FILE *out) {
 
 
 static void
-dump_one(int pid, const char *name, void *ctx) {
-  fprintf(ctx, "%d %s\n", pid, name);
+dump_one(const struct kinfo_proc *p, const char *name, void *ctx) {
+  unsigned long long ms = (unsigned long long)p->ki_runtime / 1000;
+  fprintf(ctx, "%d %s cpu=%llu.%03llus\n", p->ki_pid, name, ms / 1000, ms % 1000);
 }
 
 void
@@ -427,14 +476,18 @@ int
 plat_wait_exit(int pid, int ms) {
   static _Thread_local int kq = -1, watched = -1;
   struct kevent ev;
-  if(kq < 0 && (kq = kqueue()) < 0) {
-    usleep(ms * 1000);
-    return kill(pid, 0) && errno == ESRCH;
-  }
-  if(pid != watched) {
+  if(kq < 0) kq = kqueue();
+  if(kq >= 0 && pid != watched) {
     EV_SET(&ev, pid, EVFILT_PROC, EV_ADD | EV_ONESHOT, NOTE_EXIT, 0, NULL);
-    if(kevent(kq, &ev, 1, NULL, 0, NULL)) return errno == ESRCH;
-    watched = pid;
+    if(!kevent(kq, &ev, 1, NULL, 0, NULL)) watched = pid;
+    else if(errno == ESRCH) return 1;
+  }
+  if(kq < 0 || pid != watched) {
+    /* No event to wait for (no kqueue, or the process can't be watched): wait a little all the same, then look.
+       Never straight back: the caller asks again at once, which would spin. Never long: an exit is acted on at
+       once (shellui_guard). One that has exited counts as gone. */
+    usleep((ms < 50 ? ms : 50) * 1000);
+    return !plat_process_start(pid);
   }
   struct timespec wait = {ms / 1000, (ms % 1000) * 1000000L};
   int k = kevent(kq, NULL, 0, &ev, 1, &wait);
@@ -492,6 +545,18 @@ plat_dump_mounts(FILE *out) {
             sf[i].f_mntonname, (unsigned long long)sf[i].f_flags);
   }
   free(sf);
+}
+
+
+uint64_t
+plat_free_bytes(const char *path) {
+  struct statfs sf;
+
+  /* A figure that can't be right (no size, more free than there is, a storage under 2 GB) is taken as unknown:
+     the storage check then refuses nothing, rather than refusing everything on a figure it can't trust. */
+  if(statfs(path, &sf) || sf.f_bsize <= 0 || sf.f_blocks <= 0 || sf.f_bavail > (int64_t)sf.f_blocks) return UINT64_MAX;
+  if((uint64_t)sf.f_blocks * (uint64_t)sf.f_bsize < (2ull << 30)) return UINT64_MAX;
+  return sf.f_bavail > 0 ? (uint64_t)sf.f_bavail * (uint64_t)sf.f_bsize : 0;
 }
 
 

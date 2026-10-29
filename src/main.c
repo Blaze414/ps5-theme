@@ -56,7 +56,11 @@
 #define SHELLUI_PROCESS  "SceShellUI"
 #define SHELLUI_SANDBOX  "/mnt/sandbox/NPXS40087_"
 #define SANDBOX_ROOT     "/mnt/sandbox"
-static atomic_int shellui_seen;     /* found at least once: games' pictures may go into its view */
+static atomic_int shellui_seen;     /* found at least once (for the apply's hints) */
+/* The ShellUI sandbox whose process the guard is watching (/mnt/sandbox/NPXS40087_<n>), -1 when none. Nothing of
+   ours goes into a ShellUI sandbox but this one (see mount_overlay). */
+static atomic_int watched_box = -1;
+static atomic_int guard_hunting;    /* ShellUI exited moments ago: its successor is looked for, and covered, at once */
 
 /* Themable folders: ShellUI's React Native apps and its own VSH assets
    (home screen backgrounds, sounds), and installed titles' metadata (their
@@ -455,6 +459,7 @@ copy_file(const char *src, const char *dst, uint64_t *budget) {
     log_err("stage size limit reached at %s", src);
     return -1;
   }
+  if(fs_room_for((uint64_t)st.st_size)) return -1;   /* logged */
   *budget -= st.st_size;
 
   /* Always a new file: dst may be a copied symlink, or a link to a stock
@@ -905,7 +910,7 @@ revert_mounts(const char *keep, const char *const *covers, int ncovers, int *def
 #define MUSIC_HINT "To hear the new home music, highlight a game or app that plays its own music, let it play, " \
                    "then go back to the home screen."
 #define FONTS_HINT "To see the new font, put the console in rest mode and wake it. If the text looks wrong, " \
-                   "choose Restore stock in the manager."
+                   "choose No theme in the manager."
 #define ARTWORK_HINT "To see the new Appearance artwork, put the console in rest mode and wake it."
 
 static int
@@ -936,16 +941,30 @@ home_view_only(const char *dir) {
   return title_target(dir) || font_target(dir);
 }
 
+/* Is `on` in a ShellUI sandbox other than the one whose process the guard is watching? Nothing of ours goes into
+   one (mount_overlay): a sandbox the system is still building (its process not started), one it is taking down,
+   or one whose ShellUI is gone. On 13.42 (2026-10-29), the font overlaid in each new ShellUI sandbox while the
+   system was still building it, as it woke from rest mode: two instances in a row never started, the system was
+   left unable to take their sandboxes down (our overlay on its font folder), and no ShellUI started again until
+   the console was restarted. Watched, every overlay in it comes out the moment it exits (shellui_guard). */
+static int
+shellui_box_unwatched(const char *on) {
+  if(strncmp(on, SHELLUI_SANDBOX, sizeof(SHELLUI_SANDBOX) - 1)) return 0;
+  const char *n = on + sizeof(SHELLUI_SANDBOX) - 1;
+  if(*n < '0' || *n > '9') return 1;
+  return atoi(n) != atomic_load(&watched_box);
+}
+
 /* Where such a folder is overlaid: only in ShellUI's own views (`view`
    on `on`), the one place it reads games' and apps' pictures and its fonts
-   from, and only once its process has been found, so they come out of its
+   from, and only in the instance being watched, so they come out of its
    sandbox the moment it exits (shellui_guard). On 13.42 an overlay left in
    its view of /user when it exited (rest mode) stopped every game and app
    from starting (CE-105733-9) until the console restarted; overlays on the
    real folders stopped the game itself from starting. */
 static int
 title_job_ok(int view, const char *on) {
-  return view && !strncmp(on, SHELLUI_SANDBOX, sizeof(SHELLUI_SANDBOX) - 1) && atomic_load(&shellui_seen);
+  return view && !strncmp(on, SHELLUI_SANDBOX, sizeof(SHELLUI_SANDBOX) - 1) && !shellui_box_unwatched(on);
 }
 
 #ifdef TEST_HOOKS
@@ -1001,12 +1020,20 @@ collect_targets(const char *files_root, const char *rel,
     snprintf(child_rel, sizeof(child_rel), "%s/%s", rel, e->d_name);
     snprintf(child, sizeof(child), "%s%s", files_root, child_rel);
     if(lstat(child, &st)) continue;
+    size_t nl = strlen(e->d_name);
     if(S_ISDIR(st.st_mode)) ret = collect_targets(files_root, child_rel, targets, count);
-    else if(S_ISREG(st.st_mode)) has_files = 1;
+    else if(S_ISREG(st.st_mode) && !(nl > 5 && !strcmp(e->d_name + nl - 5, ".part"))) has_files = 1;   /* (one being written isn't) */
   }
   closedir(d);
 
   if(!ret && has_files) {
+    /* A game or app that isn't installed (any more, or yet): its pictures stay in the theme for when it is, and
+       aren't a failure of the apply. Icons styled for games installed later make this common after an uninstall. */
+    struct stat ts;
+    if(title_target(rel) && (stat(rel, &ts) || !S_ISDIR(ts.st_mode))) {
+      log_msg("theme: %s isn't installed; its pictures stay in the theme for when it is", rel);
+      return 0;
+    }
     if(*count >= MAX_TARGETS) return -1;
     snprintf(targets[(*count)++], PATH_MAX, "%s", rel);
   }
@@ -1536,15 +1563,14 @@ sandbox_closed(const char *on) {
   return closed;
 }
 
-/* plat_mount_ro, but never into a closed sandbox: checked before, and
-   after, as the guard thread may close it meanwhile (it marks a sandbox
-   before it lists what to take out, so one of the two sees the mount).
-   1 if skipped. */
+/* plat_mount_ro, but never into a closed sandbox, nor into a ShellUI sandbox but the watched one: checked before,
+   and after, as the guard thread may close it meanwhile (it stops watching it, then marks it, before it lists what
+   to take out, so one of the two sees the mount). Every overlay of ours goes on through here. 1 if skipped. */
 static int
 mount_overlay(const char *src, const char *on) {
-  if(sandbox_closed(on)) return 1;
+  if(sandbox_closed(on) || shellui_box_unwatched(on)) return 1;
   if(plat_mount_ro(src, on)) return -1;
-  if(!sandbox_closed(on)) return 0;
+  if(!sandbox_closed(on) && !shellui_box_unwatched(on)) return 0;
   if(plat_is_our_mount(on, BASE_DIR "/")) plat_unmount_once(on);
   return 1;
 }
@@ -1632,6 +1658,34 @@ release_sandbox(int inst) {
 }
 
 
+/* On a fatal signal (crash.c's handler: system calls and static memory only): our overlays out of ShellUI's
+   sandbox, newest first, as the guard takes them out when ShellUI exits. With no copy running, one left there
+   would stop the system taking the sandbox down at rest mode (no home screen, or no app starting, until the
+   console restarts). From the records, read whole into a static buffer; only one the path shows as ours comes
+   off, never a mount of the system's. */
+static void
+crash_release(void) {
+  static char buf[512 << 10];
+  static char *ons[MAX_RECORDS];
+  int fd = open(MOUNTS_FILE, O_RDONLY), n = 0;
+  if(fd < 0) return;
+  ssize_t len = 0, r;
+  while(len < (ssize_t)sizeof(buf) - 1 && (r = read(fd, buf + len, sizeof(buf) - 1 - (size_t)len)) > 0) len += r;
+  close(fd);
+  buf[len] = 0;
+  for(char *p = buf; *p && n < MAX_RECORDS;) {
+    char *end = strchr(p, '\n'), *tab = strchr(p, '\t');
+    if(end) *end = 0;
+    if(tab && (!end || tab < end)) *tab = 0;
+    if(!strncmp(p, SHELLUI_SANDBOX, sizeof(SHELLUI_SANDBOX) - 1)) ons[n++] = p;
+    if(!end) break;
+    p = end + 1;
+  }
+  atomic_store(&watched_box, -1);   /* and nothing more goes in */
+  for(int i = n - 1; i >= 0; i--) if(plat_is_our_mount(ons[i], BASE_DIR "/")) plat_unmount_once(ons[i]);
+}
+
+
 static void *
 shellui_guard(void *arg) {
   int logged = -1, after_exit = 0;
@@ -1641,25 +1695,34 @@ shellui_guard(void *arg) {
   for(;;) {
     crumb(CRUMB_GUARD, "looking for ShellUI");
     int pid = plat_find_process(SHELLUI_PROCESS);
-    atomic_store(&guard_looked, 1);
     if(pid <= 0) {
-      /* Soon after it exits, a new one starts: looked for often then, so
-         its views are covered at once (as they appear, see replan_now). */
-      usleep(after_exit && time(NULL) - exited < 30 ? 100 * 1000 : 1000 * 1000);
+      atomic_store(&guard_looked, 1);
+      /* Soon after it exits, a new one starts: looked for often then, so its views are covered as soon as its
+         process is there (see watched_box), early enough for what it reads as it starts. */
+      int soon = after_exit && time(NULL) - exited < 30;
+      atomic_store(&guard_hunting, soon);
+      usleep(soon ? 10 * 1000 : 1000 * 1000);
       continue;
     }
+    /* Its process runs in the newest of its sandboxes: the system builds one before starting it, and only one
+       ShellUI runs at a time. Only now does anything of ours go in. */
     int inst = newest_shellui_box();
-    if(pid != logged) log_msg("watching ShellUI (pid %d) to take overlays out of its sandbox when it exits", pid);
+    atomic_store(&watched_box, inst);
+    atomic_store(&guard_hunting, 0);
+    atomic_store(&guard_looked, 1);
+    if(pid != logged) log_msg("watching ShellUI (pid %d, sandbox _%03d) to take overlays out of its sandbox when it exits", pid, inst);
     logged = pid;
     if(!atomic_exchange(&shellui_seen, 1) || after_exit) atomic_store(&replan_now, 1);
     after_exit = 0;
     crumb(CRUMB_GUARD, "watching ShellUI");
     while(!plat_wait_exit(pid, 5000)) {
-      if(inst < 0) inst = newest_shellui_box();
+      if(inst < 0) atomic_store(&watched_box, inst = newest_shellui_box());
     }
+    atomic_store(&watched_box, -1);   /* first: nothing more goes in (see mount_overlay) */
     release_sandbox(inst);
     after_exit = 1;
     exited = time(NULL);
+    atomic_store(&guard_hunting, 1);
   }
   return NULL;
 }
@@ -2174,7 +2237,7 @@ apply_theme(const char *name) {
     snprintf(music, sizeof(music), " The music is not converted to home music yet: open the theme in the editor.");
   }
   if(!mounted) {
-    set_result("%s was not applied: no folder passed verification. See Activity.%s%s", title, music, games);
+    set_result("%s was not applied: none of its files passed the checks. See Activity.%s%s", title, music, games);
     notify("ps5-theme: '%s' could not be applied, see Activity", title);
     return -1;
   }
@@ -2212,15 +2275,16 @@ apply_theme(const char *name) {
   if(failed || skipped) {
     char folders[96] = "";
     if(failed) snprintf(folders, sizeof(folders), " %d of its %d folders could not be used.", failed, count);
-    set_result("%s applied partly: %d files verified, %d skipped.%s%s%s See Activity.%s",
-               title, verified, skipped, folders, music, games, hints);
+    set_result("%s applied partly: %d %s checked, %d skipped.%s%s%s See Activity.%s",
+               title, verified, verified == 1 ? "file" : "files", skipped, folders, music, games, hints);
   } else {
-    set_result("%s applied: %d files verified on the console.%s%s%s", title, verified, music, games, hints);
+    set_result("%s applied: %d %s checked on the console.%s%s%s", title, verified, verified == 1 ? "file" : "files",
+               music, games, hints);
   }
   if(failed || skipped) {
-    notify("ps5-theme: '%s' applied partly (%d files verified, %d skipped). See Activity.", title, verified, skipped + failed);
+    notify("ps5-theme: '%s' applied partly (%d skipped). See Activity.", title, skipped + failed);
   } else {
-    notify("ps5-theme: '%s' applied (%d files verified)", title, verified);
+    notify("ps5-theme: '%s' applied", title);
   }
   if(icons) notify("ps5-theme: %s", ICONS_HINT);
   if(font_hint) notify("ps5-theme: %s", FONTS_HINT);
@@ -2336,6 +2400,18 @@ read_active(char *out, size_t size) {
   if(!out[0]) snprintf(out, size, "none");
 }
 
+
+/* Apply again the theme that is chosen, if it is still `expect`: for the icon styler, which works for a while
+   after reading what was applied. It never writes the choice, so a theme chosen meanwhile is never undone; if one is
+   chosen between the check and the request, the request applies that one, as it was going to be anyway. */
+int
+reapply_active(const char *expect) {
+  char cur[128];
+  read_active(cur, sizeof(cur));
+  if(strcmp(cur, expect)) return -1;
+  atomic_store(&reapply_requested, 1);
+  return 0;
+}
 
 /* Called from the web thread; the main loop picks the change up. */
 int
@@ -2478,6 +2554,10 @@ watch_views(int reset) {
   int failed = 0, added = 0;
   int njobs = plan_jobs(jobs, &failed, 1);
   looks++;
+  /* Our overlays by the mount table, read once a look and only when needed: one of ours may be under another
+     mount at the same point, where the path no longer shows it. Never a second one there. */
+  static char ours[MAX_RECORDS][1024];
+  int nours = -2;
   for(int i = 0; i < njobs; i++) {
     if(note_view(jobs[i].on, now)) {
       log_err("theme %s: the system app %s restarted %d times within %d s, as when it crashes on start; taking the theme down",
@@ -2492,6 +2572,14 @@ watch_views(int reset) {
       if(!stages[k].state && !strcmp(stages[k].real, j->real)) st = &stages[k];
     }
     if(!st || plat_is_our_mount(j->on, STAGE_DIR "/") || watch_waiting(j->on, now)) continue;
+    if(nours == -2) nours = plat_our_mounts(STAGE_DIR "/", "/", ours, MAX_RECORDS);
+    int stacked = 0;
+    for(int k = 0; k < nours && !stacked; k++) stacked = !strcmp(ours[k], j->on);
+    if(stacked) {
+      if(!watch_waiting(j->on, now)) log_msg("new view %s: an overlay of ours is already there, under another mount; left as it is", j->on);
+      watch_refuse(j->on, now);
+      continue;
+    }
 
     crumb(CRUMB_MAIN, "overlaying a new view %s", j->on);
     int r = mount_overlay(st->dir, j->on);
@@ -2551,6 +2639,7 @@ main(void) {
 
   /* Visible before anything can fail, so a silent start is impossible. */
   crash_install();
+  crash_on_fatal(crash_release);
   plat_notify("ps5-theme " PLUGIN_VERSION " starting");
   plat_klog("[ps5-theme] " PLUGIN_VERSION " starting\n");
 
@@ -2618,6 +2707,11 @@ main(void) {
 
   fs_mkdirs(THEMES_DIR);
   fs_mkdirs(STAGE_DIR);
+  /* What the storage check works from, so a figure that looks wrong can be seen in Activity. */
+  uint64_t avail = plat_free_bytes(BASE_DIR);
+  if(avail == UINT64_MAX) log_msg("storage: the free space can't be told; nothing is refused for room");
+  else log_msg("storage: %llu MB free, %llu MB of it kept for the console", (unsigned long long)(avail >> 20),
+               (unsigned long long)(FS_RESERVE >> 20));
   fs_mkdirs(DUMP_DIR);
   fs_mkdirs(UPDATE_DIR);
 
@@ -2665,6 +2759,14 @@ main(void) {
   /* Stock listing for the editor; runs before any theme is mounted. */
   dump_assets_once();
   dump_shell_files();
+
+  /* The icon style for titles installed later: it looks every minute, and works only between applies. */
+  pthread_t styler;
+  pthread_attr_init(&attr);
+  pthread_attr_setstacksize(&attr, 256 * 1024);
+  if(pthread_create(&styler, &attr, autostyle_thread, NULL)) log_err("could not start the icon styler");
+  else pthread_detach(styler);
+  pthread_attr_destroy(&attr);
 
   /* System app registration can block; keep it off the engine thread. */
   pthread_t tile;
@@ -2761,7 +2863,7 @@ main(void) {
           set_result("%s", taken_down);
           taken_down[0] = 0;
         } else {
-          set_result("Stock home screen.");
+          set_result("No theme: the console's own look.");
           if(current[0]) notify("ps5-theme: stock theme restored");
         }
       }
@@ -2784,8 +2886,10 @@ main(void) {
       continue;
     }
     /* Wait for the next second or a mount change: a new view to cover at
-       once (ShellUI reads the home row's icons as it starts). */
-    plat_wait_events(-1, (atomic_load(&replan_now) ? 0 : POLL_SECONDS) * 1000);
+       once (ShellUI reads the home row's icons as it starts). Right after
+       ShellUI exited, a few times a second: its successor's views are
+       covered as soon as the guard has found its process. */
+    plat_wait_events(-1, atomic_load(&replan_now) ? 0 : atomic_load(&guard_hunting) ? 20 : POLL_SECONDS * 1000);
   }
   return 0;
 }

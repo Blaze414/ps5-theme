@@ -387,3 +387,356 @@ texture_validate(const char *cand, const char *stock, char *why, size_t len) {
   free(c);
   return bad ? -1 : 0;
 }
+
+
+/* ---- A small picture of a console texture, for the manager's previews ----
+
+   The preview draws the console's own artwork (its home backgrounds, the Appearance themes' pieces) where a theme
+   leaves it, so what it shows is what the console shows. The browser can't read them: they are zstd-compressed BC7
+   using all eight of its modes. They are decoded here, read-only, to one pixel per 4x4 block (each the block's
+   average, weighted by how opaque its pixels are): a 4K background becomes 960x540. BC7 as Microsoft specifies it;
+   the tables are the specification's, checked against Pillow's decoder on the console's own files. */
+
+#define PREVIEW_MAX_PIXELS (1u << 20)   /* a quarter-size picture of up to 4096x4096 */
+
+static const uint16_t bc7_part2[64] = {
+  0xcccc, 0x8888, 0xeeee, 0xecc8, 0xc880, 0xfeec, 0xfec8, 0xec80, 0xc800, 0xffec, 0xfe80, 0xe800, 0xffe8, 0xff00,
+  0xfff0, 0xf000, 0xf710, 0x008e, 0x7100, 0x08ce, 0x008c, 0x7310, 0x3100, 0x8cce, 0x088c, 0x3110, 0x6666, 0x366c,
+  0x17e8, 0x0ff0, 0x718e, 0x399c, 0xaaaa, 0xf0f0, 0x5a5a, 0x33cc, 0x3c3c, 0x55aa, 0x9696, 0xa55a, 0x73ce, 0x13c8,
+  0x324c, 0x3bdc, 0x6996, 0xc33c, 0x9966, 0x0660, 0x0272, 0x04e4, 0x4e40, 0x2720, 0xc936, 0x936c, 0x39c6, 0x639c,
+  0x9336, 0x9cc6, 0x817e, 0xe718, 0xccf0, 0x0fcc, 0x7744, 0xee22,
+};
+static const uint32_t bc7_part3[64] = {
+  0xaa685050, 0x6a5a5040, 0x5a5a4200, 0x5450a0a8, 0xa5a50000, 0xa0a05050, 0x5555a0a0, 0x5a5a5050, 0xaa550000,
+  0xaa555500, 0xaaaa5500, 0x90909090, 0x94949494, 0xa4a4a4a4, 0xa9a59450, 0x2a0a4250, 0xa5945040, 0x0a425054,
+  0xa5a5a500, 0x55a0a0a0, 0xa8a85454, 0x6a6a4040, 0xa4a45000, 0x1a1a0500, 0x0050a4a4, 0xaaa59090, 0x14696914,
+  0x69691400, 0xa08585a0, 0xaa821414, 0x50a4a450, 0x6a5a0200, 0xa9a58000, 0x5090a0a8, 0xa8a09050, 0x24242424,
+  0x00aa5500, 0x24924924, 0x24499224, 0x50a50a50, 0x500aa550, 0xaaaa4444, 0x66660000, 0xa5a0a5a0, 0x50a050a0,
+  0x69286928, 0x44aaaa44, 0x66666600, 0xaa444444, 0x54a854a8, 0x95809580, 0x96969600, 0xa85454a8, 0x80959580,
+  0xaa141414, 0x96960000, 0xaaaa1414, 0xa05050a0, 0xa0a5a5a0, 0x96000000, 0x40804080, 0xa9a8a9a8, 0xaaaaaa44,
+  0x2a4a5254,
+};
+static const uint8_t bc7_anchor2[64] = {
+  15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 2, 8, 2, 2, 8, 8, 15, 2, 8, 2, 2, 8, 8, 2, 2,
+  15, 15, 6, 8, 2, 8, 15, 15, 2, 8, 2, 2, 2, 15, 15, 6, 6, 2, 6, 8, 15, 15, 2, 2, 15, 15, 15, 15, 15, 2, 2, 15,
+};
+static const uint8_t bc7_anchor3a[64] = {
+  3, 3, 15, 15, 8, 3, 15, 15, 8, 8, 6, 6, 6, 5, 3, 3, 3, 3, 8, 15, 3, 3, 6, 10, 5, 8, 8, 6, 8, 5, 15, 15,
+  8, 15, 3, 5, 6, 10, 8, 15, 15, 3, 15, 5, 15, 15, 15, 15, 3, 15, 5, 5, 5, 8, 5, 10, 5, 10, 8, 13, 15, 12, 3, 3,
+};
+static const uint8_t bc7_anchor3b[64] = {
+  15, 8, 8, 3, 15, 15, 3, 8, 15, 15, 15, 15, 15, 15, 15, 8, 15, 8, 15, 3, 15, 8, 15, 8, 3, 15, 6, 10, 15, 15, 10, 8,
+  15, 3, 15, 10, 10, 8, 9, 10, 6, 15, 8, 15, 3, 6, 6, 8, 15, 3, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 3, 15, 15, 8,
+};
+/* Per mode: subsets, partition bits, rotation bits, index-selection bits, colour bits, alpha bits, a p-bit per
+   endpoint, a p-bit per subset, index bits, second index bits. */
+static const uint8_t bc7_modes[8][10] = {
+  {3, 4, 0, 0, 4, 0, 1, 0, 3, 0}, {2, 6, 0, 0, 6, 0, 0, 1, 3, 0}, {3, 6, 0, 0, 5, 0, 0, 0, 2, 0},
+  {2, 6, 0, 0, 7, 0, 1, 0, 2, 0}, {1, 0, 2, 1, 5, 6, 0, 0, 2, 3}, {1, 0, 2, 0, 7, 8, 0, 0, 2, 2},
+  {1, 0, 0, 0, 7, 7, 1, 0, 4, 0}, {2, 6, 0, 0, 5, 5, 1, 0, 2, 0},
+};
+static const uint8_t bc7_w2[4] = {0, 21, 43, 64}, bc7_w3[8] = {0, 9, 18, 27, 37, 46, 55, 64},
+                     bc7_w4[16] = {0, 4, 9, 13, 17, 21, 26, 30, 34, 38, 43, 47, 51, 55, 60, 64};
+
+static unsigned
+bits_at(const uint8_t *b, unsigned *pos, unsigned n) {
+  unsigned v = 0;
+  for(unsigned i = 0; i < n && *pos < 128; i++, (*pos)++) v |= (unsigned)((b[*pos >> 3] >> (*pos & 7)) & 1) << i;
+  return v;
+}
+
+static uint8_t
+bc7_mix(unsigned e0, unsigned e1, unsigned bits, unsigned idx) {
+  unsigned w = bits == 2 ? bc7_w2[idx & 3] : bits == 3 ? bc7_w3[idx & 7] : bc7_w4[idx & 15];
+  return (uint8_t)(((64 - w) * e0 + w * e1 + 32) >> 6);
+}
+
+/* One 16-byte BC7 block to 16 RGBA pixels. A reserved mode decodes to clear black, as the specification says. */
+static void
+bc7_block(const uint8_t *b, uint8_t px[64]) {
+  unsigned mode = 0, pos = 0;
+  while(mode < 8 && !((b[0] >> mode) & 1)) mode++;
+  if(mode == 8) { memset(px, 0, 64); return; }
+  const uint8_t *m = bc7_modes[mode];
+  unsigned ns = m[0], cb = m[4], ab = m[5], ib = m[8], ib2 = m[9];
+  pos = mode + 1;
+  unsigned part = bits_at(b, &pos, m[1]), rot = bits_at(b, &pos, m[2]), sel = bits_at(b, &pos, m[3]);
+  unsigned ep[6][4];   /* endpoints (two per subset), RGBA */
+  for(unsigned c = 0; c < 3; c++) for(unsigned e = 0; e < ns * 2; e++) ep[e][c] = bits_at(b, &pos, cb);
+  for(unsigned e = 0; e < ns * 2; e++) ep[e][3] = ab ? bits_at(b, &pos, ab) : 255;
+  unsigned cbits = cb, abits = ab;
+  if(m[6] || m[7]) {
+    unsigned pb[6];
+    for(unsigned i = 0; i < (m[6] ? ns * 2 : ns); i++) pb[i] = bits_at(b, &pos, 1);
+    for(unsigned e = 0; e < ns * 2; e++) {
+      unsigned p = m[6] ? pb[e] : pb[e >> 1];
+      for(unsigned c = 0; c < 3; c++) ep[e][c] = ep[e][c] << 1 | p;
+      if(ab) ep[e][3] = ep[e][3] << 1 | p;
+    }
+    cbits++;
+    if(ab) abits++;
+  }
+  for(unsigned e = 0; e < ns * 2; e++) {
+    for(unsigned c = 0; c < 3; c++) ep[e][c] = (ep[e][c] << (8 - cbits)) | (ep[e][c] >> (2 * cbits - 8));
+    if(ab) ep[e][3] = (ep[e][3] << (8 - abits)) | (ep[e][3] >> (2 * abits - 8));
+  }
+  unsigned subset[16], a1 = 0, a2 = 0;
+  for(unsigned i = 0; i < 16; i++) {
+    subset[i] = ns == 1 ? 0 : ns == 2 ? (bc7_part2[part] >> i) & 1 : (bc7_part3[part] >> (2 * i)) & 3;
+  }
+  if(ns == 2) a1 = bc7_anchor2[part];
+  if(ns == 3) { a1 = bc7_anchor3a[part]; a2 = bc7_anchor3b[part]; }
+  unsigned idx[16], idx2[16];
+  for(unsigned i = 0; i < 16; i++) {
+    int anchor = i == 0 || (ns > 1 && i == a1) || (ns > 2 && i == a2);
+    idx[i] = bits_at(b, &pos, anchor ? ib - 1 : ib);
+  }
+  for(unsigned i = 0; i < 16; i++) idx2[i] = ib2 ? bits_at(b, &pos, i == 0 ? ib2 - 1 : ib2) : 0;
+  for(unsigned i = 0; i < 16; i++) {
+    const unsigned *e0 = ep[subset[i] * 2], *e1 = ep[subset[i] * 2 + 1];
+    unsigned ci = idx[i], cbn = ib, ai = idx[i], abn = ib;
+    if(ib2) {
+      if(sel) { ci = idx2[i]; cbn = ib2; ai = idx[i]; abn = ib; }
+      else    { ci = idx[i]; cbn = ib; ai = idx2[i]; abn = ib2; }
+    }
+    uint8_t *p = px + i * 4;
+    for(unsigned c = 0; c < 3; c++) p[c] = bc7_mix(e0[c], e1[c], cbn, ci);
+    p[3] = ab ? bc7_mix(e0[3], e1[3], abn, ai) : 255;
+    if(rot) { uint8_t t = p[3]; p[3] = p[rot - 1]; p[rot - 1] = t; }
+  }
+}
+
+/* One 8-byte BC1 block to 16 RGBA pixels. */
+static void
+bc1_block(const uint8_t *b, uint8_t px[64]) {
+  unsigned c0 = b[0] | b[1] << 8, c1 = b[2] | b[3] << 8, pal[4][4];
+  for(int k = 0; k < 2; k++) {
+    unsigned c = k ? c1 : c0;
+    pal[k][0] = ((c >> 11) & 31) * 255 / 31; pal[k][1] = ((c >> 5) & 63) * 255 / 63; pal[k][2] = (c & 31) * 255 / 31; pal[k][3] = 255;
+  }
+  for(int c = 0; c < 3; c++) {
+    if(c0 > c1) { pal[2][c] = (2 * pal[0][c] + pal[1][c]) / 3; pal[3][c] = (pal[0][c] + 2 * pal[1][c]) / 3; }
+    else        { pal[2][c] = (pal[0][c] + pal[1][c]) / 2; pal[3][c] = 0; }
+  }
+  pal[2][3] = 255;
+  pal[3][3] = c0 > c1 ? 255 : 0;
+  uint32_t bits = (uint32_t)b[4] | (uint32_t)b[5] << 8 | (uint32_t)b[6] << 16 | (uint32_t)b[7] << 24;
+  for(int i = 0; i < 16; i++) for(int c = 0; c < 4; c++) px[i * 4 + c] = (uint8_t)pal[(bits >> (2 * i)) & 3][c];
+}
+
+int
+texture_preview_mem(const uint8_t *d, size_t len, uint8_t **rgba, uint32_t *ow, uint32_t *oh) {
+  texture_info_t t;
+  *rgba = NULL;
+  if(texture_parse(d, len, &t) || !t.known) return -1;
+  int bc7 = t.dxgi == 98 || t.dxgi == 99, bc1 = t.dxgi == 71 || t.dxgi == 72 || !strcmp(t.fourcc, "DXT1");
+  int pb = pixel_bytes(t.dxgi), bgra = t.dxgi == 87 || t.dxgi == 88 || t.dxgi == 91 || t.dxgi == 93;
+  if(!bc7 && !bc1 && pb != 4) return -1;
+  uint32_t bw = (t.width + 3) / 4, bh = (t.height + 3) / 4;
+  if((uint64_t)bw * bh > PREVIEW_MAX_PIXELS) return -1;
+  uint8_t *out = malloc((size_t)bw * bh * 4);
+  if(!out) return -1;
+  const uint8_t *data = d + t.header_len;   /* the first mip of the first layer */
+  uint8_t px[64];
+  for(uint32_t by = 0; by < bh; by++) {
+    for(uint32_t bx = 0; bx < bw; bx++) {
+      if(bc7) bc7_block(data + ((size_t)by * bw + bx) * 16, px);
+      else if(bc1) bc1_block(data + ((size_t)by * bw + bx) * 8, px);
+      else {
+        for(int i = 0; i < 16; i++) {
+          uint32_t x = bx * 4 + (i & 3), y = by * 4 + (i >> 2);
+          if(x >= t.width) x = t.width - 1;
+          if(y >= t.height) y = t.height - 1;
+          const uint8_t *s = data + ((size_t)y * t.width + x) * 4;
+          px[i * 4] = s[bgra ? 2 : 0]; px[i * 4 + 1] = s[1]; px[i * 4 + 2] = s[bgra ? 0 : 2];
+          px[i * 4 + 3] = t.dxgi == 87 || t.dxgi == 91 || pb != 4 ? 255 : s[3];
+        }
+      }
+      /* the block's average, its colour weighted by how opaque each pixel is, and only the pixels inside the picture */
+      uint32_t r = 0, g = 0, b = 0, a = 0, n = 0;
+      for(int i = 0; i < 16; i++) {
+        if(bx * 4 + (i & 3) >= t.width || by * 4 + (i >> 2) >= t.height) continue;
+        const uint8_t *p = px + i * 4;
+        r += p[0] * p[3]; g += p[1] * p[3]; b += p[2] * p[3]; a += p[3]; n++;
+      }
+      uint8_t *o = out + ((size_t)by * bw + bx) * 4;
+      o[0] = a ? (uint8_t)(r / a) : 0; o[1] = a ? (uint8_t)(g / a) : 0; o[2] = a ? (uint8_t)(b / a) : 0;
+      o[3] = n ? (uint8_t)(a / n) : 0;
+    }
+  }
+  *rgba = out;
+  *ow = bw;
+  *oh = bh;
+  return 0;
+}
+
+int
+texture_preview(const char *path, uint8_t **rgba, uint32_t *w, uint32_t *h) {
+  size_t len;
+  int compressed;
+  uint8_t *d = texture_load(path, &len, &compressed);
+  if(!d) return -1;
+  int rc = texture_preview_mem(d, len, rgba, w, h);
+  free(d);
+  return rc;
+}
+
+
+/* ---- Writing a texture like the console's, for icons the plugin makes by itself ----
+
+   The same encoders as the manager's page (an opaque BC7 mode-6 block, a BC1 block), so an icon made here is what
+   the page would have made: the endpoints from the block's principal colour line, each pixel the nearest palette
+   colour. Every mip level of the console's texture is written, each a 2x2 average of the one above. */
+
+/* No maths library on the console: the two needed here, rounding as the page's Math.round does (halves up). */
+static double dabs(double v) { return v < 0 ? -v : v; }
+static long round_half_up(double v) { long r = (long)(v + 0.5); if((double)r > v + 0.5) r--; return r; }
+
+static void
+block_line(const uint8_t px[64], double lo[3], double hi[3]) {
+  double m[3] = {0, 0, 0}, cov[6] = {0, 0, 0, 0, 0, 0}, a[3] = {0.58, 0.58, 0.58};
+  for(int i = 0; i < 16; i++) for(int c = 0; c < 3; c++) m[c] += px[i * 4 + c] / 16.0;
+  for(int i = 0; i < 16; i++) {
+    double r = px[i * 4] - m[0], g = px[i * 4 + 1] - m[1], b = px[i * 4 + 2] - m[2];
+    cov[0] += r * r; cov[1] += r * g; cov[2] += r * b; cov[3] += g * g; cov[4] += g * b; cov[5] += b * b;
+  }
+  for(int k = 0; k < 8; k++) {
+    double nx = cov[0] * a[0] + cov[1] * a[1] + cov[2] * a[2], ny = cov[1] * a[0] + cov[3] * a[1] + cov[4] * a[2];
+    double nz = cov[2] * a[0] + cov[4] * a[1] + cov[5] * a[2];
+    double mx = dabs(nx) > dabs(ny) ? dabs(nx) : dabs(ny);
+    if(dabs(nz) > mx) mx = dabs(nz);
+    if(mx < 1e-9) break;
+    a[0] = nx / mx; a[1] = ny / mx; a[2] = nz / mx;
+  }
+  double len2 = a[0] * a[0] + a[1] * a[1] + a[2] * a[2], tmin = 0, tmax = 0;
+  if(len2 > 1e-12) {
+    tmin = 1e30; tmax = -1e30;
+    for(int i = 0; i < 16; i++) {
+      double t = ((px[i * 4] - m[0]) * a[0] + (px[i * 4 + 1] - m[1]) * a[1] + (px[i * 4 + 2] - m[2]) * a[2]) / len2;
+      if(t < tmin) tmin = t;
+      if(t > tmax) tmax = t;
+    }
+  }
+  for(int c = 0; c < 3; c++) { lo[c] = m[c] + tmin * a[c]; hi[c] = m[c] + tmax * a[c]; }
+}
+
+static int clampi(long v, int lo, int hi) { return v < lo ? lo : v > hi ? hi : (int)v; }
+
+static void
+put_bits(uint8_t *out, unsigned *bit, unsigned v, unsigned n) {
+  for(unsigned i = 0; i < n; i++, (*bit)++) if((v >> i) & 1) out[*bit >> 3] |= (uint8_t)(1 << (*bit & 7));
+}
+
+/* One opaque 4x4 block as BC7 mode 6 (7-bit endpoints, p-bit 1 so alpha stays 255, 4-bit indices). */
+static void
+bc7_encode_block(const uint8_t px[64], uint8_t out[16]) {
+  double lo[3], hi[3];
+  block_line(px, lo, hi);
+  int e0[3], e1[3], pal[16][3], idx[16];
+  for(int c = 0; c < 3; c++) {
+    e0[c] = clampi(round_half_up((lo[c] - 1) / 2), 0, 127);
+    e1[c] = clampi(round_half_up((hi[c] - 1) / 2), 0, 127);
+  }
+  for(int i = 0; i < 16; i++) for(int c = 0; c < 3; c++) pal[i][c] = ((64 - bc7_w4[i]) * ((e0[c] << 1) | 1) + bc7_w4[i] * ((e1[c] << 1) | 1) + 32) >> 6;
+  for(int p = 0; p < 16; p++) {
+    int best = 0;
+    long bestErr = -1;
+    for(int i = 0; i < 16; i++) {
+      long dr = px[p * 4] - pal[i][0], dg = px[p * 4 + 1] - pal[i][1], db = px[p * 4 + 2] - pal[i][2];
+      long e = dr * dr + dg * dg + db * db;
+      if(bestErr < 0 || e < bestErr) { bestErr = e; best = i; }
+    }
+    idx[p] = best;
+  }
+  if(idx[0] >= 8) {   /* the anchor index must fit in 3 bits */
+    for(int c = 0; c < 3; c++) { int t = e0[c]; e0[c] = e1[c]; e1[c] = t; }
+    for(int p = 0; p < 16; p++) idx[p] = 15 - idx[p];
+  }
+  unsigned bit = 0;
+  memset(out, 0, 16);
+  put_bits(out, &bit, 64, 7);
+  for(int c = 0; c < 3; c++) { put_bits(out, &bit, (unsigned)e0[c], 7); put_bits(out, &bit, (unsigned)e1[c], 7); }
+  put_bits(out, &bit, 127, 7); put_bits(out, &bit, 127, 7);
+  put_bits(out, &bit, 1, 1); put_bits(out, &bit, 1, 1);
+  put_bits(out, &bit, (unsigned)idx[0], 3);
+  for(int p = 1; p < 16; p++) put_bits(out, &bit, (unsigned)idx[p], 4);
+}
+
+/* One opaque 4x4 block as BC1: endpoints larger first, so the block has four opaque colours. */
+static void
+bc1_encode_block(const uint8_t px[64], uint8_t out[8]) {
+  double lo[3], hi[3];
+  block_line(px, lo, hi);
+  #define Q(v, n) clampi(round_half_up((v) * (n) / 255.0), 0, (n))
+  unsigned c0 = (unsigned)(Q(hi[0], 31) << 11 | Q(hi[1], 63) << 5 | Q(hi[2], 31));
+  unsigned c1 = (unsigned)(Q(lo[0], 31) << 11 | Q(lo[1], 63) << 5 | Q(lo[2], 31));
+  #undef Q
+  if(c0 < c1) { unsigned t = c0; c0 = c1; c1 = t; }
+  uint32_t bits = 0;
+  if(c0 != c1) {
+    int pal[4][3];
+    unsigned cs[2] = {c0, c1};
+    for(int k = 0; k < 2; k++) {
+      unsigned c = cs[k];
+      pal[k][0] = (int)((c >> 11) << 3 | c >> 13); pal[k][1] = (int)(((c >> 5) & 63) << 2 | ((c >> 9) & 3)); pal[k][2] = (int)((c & 31) << 3 | ((c >> 2) & 7));
+    }
+    for(int c = 0; c < 3; c++) { pal[2][c] = (int)round_half_up((2.0 * pal[0][c] + pal[1][c]) / 3); pal[3][c] = (int)round_half_up((pal[0][c] + 2.0 * pal[1][c]) / 3); }
+    for(int p = 0; p < 16; p++) {
+      int best = 0;
+      long bestErr = -1;
+      for(int i = 0; i < 4; i++) {
+        long dr = px[p * 4] - pal[i][0], dg = px[p * 4 + 1] - pal[i][1], db = px[p * 4 + 2] - pal[i][2];
+        long e = dr * dr + dg * dg + db * db;
+        if(bestErr < 0 || e < bestErr) { bestErr = e; best = i; }
+      }
+      bits |= (uint32_t)best << (2 * p);
+    }
+  }
+  out[0] = (uint8_t)c0; out[1] = (uint8_t)(c0 >> 8); out[2] = (uint8_t)c1; out[3] = (uint8_t)(c1 >> 8);
+  for(int i = 0; i < 4; i++) out[4 + i] = (uint8_t)(bits >> (8 * i));
+}
+
+uint8_t *
+texture_encode_like(const uint8_t *stock, size_t sl, const uint8_t *rgba, size_t *outlen) {
+  texture_info_t t;
+  *outlen = 0;
+  if(texture_parse(stock, sl, &t) || !t.known || t.array != 1) return NULL;
+  int bc7 = t.dxgi == 98 || t.dxgi == 99, bc1 = t.dxgi == 71 || t.dxgi == 72 || !strcmp(t.fourcc, "DXT1");
+  if(!bc7 && !bc1) return NULL;
+  size_t total = t.header_len + (size_t)t.data_len;
+  uint8_t *out = malloc(total), *level = malloc((size_t)t.width * t.height * 4);
+  if(!out || !level) { free(out); free(level); return NULL; }
+  memcpy(out, stock, t.header_len);
+  memcpy(level, rgba, (size_t)t.width * t.height * 4);
+  size_t pos = t.header_len, bb = bc7 ? 16 : 8;
+  uint32_t w = t.width, h = t.height;
+  for(uint32_t m = 0; m < t.mips; m++) {
+    uint8_t px[64];
+    for(uint32_t by = 0; by < (h + 3) / 4; by++) {
+      for(uint32_t bx = 0; bx < (w + 3) / 4; bx++) {
+        for(int i = 0; i < 16; i++) {
+          uint32_t x = bx * 4 + (i & 3), y = by * 4 + (i >> 2);
+          if(x >= w) x = w - 1;
+          if(y >= h) y = h - 1;
+          memcpy(px + i * 4, level + ((size_t)y * w + x) * 4, 4);
+        }
+        if(bc7) bc7_encode_block(px, out + pos); else bc1_encode_block(px, out + pos);
+        pos += bb;
+      }
+    }
+    if(m + 1 < t.mips) {   /* the next level: each pixel the average of up to four */
+      uint32_t nw = w > 1 ? w / 2 : 1, nh = h > 1 ? h / 2 : 1;
+      for(uint32_t y = 0; y < nh; y++) for(uint32_t x = 0; x < nw; x++) for(int c = 0; c < 4; c++) {
+        uint32_t x0 = x * 2 < w ? x * 2 : w - 1, y0 = y * 2 < h ? y * 2 : h - 1;
+        uint32_t x1 = x0 + 1 < w ? x0 + 1 : x0, y1 = y0 + 1 < h ? y0 + 1 : y0;
+        level[((size_t)y * nw + x) * 4 + c] = (uint8_t)((level[((size_t)y0 * w + x0) * 4 + c] + level[((size_t)y0 * w + x1) * 4 + c] +
+                                                         level[((size_t)y1 * w + x0) * 4 + c] + level[((size_t)y1 * w + x1) * 4 + c] + 2) / 4);
+      }
+      w = nw; h = nh;
+    }
+  }
+  free(level);
+  if(pos != total) { free(out); return NULL; }
+  *outlen = total;
+  return out;
+}

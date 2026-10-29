@@ -28,7 +28,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from rco_fixture import Rco, SHAPES, COLORS_DEFAULT, COLORS_PS2, hevag, palette_png, png_chunk, sample as rco_sample  # noqa: E402
 import font_fixture  # noqa: E402
 
-ASAN = "build-host/ps5-theme-asan"
+ASAN = os.environ.get("PS5THEME_TEST_BINARY", "build-host/ps5-theme-asan")   # (run.sh tsan: the ThreadSanitizer build)
 STOP_TOOL = "build-host/ps5-theme-stop"
 CRASH = "build-host/ps5-theme-crash"
 PORT = 8095
@@ -44,7 +44,10 @@ SYSA = "/system/vsh_asset"                # the Appearance themes' textures and 
 LOG = f"{BASE}/logs/log.txt"
 ENV = dict(os.environ, ASAN_OPTIONS="detect_leaks=0:halt_on_error=1:abort_on_error=0",
            UBSAN_OPTIONS="halt_on_error=1:print_stacktrace=1",
-           PS5THEME_TEST_FAIL_VERIFY="/tmp/fail-verify")   # holds a mount point whose overlay then fails its check
+           PS5THEME_TEST_FAIL_VERIFY="/tmp/fail-verify",   # holds a mount point whose overlay then fails its check
+           PS5THEME_TEST_FREE_BYTES="/tmp/free-bytes",     # while it exists: the free space the plugin is told of
+           PS5THEME_TEST_AUTOSTYLE_POLL="1",               # the icon styler looks every second instead of every minute
+           PS5THEME_TEST_AUTOSTYLE_SETTLE="300")           # and takes a title as installed after 5 minutes unchanged
 
 
 # ---------------------------------------------------------------- fixtures
@@ -600,7 +603,7 @@ S = {}  # shared state between ordered tests
 
 def t_startup():
     s = status()
-    assert s["fw"] == "13.42" and s["version"] == "1.65" and s["themes"] == [], s
+    assert s["fw"] == "13.42" and s["version"] == "1.69" and s["themes"] == [], s
     listing = open(f"{BASE}/dump/assets-v2-13.42.txt").read()
     assert f"{VSH}/bg_hub_default.dds.zst" in listing
     assert f"{HOME}/bg.png" in listing and "/mnt/rnps/apps/NPXS40099/a.png" in listing
@@ -610,7 +613,7 @@ def t_startup():
     assert open("/tmp/tile-registered").read().strip() == "THEM00001"
     assert "starting" in log_text()
     notes = open("/tmp/notifications.txt").read()
-    assert "ps5-theme 1.65 starting" in notes and "ps5-theme ready" in notes, notes
+    assert "ps5-theme 1.69 starting" in notes and "ps5-theme ready" in notes, notes
 
 
 def t_ui_and_icon_served():
@@ -680,7 +683,7 @@ def t_apply_verifies_and_is_read_only():
     S["stock_target"] = crc_file(f"{OTHER}/target.png")
     assert call("POST", "/api/apply", {"id": "night"})[0] == 200
     s = wait_applied("night")
-    assert "3 files verified" in s["result"] and "1 skipped" in s["result"], s["result"]
+    assert "3 files checked" in s["result"] and "1 skipped" in s["result"], s["result"]
     notes = open("/tmp/notifications.txt").read()
     assert "ps5-theme: applying 'Night'..." in notes, notes[-500:]
 
@@ -943,7 +946,7 @@ def t_concurrent_requests_during_apply():
     assert not errors, errors
     assert upload["r"][0] == 200, upload
     s = wait_applied("bulk")
-    assert "1 files verified" in s["result"], s["result"]
+    assert "1 file checked" in s["result"], s["result"]
     assert crc_file(f"{BULK}/blob007.bin") == stock_blob
     assert max(timings) < 10, f"status blocked for {max(timings):.1f}s"
 
@@ -959,7 +962,7 @@ def t_restore_stock_cleans_up():
     bulk = live_stage(BULK)
     assert call("POST", "/api/apply", {"id": "none"})[0] == 200
     s = wait_applied("")
-    assert s["result"] == "Stock home screen.", s
+    assert s["result"] == "No theme: the console's own look.", s
     assert not mounts_on(HOME) and not mounts_on(BULK)
     assert crc_file(f"{HOME}/bg.png") == S["stock_bg"]
     assert not os.path.exists(f"{BASE}/mounts") and not os.path.exists(f"{BASE}/live")
@@ -1419,12 +1422,19 @@ def clear_sandboxes():
     wait_applied(status()["active"] if status()["active"] != "none" else "")
 
 
+def next_shellui_box():
+    """ShellUI's next sandbox, as the system names it: one past the newest there is."""
+    nums = [int(d.split("_")[1]) for d in os.listdir("/mnt/sandbox") if d.startswith("NPXS40087_")] if os.path.isdir("/mnt/sandbox") else []
+    return f"/mnt/sandbox/NPXS40087_{max(nums, default=-1) + 1:03}"
+
+
 def start_shellui():
-    """A stand-in for ShellUI's process (SceShellUI), once the plugin watches it."""
+    """A stand-in for ShellUI's process (SceShellUI), once the plugin watches it. Started after its sandbox is
+    made, as the system does: nothing of the plugin's goes into a ShellUI sandbox before its process runs."""
     copy_program("/bin/sleep", "/tmp/SceShellUI")
     shell = subprocess.Popen(["/tmp/SceShellUI", "600"])
     end = time.time() + 10
-    while f"watching ShellUI (pid {shell.pid})" not in log_text():
+    while f"watching ShellUI (pid {shell.pid}," not in log_text():
         assert time.time() < end, "ShellUI's process was not found"
         time.sleep(0.1)
     return shell
@@ -1539,7 +1549,8 @@ def t_failed_write_closes_its_file():
         os.unlink("/tmp/ps5-theme-fail-fsync")
     time.sleep(0.5)
     assert fds() <= before + 3, f"file descriptors leaked: {before} -> {fds()}"
-    assert not os.path.exists(ini + ".tmp") and open(ini, "rb").read() == before_ini
+    leftovers = [f for f in os.listdir(os.path.dirname(ini)) if f.endswith((".tmp", ".part"))]   # no temporary file of a failed write
+    assert not leftovers and open(ini, "rb").read() == before_ini, leftovers
     assert call("POST", "/api/theme/settings", {"id": "night", "gain": "0"})[0] == 200
     assert call("POST", "/api/theme/save", {"id": "night"})[0] == 200
 
@@ -1790,7 +1801,7 @@ def t_media_policy():
 
     assert call("POST", "/api/apply", {"id": "media"})[0] == 200
     s = wait_applied("media")
-    assert "5 files verified" in s["result"], s["result"]
+    assert "5 files checked" in s["result"], s["result"]
     assert open(f"{MEDIA}/fonts/ui.ttf", "rb").read() == font_fixture.font("tt", glyphs=130)
     assert open(f"{MEDIA}/bundle.js", "rb").read() == b"console.log(1)"
     assert S["plugin"].alive()
@@ -2045,6 +2056,318 @@ def t_discard_applies_only_when_needed():
         call("DELETE", "/api/themes", {"id": "redo"})
 
 
+def t_console_pictures():
+    """The manager draws the console's own pictures where a theme leaves things as they are, read-only: an
+    interface icon (iconid_*) by id from the console's copy of its interface file, with a policy that keeps an SVG
+    from running anything; and a texture as a quarter-size picture (one pixel per 4x4 block, its opacity-weighted
+    average). The BC7 decoder matched Pillow's exactly on the console's own textures (all eight modes) and on this
+    fixture, whose result is pinned here. A theme keeps the picture its icon style puts behind icons (kind iconbg),
+    a change of the theme's like its chosen preview picture."""
+    rco = open(UI_RCO, "rb").read()
+    code, svg = call("GET", "/api/ui-icon", {"id": "iconid_home"})
+    assert code == 200 and b"<svg" in svg[:300] and svg in rco, (code, svg[:80])
+    conn = http.client.HTTPConnection("127.0.0.1", PORT, timeout=10)
+    conn.request("GET", "/api/ui-icon?id=iconid_texture_app_fallback")
+    res = conn.getresponse(); png_icon = res.read()
+    assert res.status == 200 and res.getheader("Content-Type") == "image/png" and png_icon.startswith(b"\x89PNG") and png_icon in rco
+    assert "default-src 'none'" in res.getheader("Content-Security-Policy", ""), res.getheaders()
+    conn.close()
+    assert call("GET", "/api/ui-icon", {"id": "iconid_not_there"})[0] == 404
+    for bad in ("", "home", "iconid_", "IconID_home", "iconid_../x", "iconid_home.svg", "iconid_" + "a" * 80):
+        assert call("GET", "/api/ui-icon", {"id": bad})[0] in (400, 404), bad
+
+    code, pic = call("GET", "/api/asset/picture", {"path": f"{VSH}/bg_hub_default.dds.zst"})
+    assert code == 200 and struct.unpack("<II", pic[:8]) == (64, 32) and len(pic) == 8 + 64 * 32 * 4, (code, pic[:8])
+    assert hashlib.sha256(pic[8:]).hexdigest() == "0132341884b3a41069d833177973cdb3f8d90208478e68bb950d7c7b2751cd08"
+    for path in (f"{HOME}/bg.png", "/etc/passwd", f"{VSH}/../../etc/passwd"):
+        assert call("GET", "/api/asset/picture", {"path": path})[0] == 403, path
+
+    assert call("POST", "/api/themes", {"id": "styled", "name": "Styled"})[0] == 200
+    assert call("POST", "/api/theme/save", {"id": "styled"})[0] == 200
+    back = jpeg_header(1024, 1024)
+    assert call("PUT", "/api/theme/preview", {"id": "styled", "kind": "iconbg", "crc": f"{zlib.crc32(back):08x}"}, back)[0] == 200
+    assert call("GET", "/api/theme/preview", {"id": "styled", "kind": "iconbg"}) == (200, back)
+    styled = {t["id"]: t for t in status()["themes"]}["styled"]
+    assert styled["unsaved"] and styled["cover"] == "", styled   # a change of yours, and not the library's picture
+    assert call("PUT", "/api/theme/preview", {"id": "styled", "kind": "nope"}, back)[0] == 400
+    assert call("DELETE", "/api/theme/preview", {"id": "styled", "kind": "iconbg"})[0] == 200
+    assert call("GET", "/api/theme/preview", {"id": "styled", "kind": "iconbg"})[0] == 404
+    assert call("DELETE", "/api/themes", {"id": "styled"})[0] == 200
+
+
+def png_rgba(w, h, fn):
+    """An 8-bit RGBA PNG whose pixel (x, y) is fn(x, y)."""
+    raw = b"".join(b"\0" + b"".join(bytes(fn(x, y)) for x in range(w)) for y in range(h))
+    def chunk(kind, data):
+        return struct.pack(">I", len(data)) + kind + data + struct.pack(">I", zlib.crc32(kind + data))
+    return (b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", w, h, 8, 6, 0, 0, 0))
+            + chunk(b"IDAT", zlib.compress(raw)) + chunk(b"IEND", b""))
+
+
+def png_pixels(data):
+    """An 8-bit RGB or RGBA PNG's rows of pixels (as the plugin writes them: one IDAT, rows unfiltered)."""
+    pos, idat, w = 8, b"", 0
+    while pos < len(data):
+        n, kind = struct.unpack(">I", data[pos:pos + 4])[0], data[pos + 4:pos + 8]
+        body = data[pos + 8:pos + 8 + n]
+        if kind == b"IHDR":
+            w, h, ch = struct.unpack(">II", body[:8]) + ({2: 3, 6: 4}[body[9]],)
+        if kind == b"IDAT":
+            idat += body
+        pos += 12 + n
+    raw, stride = zlib.decompress(idat), 1 + w * ch
+    assert all(raw[y * stride] == 0 for y in range(h))
+    return lambda x, y: tuple(raw[y * stride + 1 + x * ch:y * stride + 1 + x * ch + 3])
+
+
+def t_icon_style_for_titles_installed_later():
+    """A theme's icon style for games installed later: while the theme is applied, the plugin styles a title by
+    itself once nothing in its folders has changed for a while (here 5 minutes), from the template the page keeps:
+    each of its icon files made in the console's own form (a PNG with the console's chunks, BC7 for the texture),
+    checked as an upload is, then the theme applied again and the console told. Each part of the template is
+    answered with what was stored (the page checks it), and the template is whole only with all three parts; it is
+    made from the theme's choices, so keeping it isn't a change for Discard. Your picture for an icon you changed,
+    kept with the style when it is styled: stored, listed, read back, forgotten one at a time and cleared with the
+    style, and a change Discard can undo.
+    Titles present when the style was used, titles still being installed, and themes without the style on are
+    left alone. A game being played (its process using the processor) holds it up; one left suspended on the home
+    screen (using none) doesn't."""
+    side, r = 512, 512 / 2 * 60 / 100
+    inside = lambda x, y: (x + .5 - 256) ** 2 + (y + .5 - 256) ** 2 <= r * r
+    base = png_rgba(side, side, lambda x, y: (20, 40, 160, 255))
+    mask = png_rgba(side, side, lambda x, y: (255, 255, 255, 255 if inside(x, y) else 0))
+    before = status()["applied"] or "none"
+    assert call("POST", "/api/themes", {"id": "iconic", "name": "Iconic"})[0] == 200
+    assert put_file("iconic", f"{HOME}/bg.png", S["bg"])[0] == 200
+    assert call("POST", "/api/theme/save", {"id": "iconic"})[0] == 200
+    unsaved = lambda: [t for t in status()["themes"] if t["id"] == "iconic"][0]["unsaved"]
+    for part, data in (("base", base), ("mask", mask), ("known", b"PPSA01234\nCUSA09999\n")):
+        if part == "known":   # not whole yet: without the titles installed then, every title would look new
+            assert call("GET", "/api/theme/icon-style", {"id": "iconic"})[1]["template"] is False
+        code, r2 = call("PUT", "/api/theme/icon-style", {"id": "iconic", "part": part, "crc": f"{zlib.crc32(data):08x}"}, data)
+        assert code == 200 and r2["size"] == len(data) and r2["crc32"] == f"{zlib.crc32(data):08x}", (part, code, r2)
+    empty = b"\n"   # no titles installed then: still a list
+    assert call("PUT", "/api/theme/icon-style", {"id": "iconic", "part": "known", "crc": f"{zlib.crc32(empty):08x}"}, empty)[0] == 200
+    data = b"PPSA01234\nCUSA09999\n"
+    assert call("PUT", "/api/theme/icon-style", {"id": "iconic", "part": "known", "crc": f"{zlib.crc32(data):08x}"}, data)[0] == 200
+    assert not unsaved()   # the template: made from the choices, not a change of yours
+
+    # Your picture for an icon you changed, kept when it is styled.
+    mine = png(300, 200, (9, 99, 199))
+    code, r2 = call("PUT", "/api/theme/icon-style", {"id": "iconic", "part": "own", "title": "PPSA01234", "crc": f"{zlib.crc32(mine):08x}"}, mine)
+    assert code == 200 and r2["size"] == len(mine) and r2["crc32"] == f"{zlib.crc32(mine):08x}", (code, r2)
+    assert unsaved()   # part of styling an icon: Discard undoes it
+    assert call("POST", "/api/theme/save", {"id": "iconic"})[0] == 200
+    assert call("GET", "/api/theme/icon-style", {"id": "iconic"})[1]["own"] == ["PPSA01234"]
+    code, got = call("GET", "/api/theme/icon-style", {"id": "iconic", "own": "PPSA01234"})
+    assert code == 200 and got == mine
+    assert call("GET", "/api/theme/icon-style", {"id": "iconic", "own": "CUSA09999"})[0] == 404
+    for params, data in (({"title": "../x"}, mine), ({"title": "ppsa01234"}, mine), ({}, mine),
+                         ({"title": "PPSA01234"}, b"not a picture"), ({"title": "PPSA01234"}, png(8, 8, (1, 2, 3)))):
+        params = {"id": "iconic", "part": "own", "crc": f"{zlib.crc32(data):08x}", **params}
+        assert call("PUT", "/api/theme/icon-style", params, data)[0] in (400, 422), params
+    assert call("GET", "/api/theme/icon-style", {"id": "iconic", "own": "../../active"})[0] == 400
+    assert call("POST", "/api/theme/icon-style", {"id": "iconic", "forget": "PPSA01234"})[0] == 200
+    assert call("GET", "/api/theme/icon-style", {"id": "iconic"})[1]["own"] == []
+    assert call("POST", "/api/theme/icon-style", {"id": "iconic", "forget": "PPSA01234"})[0] == 200   # already gone: fine
+    assert call("POST", "/api/theme/icon-style", {"id": "iconic", "forget": "nope"})[0] == 400
+    for t in ("PPSA01234", "CUSA09999"):
+        assert call("PUT", "/api/theme/icon-style", {"id": "iconic", "part": "own", "title": t, "crc": f"{zlib.crc32(mine):08x}"}, mine)[0] == 200
+    assert sorted(call("GET", "/api/theme/icon-style", {"id": "iconic"})[1]["own"]) == ["CUSA09999", "PPSA01234"]
+    assert call("POST", "/api/theme/icon-style", {"id": "iconic", "clear": "1"})[0] == 200   # with the style: back in the theme
+    assert call("GET", "/api/theme/icon-style", {"id": "iconic"})[1]["own"] == []
+    assert not os.path.exists(f"{BASE}/themes/iconic/icon-style/own")
+    assert call("POST", "/api/theme/save", {"id": "iconic"})[0] == 200
+    for bad, data in (("mask", png(64, 32, (1, 2, 3))), ("known", b"not a title\n"), ("nope", base)):
+        assert call("PUT", "/api/theme/icon-style", {"id": "iconic", "part": bad, "crc": f"{zlib.crc32(data):08x}"}, data)[0] in (400, 422), bad
+    assert call("POST", "/api/theme/icon-style", {"id": "iconic", "auto": "1", "scale": "60"})[0] == 200
+    assert call("POST", "/api/theme/icon-style", {"id": "iconic", "scale": "300"})[0] == 400
+    assert call("POST", "/api/apply", {"id": "iconic"})[0] == 200
+    wait_applied("iconic")
+
+    # A game being played: a process named as games' are (eboot.bin) that keeps using the processor. Started
+    # before the titles arrive, so nothing can be styled before it is there.
+    shutil.copy("/usr/bin/yes", "/tmp/eboot.bin")
+    game = subprocess.Popen(["/tmp/eboot.bin"], stdout=subprocess.DEVNULL)
+    titles = {"NEWT00001": (200, 30, 30), "NEWT00002": (30, 200, 30), "NEWT00003": (30, 30, 200)}
+    for tid, rgb in titles.items():
+        for folder in (f"/user/appmeta/{tid}", f"/user/app/{tid}/sce_sys"):
+            write(f"{folder}/icon0.png", png(512, 512, rgb))
+            write(f"{folder}/icon0.dds", dds_bc7(512, 512, flags=0xa1007))
+            write(f"{folder}/param.json", b'{"titleId":"' + tid.encode() + b'"}')
+    old = time.time() - 900
+    for tid in ("NEWT00001", "NEWT00003"):   # installed a while ago; NEWT00002 is still being written
+        for root, dirs, files in os.walk(f"/user/appmeta/{tid}"):
+            for n in files + [""]:
+                os.utime(os.path.join(root, n), (old, old))
+        for d in (f"/user/app/{tid}/sce_sys", f"/user/app/{tid}"):
+            for n in os.listdir(d) + [""]:
+                os.utime(os.path.join(d, n) if n else d, (old, old))
+    # NEWT00003's folders are old, but its package is still downloading: it grows, its folder doesn't change.
+    write("/user/app/NEWT00003/app.pkg", b"\0" * 4096)
+    os.utime("/user/app/NEWT00003", (old, old))
+    styled = f"{BASE}/themes/iconic/files/user/appmeta/NEWT00001/icon0.png"
+    try:   # while it is played, nothing is styled or applied
+        time.sleep(4)
+        assert not os.path.exists(styled)
+        assert "icon style: NEWT00001 waits while a game is being played" in open(LOG).read(), open(LOG).read()[-1500:]
+    finally:
+        game.kill()
+        game.wait()
+    # A game left on the home screen: the console suspends it, and it uses no processor time. It holds nothing up.
+    shutil.copy("/bin/sleep", "/tmp/eboot.bin")
+    game = subprocess.Popen(["/tmp/eboot.bin", "120"])
+    try:
+        end = time.time() + 40
+        while time.time() < end and not os.path.exists(styled):
+            time.sleep(0.5)
+        assert os.path.exists(styled), open(LOG).read()[-2000:]
+        assert game.poll() is None   # styled while it was there
+    finally:
+        game.kill()
+        game.wait()
+    said = "styled the icon of 1 new game or app (NEWT00001)"
+    end = time.time() + 15
+    while time.time() < end and said not in open("/tmp/notifications.txt").read():   # said once it is applied again
+        time.sleep(0.3)
+    assert said in open("/tmp/notifications.txt").read(), open(LOG).read()[-1500:]
+    assert "icon style: styled NEWT00001's icon in theme iconic" in open(LOG).read()
+    wait_applied("iconic")
+    for path in (styled, styled.replace("appmeta/NEWT00001", "app/NEWT00001/sce_sys")):
+        px = png_pixels(open(path, "rb").read())
+        assert px(256, 256) == (200, 30, 30) and px(4, 4) == (20, 40, 160), (px(256, 256), px(4, 4))
+        dds = open(path[:-3] + "dds", "rb").read()
+        assert len(dds) == len(dds_bc7(512, 512, flags=0xa1007)) and dds[148] == 0x40, dds[148]   # BC7 mode 6 blocks
+    for tid in ("NEWT00002", "NEWT00003", "PPSA01234", "CUSA09999"):
+        assert not os.path.exists(f"{BASE}/themes/iconic/files/user/appmeta/{tid}/icon0.png"), tid
+    code, info = call("GET", "/api/theme/icon-style", {"id": "iconic"})
+    assert code == 200 and info["auto"] and info["template"] and info["made"] == ["NEWT00001"], info
+    assert call("POST", "/api/theme/icon-style", {"id": "iconic", "auto": "0", "clear": "1"})[0] == 200
+    assert call("GET", "/api/theme/icon-style", {"id": "iconic"})[1]["made"] == []
+
+    # The game is uninstalled: its styled icons stay in the theme for when it comes back, and aren't a failure.
+    assert call("POST", "/api/apply", {"id": "none"})[0] == 200
+    wait_applied("")
+    for tid in titles:
+        shutil.rmtree(f"/user/appmeta/{tid}")
+        shutil.rmtree(f"/user/app/{tid}")
+    assert call("POST", "/api/apply", {"id": "iconic"})[0] == 200
+    s = wait_applied("iconic")
+    assert "partly" not in s["result"] and "could not be used" not in s["result"], s["result"]
+    assert "/user/appmeta/NEWT00001 isn't installed; its pictures stay in the theme" in open(LOG).read()
+    assert os.path.exists(styled)
+
+    assert call("POST", "/api/apply", {"id": before})[0] == 200
+    wait_applied("" if before == "none" else before)
+    assert call("DELETE", "/api/themes", {"id": "iconic"})[0] == 200
+
+
+def t_writes_from_many_threads_stay_whole():
+    """The plugin's four web workers (and its icon styler) write the same files at once: the theme's settings, its
+    icon style, its choices, and which theme is chosen. Each write has a temporary name of its own and settings are
+    read and written under one lock, so every file ends whole, holding one of the values written, nothing is left
+    half-written, and every request is answered."""
+    assert call("POST", "/api/themes", {"id": "busy", "name": "Busy"})[0] == 200
+    assert put_file("busy", f"{HOME}/bg.png", S["bg"])[0] == 200
+    names = [f"Busy {i}" for i in range(8)]
+    errors = []
+
+    def worker(k):
+        for i in range(20):
+            for method, path, params, body in (
+                    ("POST", "/api/theme/settings", {"id": "busy", "name": names[(k + i) % len(names)]}, None),
+                    ("POST", "/api/theme/icon-style", {"id": "busy", "auto": str(i % 2), "scale": str(40 + k * 10)}, None),
+                    ("PUT", "/api/theme/choices", None, json.dumps({"v": 1, "fit": ("cover", "contain")[i % 2]}).encode()),
+                    ("GET", "/api/status", None, None)):
+                if path == "/api/theme/choices":
+                    params = {"id": "busy", "crc": f"{zlib.crc32(body):08x}"}
+                code, r = call(method, path, params, body)
+                if code != 200:
+                    errors.append((path, code, r))
+
+    def chooser(k):
+        for i in range(10):
+            code, r = call("POST", "/api/apply", {"id": ("busy", "none")[(k + i) % 2]})
+            if code != 200:
+                errors.append(("/api/apply", code, r))
+
+    threads = [threading.Thread(target=worker, args=(k,)) for k in range(4)] + [threading.Thread(target=chooser, args=(k,)) for k in range(2)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert not errors, errors[:5]
+    ini = open(f"{BASE}/themes/busy/theme.ini").read()
+    assert re.search(r"^name=Busy [0-7]$", ini, re.M) and "fw=" in ini, ini
+    style = open(f"{BASE}/themes/busy/icon-style/style.ini").read()
+    assert re.fullmatch(r"auto=[01]\nscale=(40|50|60|70)\n", style), style
+    assert json.loads(open(f"{BASE}/themes/busy/choices.json").read())["fit"] in ("cover", "contain")
+    assert open(f"{BASE}/active").read().strip() in ("busy", "none")
+    s = wait_applied("busy" if open(f"{BASE}/active").read().strip() == "busy" else "")   # the applies asked for, done
+    leftovers = lambda: [(root, f) for root in (f"{BASE}/themes/busy", BASE) for f in os.listdir(root) if f.endswith((".tmp", ".part"))]
+    end = time.time() + 10   # a write still under way finishes; one left behind stays and fails
+    while time.time() < end and leftovers():
+        time.sleep(0.2)
+    assert not leftovers(), leftovers()
+    assert call("POST", "/api/apply", {"id": "none"})[0] == 200
+    wait_applied("")
+    assert call("DELETE", "/api/themes", {"id": "busy"})[0] == 200
+
+
+def t_status_keeps_its_walk():
+    """The status, asked every few seconds by every open manager, keeps its walk of each theme's files until the
+    plugin writes anything (a change made through it shows at once) or for 10 seconds (a change made from outside,
+    over FTP, shows within that)."""
+    files = lambda: {t["id"]: t for t in status()["themes"]}["walky"]["files"]
+    assert call("POST", "/api/themes", {"id": "walky", "name": "Walky"})[0] == 200
+    assert put_file("walky", f"{HOME}/bg.png", S["bg"])[0] == 200
+    assert files() == 1                                      # made through the plugin: at once
+    write(f"{BASE}/themes/walky/files{HOME}/icon.png", open(f"{HOME}/icon.png", "rb").read())
+    assert files() == 1                                      # from outside: the walk kept is used...
+    end = time.time() + 15
+    while time.time() < end and files() != 2:
+        time.sleep(0.5)
+    assert files() == 2                                      # ...for 10 seconds at most
+    assert call("DELETE", "/api/theme/file", {"id": "walky", "path": f"{HOME}/icon.png"})[0] == 200
+    assert files() == 1                                      # removed through the plugin: at once
+    assert call("DELETE", "/api/themes", {"id": "walky"})[0] == 200
+
+
+def t_storage_reserve():
+    """The console's storage is shared with its saves and records: the plugin keeps 1 GB of it free. An upload that
+    would eat into that is refused before a byte is stored (507, nothing left behind), the status says how much a
+    theme can still take, and a mix that runs out of room is refused as such, leaving no theme. With room again,
+    the same upload and mix go through."""
+    reserve, free_file = 1 << 30, "/tmp/free-bytes"
+    bg = png(480, 270, (90, 20, 160))
+    assert call("POST", "/api/themes", {"id": "roomy", "name": "Roomy"})[0] == 200
+    assert put_file("roomy", f"{HOME}/bg.png", bg)[0] == 200
+    themes = f"{BASE}/themes"
+    try:
+        with open(free_file, "w") as f:
+            f.write(str(reserve + 100))      # room for a short list of parts, not for a picture
+        assert status()["room"] == 100, status().get("room")
+        code, r = put_file("roomy", f"{HOME}/icon.png", png(96, 96, (1, 2, 3)))
+        assert code == 507 and "storage is nearly full" in r["error"], (code, r)
+        left = [n for _, _, names in os.walk(f"{themes}/roomy") for n in names if n.endswith(".part")]
+        assert not left and not os.path.exists(f"{themes}/roomy/files{HOME}/icon.png"), left
+        code, r = call("POST", "/api/themes/mix", {"id": "roomless", "name": "Roomless"}, f"file\troomy\t{HOME}/bg.png\n".encode())
+        assert code == 507 and r["error"].startswith("the console's storage is nearly full"), (code, r)
+        assert not [n for n in os.listdir(themes) if "roomless" in n], os.listdir(themes)
+        assert "storage nearly full" in open(LOG).read()
+        with open(free_file, "w") as f:
+            f.write("0")
+        assert status()["room"] == 0
+    finally:
+        os.unlink(free_file)
+    assert status()["room"] > 0
+    assert put_file("roomy", f"{HOME}/icon.png", png(96, 96, (1, 2, 3)))[0] == 200
+    code, r = call("POST", "/api/themes/mix", {"id": "roomful", "name": "Roomful"}, f"file\troomy\t{HOME}/bg.png\n".encode())
+    assert code == 200 and r["files"] == 1, (code, r)
+    for tid in ("roomy", "roomful"):
+        assert call("DELETE", "/api/themes", {"id": tid})[0] == 200
+
+
 def t_mix_and_match():
     """Mix and match: a new theme made of parts of others (/api/themes/mix), each file, original, song and the music
     settings copied byte for byte from the theme named for it, the themes taken from left as they were; a list that
@@ -2282,7 +2605,7 @@ def t_cut_off_uploads_are_not_theme_files():
     os.utime(stale, (time.time() - 7200, time.time() - 7200))
     assert call("POST", "/api/apply", {"id": "cutoff"})[0] == 200
     s = wait_applied("cutoff")
-    assert "1 files verified" in s["result"], s["result"]
+    assert "1 file checked" in s["result"], s["result"]
     log = call("GET", "/api/log")[1].decode()
     assert "partly" not in s["result"] and "skipped" not in s["result"], \
         (s["result"], [line for line in log.splitlines() if "skipping" in line or "ignoring" in line][-4:])
@@ -2339,7 +2662,7 @@ def t_home_background_textures():
     write(f"{BASE}/themes/wall/files{stock_path}", zstd_stored(mine))
     assert call("POST", "/api/apply", {"id": "wall"})[0] == 200
     s = wait_applied("wall")
-    assert "1 files verified" in s["result"] and "partly" not in s["result"], s["result"]
+    assert "1 file checked" in s["result"] and "partly" not in s["result"], s["result"]
     assert open(f"{BASE}/themes/wall/files{stock_path}", "rb").read() == stored
     assert open(stock_path, "rb").read() == stored
     assert crc_file(f"{VSH}/eboot_like.rco") == zlib.crc32(b"\0" * 64)    # rest of the folder stays stock
@@ -2613,12 +2936,13 @@ def t_interface_pictures():
 
     # Applied: the home screen sees the theme's files, on the real folders and
     # in the system apps' sandboxes; afterwards the console's again.
-    boxes = []
+    boxes, shellui = [], None
     if not EMULATED:
-        for box in ["/mnt/sandbox/NPXS40087_000/system_ex", "/mnt/sandbox/NPXS40000_000/system_ex"]:
+        for box in [next_shellui_box() + "/system_ex", "/mnt/sandbox/NPXS40000_000/system_ex"]:
             os.makedirs(box, exist_ok=True)
             subprocess.run(["mount", "--bind", "/system_ex", box], check=True)
             boxes.append(box)
+        shellui = start_shellui()   # its sandbox gets the theme once its process runs
     try:
         apply_and_wait("ui")
         stock_icon = zlib.crc32(png(64, 64, (200, 160, 0)))
@@ -2630,6 +2954,9 @@ def t_interface_pictures():
         apply_and_wait("night")
         assert crc_file(UI_RCO) == zlib.crc32(stock) and crc_file(PLUS_ICON) == stock_icon
     finally:
+        if shellui:
+            shellui.kill()
+            shellui.wait()
         for box in reversed(boxes):
             subprocess.run(["umount", "-l", box])
     assert call("DELETE", "/api/themes", {"id": "ui"})[0] == 200
@@ -3209,16 +3536,18 @@ def t_appearance_textures():
     # A remembered check result is made by a version and a revision of the rules: results of other rules are
     # not trusted (the same version can ship twice while a feature is built).
     remembered = open(f"{BASE}/checked").read().splitlines()
-    assert remembered and all(re.match(r"1\.65r\d+\t", l) for l in remembered), remembered[:2]
+    version = re.escape(call("GET", "/api/status")[1]["version"])   # the plugin's own, so a version bump needs no change here
+    assert remembered and all(re.match(version + r"r\d+\t", l) for l in remembered), remembered[:2]
     assert put_file("appear", f"{HOME}/bg.png", S["bg"])[0] == 200
 
-    shell = "/mnt/sandbox/NPXS40087_000"
+    shell, shellui = next_shellui_box(), None
     view = f"{shell}/system/vsh_asset"
     if not EMULATED:
         os.makedirs(view, exist_ok=True)
         subprocess.run(["mount", "--bind", SYSA, view], check=True)
         S["plugin"].term()
         S["plugin"] = Plugin()
+        shellui = start_shellui()
     keep = {p: crc_file(p) for p in (home, f"{SYSA}/welcome-hub-background-0-4k.jpg")}
     try:
         apply_and_wait("appear")
@@ -3238,6 +3567,9 @@ def t_appearance_textures():
         assert open(top, "rb").read() == stock_top and open(bottom, "rb").read() == stock_bottom
     finally:
         apply_and_wait("night")
+        if shellui:
+            shellui.kill()
+            shellui.wait()
         if not EMULATED:
             subprocess.run(["umount", "-l", view])
         clear_sandboxes()
@@ -3271,16 +3603,20 @@ def t_shellui_exit_releases_sandbox():
     """With games' pictures in ShellUI's view (the only place it reads them),
     the overlays come out of its sandbox the moment ShellUI exits, so the
     launcher's teardown of that sandbox succeeds (on the console an overlay
-    left there stopped every app from starting); its next sandbox is covered
-    within a moment of appearing, before ShellUI reads the home row's icons;
-    and an older sandbox of it is never covered, nor one the system left
-    behind, even while it is briefly the newest."""
+    left there stopped every app from starting). Nothing of ours goes into a
+    sandbox the system is still building, before its ShellUI runs: one whose
+    ShellUI never starts (on the console, as it woke from rest mode) is left
+    alone and taken down cleanly. The next sandbox is covered within a moment
+    of its ShellUI starting, before it reads the home row's icons; and an
+    older sandbox of it is never covered, nor one the system left behind, even
+    while it is briefly the newest."""
     if EMULATED:
         print("      (skipped: needs real mounts)", flush=True)
         return
     copy_program("/bin/sleep", "/tmp/SceShellUI")
-    shell = subprocess.Popen(["/tmp/SceShellUI", "600"])
     boxes = []
+    ours_in = lambda box: [l.split()[4] for l in open("/proc/self/mountinfo").read().splitlines()
+                           if l.split()[4].startswith(box + "/") and "/data/ps5-theme/" in l.split()[3]]
 
     def sandbox(n, subs=("user", "system_ex")):
         for sub, src in [(s, "/" + s) for s in subs]:
@@ -3290,9 +3626,11 @@ def t_shellui_exit_releases_sandbox():
             boxes.append(box)
         return f"/mnt/sandbox/NPXS40087_{n:03}"
     mine = png(64, 64, (255, 0, 0))
+    shell = None
     try:
         left = sandbox(0, ("system_ex",))   # as on 13.42: an earlier ShellUI's view the system never took down
         old = sandbox(1)
+        shell = subprocess.Popen(["/tmp/SceShellUI", "600"])   # the system builds its sandbox, then starts it
         assert call("POST", "/api/themes", {"id": "shellui", "name": "ShellUI"})[0] == 200
         assert put_file("shellui", f"{GAME}/icon0.png", mine)[0] == 200
         assert put_file("shellui", f"{HOME}/bg.png", S["bg"])[0] == 200
@@ -3303,7 +3641,7 @@ def t_shellui_exit_releases_sandbox():
         code, procs = call("GET", "/api/diag/procs")
         assert code == 200 and f"{shell.pid} SceShellUI".encode() in procs, procs[:300]
         end = time.time() + 5
-        while f"watching ShellUI (pid {shell.pid})" not in log_text():
+        while f"watching ShellUI (pid {shell.pid}, sandbox _001)" not in log_text():
             assert time.time() < end, "ShellUI's process was not found"
             time.sleep(0.2)
 
@@ -3333,8 +3671,19 @@ def t_shellui_exit_releases_sandbox():
         time.sleep(1.5)   # the leftover is now the newest ShellUI sandbox there is
         assert not [l for l in recorded_mounts() if l.startswith(left + "/")], recorded_mounts()
 
-        # ShellUI starts again in a new sandbox: covered at once.
-        new = sandbox(2)
+        # A sandbox built for a ShellUI that never starts (as on the console, waking from rest mode): nothing of
+        # ours goes in while it is being built, and the launcher takes it down cleanly.
+        failed = sandbox(2)
+        time.sleep(1.5)
+        assert not ours_in(failed) and not [l for l in recorded_mounts() if l.startswith(failed + "/")], ours_in(failed)
+        for box in [f"{failed}/user", f"{failed}/system_ex"]:
+            assert subprocess.run(["umount", box]).returncode == 0, f"the launcher couldn't take down {box}"
+            boxes.remove(box)
+
+        # ShellUI starts again in a new sandbox: nothing of ours in it until its process runs, then covered at once.
+        new = sandbox(3)
+        time.sleep(0.5)
+        assert not ours_in(new), ours_in(new)
         shell = subprocess.Popen(["/tmp/SceShellUI", "600"])
         end = time.time() + 0.5                                 # its /user and /system_ex views, one after the other
         while (crc_file(f"{new}/user/appmeta/PPSA01234/icon0.png") != zlib.crc32(mine)
@@ -3349,12 +3698,146 @@ def t_shellui_exit_releases_sandbox():
         boxes.append(again)
         time.sleep(1.5)
         assert crc_file(f"{again}/appmeta/PPSA01234/icon0.png") == zlib.crc32(png(64, 64, (0, 90, 200)))
+        assert not ours_in(failed)
     finally:
-        shell.kill()
-        shell.wait()
+        if shell:
+            shell.kill()
+            shell.wait()
         apply_and_wait("night")
         clear_sandboxes()
         call("DELETE", "/api/themes", {"id": "shellui"})
+
+
+def t_shellui_guard_holds_up():
+    """The thread that takes our overlays out of ShellUI's sandbox when it exits, where things go wrong: when the
+    console won't report the process's exit as an event, it neither spins (it once asked again at once, for good)
+    nor waits long, and still takes everything out within a second; and when the system has made a mount over one
+    of ours, it takes off only what is exactly ours, never the system's mount on top (an unmount by path takes the
+    newest mount there), and says what stayed."""
+    if EMULATED:
+        print("      (skipped: needs real mounts)", flush=True)
+        return
+    mine = png(64, 64, (255, 0, 0))
+    ours_in = lambda box: [l.split()[4] for l in open("/proc/self/mountinfo").read().splitlines()
+                           if l.split()[4].startswith(box + "/") and "/data/ps5-theme/" in l.split()[3]]
+    cpu = lambda pid: sum(int(x) for x in open(f"/proc/{pid}/stat").read().rsplit(")", 1)[1].split()[11:13]) / os.sysconf("SC_CLK_TCK")
+
+    def sandbox():
+        box = next_shellui_box()
+        for sub in ("user", "system_ex"):
+            os.makedirs(f"{box}/{sub}", exist_ok=True)
+            subprocess.run(["mount", "--bind", "/" + sub, f"{box}/{sub}"], check=True)
+        return box
+
+    shell = None
+    S["plugin"].term()
+    S["plugin"] = Plugin(env={"PS5THEME_TEST_NO_EXIT_EVENTS": "1"})
+    try:
+        assert call("POST", "/api/themes", {"id": "guarded", "name": "Guarded"})[0] == 200
+        assert put_file("guarded", f"{GAME}/icon0.png", mine)[0] == 200
+        assert put_file("guarded", f"{HOME}/bg.png", S["bg"])[0] == 200
+        box = sandbox()
+        shell = start_shellui()
+        apply_and_wait("guarded")
+        assert crc_file(f"{box}/user/appmeta/PPSA01234/icon0.png") == zlib.crc32(mine)
+        before, t0 = cpu(S["plugin"].proc.pid), time.time()
+        time.sleep(3)
+        used = cpu(S["plugin"].proc.pid) - before
+        assert used < 0.6 * (time.time() - t0), f"the plugin used {used:.2f} s of processor time in 3 s while watching ShellUI"
+        shell.kill()
+        shell.wait()
+        end = time.time() + 1
+        while ours_in(box):
+            assert time.time() < end, ("overlays left in the exited sandbox without exit events", ours_in(box))
+            time.sleep(0.02)
+
+        # The system makes a mount over one of ours in ShellUI's sandbox: when ShellUI exits, ours there stays (it
+        # can't come off without taking the system's) and the system's is left as it was.
+        S["plugin"].term()
+        S["plugin"] = Plugin()
+        box = sandbox()
+        shell = start_shellui()
+        point = f"{box}/user/appmeta/PPSA01234"
+        end = time.time() + 5
+        while crc_file(f"{point}/icon0.png") != zlib.crc32(mine):
+            assert time.time() < end, "the sandbox was not covered"
+            time.sleep(0.05)
+        subprocess.run(["mount", "--bind", "/user/appmeta/PPSA01234", point], check=True)
+        system_on_top = lambda: [l for l in open("/proc/self/mountinfo").read().splitlines()
+                                 if l.split()[4] == point and "/data/ps5-theme/" not in l.split()[3]]
+        assert system_on_top()
+        mark = len(log_text())
+        shell.kill()
+        shell.wait()
+        end = time.time() + 2
+        while not re.search(r"ShellUI exited: \d+ overlay\(s\) taken out", log_text()[mark:]):
+            assert time.time() < end, log_text()[-1500:]
+            time.sleep(0.05)
+        assert system_on_top(), "the release took off a mount that wasn't ours"
+        assert ours_in(box) == [point], ours_in(box)   # the one under the system's; the rest came out
+        assert "ShellUI exited: 1 overlay(s) in its sandbox could not be taken out" in log_text()[mark:], log_text()[-1500:]
+    finally:
+        if shell:
+            shell.kill()
+            shell.wait()
+        S["plugin"].term()
+        S["plugin"] = Plugin()
+        apply_and_wait("night")
+        clear_sandboxes()
+        call("DELETE", "/api/themes", {"id": "guarded"})
+
+
+def t_crash_takes_overlays_out_of_shellui():
+    """The plugin crashing while a theme is applied: nothing would be running to take its overlays out of ShellUI's
+    sandbox when ShellUI exits at rest mode, and one left there stops the system taking that sandbox down (no home
+    screen, or no app starting, until the console restarts). The crash handler takes them out before it exits,
+    and says so in the report; the next copy puts the theme back."""
+    if EMULATED:
+        print("      (skipped: needs real mounts)", flush=True)
+        return
+    mine = png(64, 64, (255, 0, 0))
+    ours_in = lambda box: [l.split()[4] for l in open("/proc/self/mountinfo").read().splitlines()
+                           if l.split()[4].startswith(box + "/") and "/data/ps5-theme/" in l.split()[3]]
+    shell, box = None, next_shellui_box()
+    for sub in ("user", "system_ex"):
+        os.makedirs(f"{box}/{sub}", exist_ok=True)
+        subprocess.run(["mount", "--bind", "/" + sub, f"{box}/{sub}"], check=True)
+    S["plugin"].term()
+    crashing = Plugin(CRASH)
+    reports = lambda: sorted(f for f in os.listdir(f"{BASE}/logs") if f.startswith("crash-"))
+    before = reports()
+    try:
+        assert call("POST", "/api/themes", {"id": "crashy", "name": "Crashy"})[0] == 200
+        assert put_file("crashy", f"{GAME}/icon0.png", mine)[0] == 200
+        assert put_file("crashy", f"{HOME}/bg.png", S["bg"])[0] == 200
+        shell = start_shellui()
+        apply_and_wait("crashy")
+        assert crc_file(f"{box}/user/appmeta/PPSA01234/icon0.png") == zlib.crc32(mine)
+        assert ours_in(box)
+        try:
+            call("POST", "/api/debug/crash", timeout=5)
+        except Exception:
+            pass
+        crashing.proc.wait(10)
+        assert crashing.proc.returncode == 70, crashing.proc.returncode
+        assert not ours_in(box), ("overlays left in ShellUI's sandbox by a crash", ours_in(box))
+        new = [f for f in reports() if f not in before]
+        assert len(new) == 1 and "overlays in the home screen's sandbox were taken out" in open(f"{BASE}/logs/{new[0]}").read()
+    finally:
+        crashing.kill()
+        S["plugin"] = Plugin()   # puts the theme back, then the console's own
+        apply_and_wait("night")
+        if shell:
+            shell.kill()
+            shell.wait()
+        for f in reports():
+            if f not in before:
+                os.unlink(f"{BASE}/logs/{f}")
+        for f in ("last-crash",):
+            if os.path.exists(f"{BASE}/logs/{f}"):
+                os.unlink(f"{BASE}/logs/{f}")
+        clear_sandboxes()
+        call("DELETE", "/api/themes", {"id": "crashy"})
 
 
 def t_shellui_exits_during_apply():
@@ -3525,7 +4008,7 @@ def t_home_music_at9():
     assert code == 200, r
     assert call("POST", "/api/apply", {"id": "tune9"})[0] == 200
     s = wait_applied("tune9")
-    assert "1 files verified" in s["result"] and "not converted to home music" not in s["result"], s["result"]
+    assert "1 file checked" in s["result"] and "not converted to home music" not in s["result"], s["result"]
     # How to hear it: the home screen starts its music again after another app's.
     hint = "To hear the new home music, highlight a game or app that plays its own music"
     assert hint in s["result"] and f"ps5-theme: {hint}" in open("/tmp/notifications.txt").read(), s["result"]
@@ -3576,7 +4059,7 @@ def t_long_mount_paths_use_parent_folder():
     assert put_file("deep", f"{HOME}/sub/deep.png", deep)[0] == 200  # folder path is 65 characters
     assert call("POST", "/api/apply", {"id": "deep"})[0] == 200
     s = wait_applied("deep")
-    assert "1 files verified" in s["result"] and "partly" not in s["result"], s["result"]
+    assert "1 file checked" in s["result"] and "partly" not in s["result"], s["result"]
     parent = f"{APPS}/NPXS40008/assets/src/modules/home"   # 54 characters
     assert len(mounts_on(parent)) == 1 and not mounts_on(f"{HOME}/sub"), (mounts_on(parent), mounts_on(f"{HOME}/sub"))
     assert crc_file(f"{HOME}/sub/deep.png") == zlib.crc32(deep)
@@ -3649,8 +4132,8 @@ TESTS = [t_startup, t_ui_and_icon_served, t_mutations_need_token, t_create_theme
          t_stock_mirror_and_linked_staging, t_stage_folders_reused_without_links,
          t_firmware_mismatch_is_refused, t_delete_rules, t_concurrent_requests_during_apply,
          t_restore_stock_cleans_up, t_overlays_reach_system_views, t_crash_loop_takes_theme_down, t_busy_overlay_is_never_forced, t_recovers_after_hard_kill, t_update_from_payload_manager, t_update_from_plain_elf, t_update_hands_over, t_update_at_boot, t_web_comes_back_after_rest_mode, t_takeover_when_web_is_down, t_stop_tool_keeps_the_theme, t_failed_write_closes_its_file, t_survives_malformed_and_abusive_requests,
-         t_slow_clients_do_not_block_others, t_log_rotates, t_media_policy, t_music, t_music_playlist, t_theme_choices, t_settings_and_duplicate, t_mix_and_match, t_preview_pictures, t_save_and_discard, t_discard_applies_only_when_needed, t_cut_off_uploads_are_not_theme_files,
-         t_home_background_textures, t_interface_pictures, t_title_pictures, t_fonts, t_bc7_keeps_transparency, t_page_writes_the_consoles_zstd_frames, t_page_builds_playlists, t_page_bleeds_colour_into_clear_pixels, t_page_places_textures_against_their_edge, t_texture_sources, t_appearance_textures, t_shellui_exit_releases_sandbox, t_shellui_exits_during_apply, t_title_where, t_watch_files, t_home_music_at9, t_long_mount_paths_use_parent_folder, t_system_is_byte_identical_afterwards, t_crash_is_reported_and_recovered,
+         t_slow_clients_do_not_block_others, t_log_rotates, t_media_policy, t_music, t_music_playlist, t_theme_choices, t_settings_and_duplicate, t_mix_and_match, t_writes_from_many_threads_stay_whole, t_status_keeps_its_walk, t_storage_reserve, t_console_pictures, t_icon_style_for_titles_installed_later, t_preview_pictures, t_save_and_discard, t_discard_applies_only_when_needed, t_cut_off_uploads_are_not_theme_files,
+         t_home_background_textures, t_interface_pictures, t_title_pictures, t_fonts, t_bc7_keeps_transparency, t_page_writes_the_consoles_zstd_frames, t_page_builds_playlists, t_page_bleeds_colour_into_clear_pixels, t_page_places_textures_against_their_edge, t_texture_sources, t_appearance_textures, t_shellui_exit_releases_sandbox, t_shellui_guard_holds_up, t_crash_takes_overlays_out_of_shellui, t_shellui_exits_during_apply, t_title_where, t_watch_files, t_home_music_at9, t_long_mount_paths_use_parent_folder, t_system_is_byte_identical_afterwards, t_crash_is_reported_and_recovered,
          t_privilege_failure_exits_cleanly]
 
 

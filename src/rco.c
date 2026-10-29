@@ -23,6 +23,8 @@
    controller's vibration patterns) must be unchanged. */
 
 #include <fcntl.h>
+#include <limits.h>
+#include <pthread.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -474,4 +476,147 @@ done:
 done_s:
   free(s.b);
   return ret;
+}
+
+
+/* ---- The manager's own icons: the console's interface icons (iconid_*), one at a time ----
+
+   The manager draws its list of a theme's parts with the console's own icons, read from the console's interface
+   file as it runs: nothing of Sony's is shipped with the plugin. Only the part of the file before its pictures is
+   read to find them (about 200 KB of 39 MB on 13.42), once while the file stays the same; each icon is then read on
+   its own. */
+
+#define ICON_INDEX_MAX (8u << 20)
+#define ICON_MAX_BYTES (256u << 10)
+#define ICON_ID_MAX    64
+
+typedef struct { char id[ICON_ID_MAX]; uint32_t off, size; } icon_ent_t;
+
+static struct {
+  pthread_mutex_t lock;
+  char path[PATH_MAX];
+  dev_t dev;
+  ino_t ino;
+  off_t size;
+  time_t mtime;
+  uint32_t data_off;     /* where the file table starts */
+  icon_ent_t *ents;
+  int n;
+} icons = { .lock = PTHREAD_MUTEX_INITIALIZER };
+
+
+static int
+read_at(int fd, void *buf, size_t len, off_t at) {
+  for(size_t done = 0; done < len;) {
+    ssize_t got = pread(fd, (uint8_t *)buf + done, len - done, at + (off_t)done);
+    if(got <= 0) return -1;
+    done += (size_t)got;
+  }
+  return 0;
+}
+
+
+/* The icons of the file at `path`, into `icons` (its lock held). */
+static int
+icons_index(const char *path, const struct stat *st) {
+  uint8_t head[RCO_HEADER];
+  rco_t r;
+  int fd = open(path, O_RDONLY);
+  if(fd < 0) return -1;
+  memset(&r, 0, sizeof(r));
+  if(read_at(fd, head, RCO_HEADER, 0) || memcmp(head, RCO_MAGIC, 4) || le32(head + 4) != RCO_VERSION) goto fail;
+  for(int i = 0; i < T_COUNT; i++) {
+    r.off[i] = le32(head + 8 + 8 * i);
+    r.size[i] = le32(head + 12 + 8 * i);
+  }
+  /* As rco_load expects: the tree first, the file table last, and everything before it small enough to read. */
+  if(r.off[T_TREE] != RCO_HEADER || r.off[T_FILE] > ICON_INDEX_MAX ||
+     (uint64_t)r.off[T_FILE] + r.size[T_FILE] != (uint64_t)st->st_size) goto fail;
+  for(int i = 0; i < T_FILE; i++) {
+    if(r.off[i] < RCO_HEADER || (uint64_t)r.off[i] + r.size[i] > r.off[T_FILE]) goto fail;
+  }
+  r.n = r.off[T_FILE];
+  r.b = malloc(r.n);
+  if(!r.b || read_at(fd, r.b, r.n, 0)) goto fail;
+
+  int cap = 0, n = 0;
+  icon_ent_t *ents = NULL;
+  const uint8_t *tree = r.b + r.off[T_TREE];
+  size_t tsize = r.size[T_TREE];
+  for(size_t at = 0; at + 28 <= tsize;) {
+    const uint8_t *el = tree + at;
+    uint32_t nattr = le32(el + 4);
+    if(nattr > (tsize - at - 28) / 16) break;
+    const char *id = element_id(&r, el, nattr);
+    if(!strcmp(table_str(&r, T_STR, le32(el)), "texture") && !strncmp(id, "iconid_", 7) && strlen(id) < ICON_ID_MAX) {
+      for(uint32_t i = 0; i < nattr; i++) {
+        const uint8_t *a = el + 28 + 16 * i;
+        uint32_t off = le32(a + 8), size = le32(a + 12);
+        if(le32(a + 4) != ATTR_FILE || !size || size > ICON_MAX_BYTES || (uint64_t)off + size > r.size[T_FILE]) continue;
+        if(n == cap) {
+          icon_ent_t *more = realloc(ents, sizeof(*ents) * (size_t)(cap = cap ? cap * 2 : 512));
+          if(!more) { free(ents); goto fail; }
+          ents = more;
+        }
+        snprintf(ents[n].id, sizeof(ents[n].id), "%s", id);
+        ents[n].off = off;
+        ents[n].size = size;
+        n++;
+        break;
+      }
+    }
+    at += 28 + 16 * (size_t)nattr;
+  }
+  free(icons.ents);
+  icons.ents = ents;
+  icons.n = n;
+  icons.data_off = r.off[T_FILE];
+  snprintf(icons.path, sizeof(icons.path), "%s", path);
+  icons.dev = st->st_dev;
+  icons.ino = st->st_ino;
+  icons.size = st->st_size;
+  icons.mtime = st->st_mtime;
+  free(r.b);
+  close(fd);
+  return 0;
+
+fail:
+  free(r.b);
+  close(fd);
+  return -1;
+}
+
+
+int
+rco_icon(const char *path, const char *id, uint8_t **out, size_t *len) {
+  struct stat st;
+  uint32_t off = 0, size = 0, data_off = 0;
+  *out = NULL;
+  *len = 0;
+  if(stat(path, &st) || !S_ISREG(st.st_mode)) return -1;
+  pthread_mutex_lock(&icons.lock);
+  int fresh = !strcmp(icons.path, path) && icons.dev == st.st_dev && icons.ino == st.st_ino &&
+              icons.size == st.st_size && icons.mtime == st.st_mtime;
+  if(fresh || !icons_index(path, &st)) {
+    for(int i = 0; i < icons.n; i++) {
+      if(strcmp(icons.ents[i].id, id)) continue;
+      off = icons.ents[i].off;
+      size = icons.ents[i].size;
+      data_off = icons.data_off;
+      break;
+    }
+  }
+  pthread_mutex_unlock(&icons.lock);
+  if(!size) return -1;
+  int fd = open(path, O_RDONLY);
+  uint8_t *d = fd < 0 ? NULL : malloc(size);
+  if(!d || read_at(fd, d, size, (off_t)data_off + off)) {
+    free(d);
+    if(fd >= 0) close(fd);
+    return -1;
+  }
+  close(fd);
+  *out = d;
+  *len = size;
+  return 0;
 }

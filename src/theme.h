@@ -5,7 +5,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#define PLUGIN_VERSION "1.65"
+#define PLUGIN_VERSION "1.69"
 #define TITLE_ID       "THEM00001"
 #define WEB_PORT       8095
 
@@ -38,6 +38,13 @@ int  fs_guard_init(void);
 int  fs_write_allowed(const char *path);
 int  fs_read_within(const char *path, const char *root);
 int  fs_open_write(const char *path);
+/* Free space kept for the console on the storage the plugin writes to. */
+#define FS_RESERVE (1ull << 30)
+int  fs_room_for(uint64_t need);
+/* How many writes the plugin has made: what was worked out from its folders holds while this stays the same. */
+unsigned fs_generation(void);
+#define STORAGE_FULL "the console's storage is nearly full: free some space, then try again"
+
 int  fs_mkdirs(const char *path);
 int  fs_rename(const char *from, const char *to);
 int  fs_unlink(const char *path);
@@ -90,11 +97,19 @@ int         svg_check_mem(const uint8_t *data, size_t len, char *why, size_t why
 
 /* inflate.c, png.c: checking PNG pictures against the console's own. */
 long        inflate_raw(const uint8_t *src, size_t len, size_t *used, uint8_t *dst, size_t cap, size_t window);
+/* png.c: a picture's pixels as RGBA (8-bit RGB or RGBA, not interlaced), and pixels
+   of the stock's size written back as a PNG of exactly the stock's kind (its chunks, its zlib header). At most
+   2048 pixels a side. */
+uint8_t    *png_decode_rgba(const uint8_t *png, size_t len, uint32_t *w, uint32_t *h);
+uint8_t    *png_encode_like(const uint8_t *stock, size_t stock_len, const uint8_t *rgba, size_t *out_len);
 int         png_check_against(const uint8_t *stock, size_t stock_len, const uint8_t *cand, size_t cand_len,
                               char *why, size_t why_len);
 
 /* rco.c: ShellUI resource containers; only their pictures may change. */
 int         rco_validate(const char *candidate, const char *stock, char *why, size_t len);
+/* One of the console's interface icons (an iconid_* picture) from the interface file at `path`: 0 with *out
+   (malloc'd, the caller frees) and *len, or -1 when there's no such icon. */
+int         rco_icon(const char *path, const char *id, uint8_t **out, size_t *len);
 int         wav_probe(const char *path, wav_info_t *out);
 
 /* font.c: a replacement font must be a whole TrueType or OpenType font with
@@ -121,6 +136,7 @@ int         font_check_mem(const uint8_t *buf, size_t n, char *why, size_t len);
    may be themed. */
 #define APPMETA_DIR     "/user/appmeta"
 #define APP_DIR         "/user/app"
+#define PATCH_DIR       "/user/patch"
 /* The pictures the console downloads from PlayStation Network: a title's
    (one folder per title) and its game's (one folder per concept, which a
    game's editions share). The app database points some games' tiles at
@@ -192,6 +208,13 @@ int         texture_validate(const char *candidate, const char *stock, char *why
    page to copy exactly; 0 if the file isn't zstd-compressed. */
 size_t      texture_frame_head(const char *path, uint8_t out[16]);
 const char *texture_format_name(const texture_info_t *t);
+/* A quarter-size picture of a texture (one RGBA pixel per 4x4 block, its opacity-weighted average), for the
+   manager's previews: BC7, BC1 and 8-bit RGBA/BGRA. 0 with *rgba malloc'd (the caller frees). */
+int         texture_preview(const char *path, uint8_t **rgba, uint32_t *w, uint32_t *h);
+int         texture_preview_mem(const uint8_t *d, size_t len, uint8_t **rgba, uint32_t *w, uint32_t *h);
+/* An opaque picture of the stock texture's size written as that texture (its header, its format, every mip):
+   BC7 or BC1, uncompressed. NULL for anything else. */
+uint8_t    *texture_encode_like(const uint8_t *stock, size_t stock_len, const uint8_t *rgba, size_t *out_len);
 
 
 /* zstd.c: Zstandard decompression (to read and verify .dds.zst textures). */
@@ -204,6 +227,8 @@ uint64_t xxh64(const void *data, size_t len);
 #define WEB_WORKERS 4
 enum { CRUMB_MAIN = 0, CRUMB_LISTEN, CRUMB_TILE, CRUMB_GUARD, CRUMB_WEB, CRUMB_COUNT = CRUMB_WEB + WEB_WORKERS };
 void crash_install(void);
+/* Called first on a fatal signal, from the signal handler: system calls and static memory only. */
+void crash_on_fatal(void (*fn)(void));
 void crash_thread_init(int slot);
 void crash_thread_exit(int slot);
 void crumb(int slot, const char *fmt, ...) __attribute__((format(printf, 2, 3)));
@@ -219,6 +244,7 @@ int  fw_matches(const char *list, const char *fw);
 void asset_listing_path(char *out, size_t size);
 void read_active(char *out, size_t size);
 int  write_active(const char *name);
+int  reapply_active(const char *expect);   /* apply the chosen theme again if it is still `expect` */
 int  applied_theme(char *out, size_t size);
 int  applying_theme(char *out, size_t size);
 int  apply_progress(char *text, size_t size);   /* percent, or -1 when idle */
@@ -239,6 +265,10 @@ void music_source_file(int slot, char *out, size_t size);   /* "music.wav" or "m
    the system path shows the theme's version, so every apply keeps a copy of
    each file it replaces under STOCK_DIR/<firmware>/. */
 void stock_path(const char *asset, char *out, size_t size);
+/* web.c: a replaceable asset (an allowed folder, an existing regular file, its real location allowed too). */
+int  asset_path_valid(const char *path);
+/* autostyle.c: the icon style for games and apps installed later, run in the background. */
+void *autostyle_thread(void *arg);
 int  write_theme_ini(const char *id, const char *name, const char *fw, const music_settings_t *music);
 
 

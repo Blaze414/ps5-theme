@@ -28,8 +28,8 @@ music) are under **Sounds** in the same editor.
    **New theme** first. A computer or phone is the easiest place: the song is
    converted in that browser, which is quicker there than in the console's
    own browser.
-2. **Add the song.** Switch on **Home music**, then drop the file on it or
-   press **Choose file**. Any audio file the browser can play works: MP3,
+2. **Add the song.** Open **Home music** in the list of parts, then drop the
+   file on it or press **Choose file**. Any audio file the browser can play works: MP3,
    M4A (AAC), OGG, FLAC, WAV and more. The music editor opens.
 3. **Choose what plays.**
 
@@ -54,7 +54,7 @@ music) are under **Sounds** in the same editor.
 5. **Set the loudness** if you like: from -12 to +12 dB against the console's
    own music (the starting point matches it). Changing it converts the music
    again.
-6. **Save** (the bar at the bottom), then **Apply to console**.
+6. **Save** (the bar at the bottom), then **Apply**.
 7. **Hear it:** highlight a game or app on the home screen that plays its own
    music, let it play, then go back to the home screen. See [When you hear
    it](#when-you-hear-it).
@@ -103,7 +103,7 @@ the manager puts the songs together into it.
 
 7. **Play** plays the whole playlist as the console will loop it; **Hear
    where it repeats** plays the seconds around the jump back.
-8. **Save**, then **Apply to console**, and hear it as in step 7 of [Step by
+8. **Save**, then **Apply**, and hear it as in step 7 of [Step by
    step](#step-by-step).
 
 - **Length:** the console plays home music up to about twice as long as its
@@ -174,12 +174,12 @@ The console plays a short sound as it wakes from rest mode
 has been heard on a PS5 with 13.42: the plugin keeps running through rest
 mode, and the console reads the sound as it wakes.
 
-1. In the theme's editor, switch on **Sounds** and press **Attach** on
-   `sfx_warmboot.at9`.
+1. In the theme's editor, open **Sounds** and press **Attach** on
+   `sfx_warmboot.at9` ("Waking from rest mode", under **Other sounds**).
 2. Choose a short sound. It can be up to about twice as long as the
    console's (on 13.42, about 10 seconds); a longer one is cut, fading out.
    Its loudness is matched to the console's own sound.
-3. **Save**, then **Apply to console**.
+3. **Save**, then **Apply**.
 4. Put the console in rest mode and wake it.
 
 The sounds of moving around the interface (the navigation sound and the

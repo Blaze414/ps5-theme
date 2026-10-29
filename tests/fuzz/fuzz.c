@@ -13,6 +13,14 @@
               picture), which inflates and unfilters it
      font     font_check_mem on the bytes, and the policy's font check against a
               stock font (a replacement font for the console's text)
+     preview  texture_preview_mem: a texture decoded to a quarter-size picture
+              (BC7 in all its modes, BC1, RGBA), for the manager's previews
+     rco-icon rco_icon: an interface file's icon index, and one icon from it
+     png-pixels png_decode_rgba (a title's icon, which homebrew can supply),
+              then png_encode_like and a decode of that, which must give the
+              same pixels back
+     tex-encode texture_encode_like on the input as the stock texture, then
+              texture_preview_mem on what it wrote
      rco-data the same, keeping the stock file's structure: the input gives
               the pointers into the file table (8 bytes each, in order) and
               then the file table itself, so the per-picture checks get
@@ -107,6 +115,37 @@ LLVMFuzzerTestOneInput(const uint8_t *d, size_t n) {
     texture_parse(d, n, &t);
     put(d, n);
     texture_validate(cand, stock("stock.dds.zst"), why, sizeof(why));
+  } else if(!strcmp(target, "preview")) {
+    uint8_t *rgba = NULL;
+    uint32_t w, h;
+    if(!texture_preview_mem(d, n, &rgba, &w, &h)) free(rgba);
+  } else if(!strcmp(target, "png-pixels")) {
+    uint32_t w, h, w2, h2;
+    size_t len;
+    uint8_t *px = png_decode_rgba(d, n, &w, &h);
+    if(px) {
+      uint8_t *again = png_encode_like(d, n, px, &len), *px2 = again ? png_decode_rgba(again, len, &w2, &h2) : NULL;
+      if(again && (!px2 || w2 != w || h2 != h || memcmp(px, px2, (size_t)w * h * 4))) abort();   /* a round trip must hold */
+      free(again);
+      free(px2);
+      free(px);
+    }
+  } else if(!strcmp(target, "tex-encode")) {
+    texture_info_t t;
+    if(!texture_parse(d, n, &t) && (uint64_t)t.width * t.height <= (1u << 20)) {
+      uint8_t *rgba = calloc((size_t)t.width * t.height, 4), *out = NULL, *pic = NULL;
+      size_t len;
+      uint32_t w, h;
+      if(rgba && (out = texture_encode_like(d, n, rgba, &len)) && texture_preview_mem(out, len, &pic, &w, &h)) abort();
+      free(pic);
+      free(out);
+      free(rgba);
+    }
+  } else if(!strcmp(target, "rco-icon")) {
+    uint8_t *icon = NULL;
+    size_t len;
+    put(d, n);
+    if(!rco_icon(cand, "iconid_home", &icon, &len)) free(icon);
   } else if(!strcmp(target, "at9")) {
     put(d, n);
     at9_validate(cand, stock("stock.at9"), why, sizeof(why));

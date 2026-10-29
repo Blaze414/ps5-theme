@@ -11,7 +11,7 @@ own view of the folder, as it does for game icons, once ShellUI's process
 has been found, and takes it out of that view the moment ShellUI exits.
 Other apps' views and the real folder keep the console's fonts.
 
-![The Fonts section of the manager: the fonts marked Home screen are the ones it draws with](screenshots/manager-fonts.png)
+![The Fonts part of the manager: fonts in groups, each with a sample in the theme's font; those marked Home screen are the ones it draws with](screenshots/manager-fonts.png)
 
 Before a font is accepted, `src/font.c` reads its structure in memory. It
 must be a whole TrueType or OpenType (CFF) font: its table list inside the

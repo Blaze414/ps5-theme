@@ -55,6 +55,7 @@ emulated`, `./build.sh` and `python3 tools/check_repo.py`.
 | `tools/klog/` | `ps5-klog.elf`: the kernel log on TCP port 3232, for finding out what the system does |
 | `tools/fonts/` | `ps5-fontscan.elf`: lists the font files each process has open or mapped, read-only, for the font test |
 | `tools/assetwatch/` | `ps5-assetwatch.elf`: for two minutes, logs the files the home screen and the web renderer map and unmap, read-only, to find where something on screen is loaded from |
+| `tools/docshots.mjs` | The manager's screenshots in `docs/screenshots/`, taken from a console's manager in a headless Chromium, read-only (every request that would change something is refused), with the console's own pictures and games' icons shown as stand-ins |
 | `tools/` | Table generator, icon generator, plugin packer, repository checks (`check_repo.py`) |
 | `.github/workflows/ci.yml` | The tests, the build and the repository checks on every push |
 | `tests/host/` | End-to-end tests and the fake console (`rco_fixture.py` builds resource files) |

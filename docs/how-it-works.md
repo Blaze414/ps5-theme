@@ -21,10 +21,13 @@ How themes reach the console without writing the system, and why it is built thi
 - [Interface pictures in resource files](#interface-pictures-in-resource-files)
 - [Overlays still in use](#overlays-still-in-use)
 - [When the interface keeps restarting](#when-the-interface-keeps-restarting)
+- [The console's own pictures in the manager](#the-consoles-own-pictures-in-the-manager)
+- [Icons styled in the background](#icons-styled-in-the-background)
 - [Preview pictures](#preview-pictures)
 - [Export and import](#export-and-import)
 - [The web server](#the-web-server)
 - [The tile](#the-tile)
+- [Threads, and what they share](#threads-and-what-they-share)
 - [Crashes, logs and threads](#crashes-logs-and-threads)
 - [Firmware independence](#firmware-independence)
 
@@ -62,6 +65,18 @@ enforced, not assumed. Every write the plugin makes goes through
   `unlink` semantics).
 - Theme files, settings and uploads are written under a temporary name and
   renamed into place, so a crash never leaves half a file.
+- **Room for the console** (since 1.66): the storage under `/data` is the
+  console's own, shared with saves, app data and the system's records. Before
+  receiving an upload (whose size the request states), and before each copy
+  it makes (staging a theme's folders where hard links aren't available, Mix
+  and match), the guard's `fs_room_for` checks that 1 GB stays free
+  (`FS_RESERVE`), from `statfs` on `/data/ps5-theme`. When it wouldn't, the
+  write is refused before anything is written: an upload gets
+  `507 Insufficient Storage` ("the console's storage is nearly full"), a copy
+  fails and is logged as "storage nearly full". `/api/status` reports `room`,
+  what a theme can still take, so the page refuses a file that won't fit
+  before sending it: a refusal while a large upload is still arriving can
+  reach the browser as a dropped connection instead of the message.
 - **One exception** (since 1.62): replacing an older installed copy of
   ps5-theme itself with the running version (see
   [Updating in place](#updating-in-place)). It is a separate call,
@@ -110,6 +125,39 @@ changes (it compares the number of mounts every second, which costs almost
 nothing) and overlays any new view from the same stage folders, checks it,
 and logs it. It never takes anything down to do this, so there's no stock
 flash, and nothing is forced off while an app is using it.
+
+The home screen's own sandbox (`/mnt/sandbox/NPXS40087_<n>`) gets nothing
+until its process (`SceShellUI`) is running and the plugin is watching it
+(since 1.68). The system builds the sandbox first, then starts the process,
+and if the process ends, the plugin takes its overlays out of the sandbox
+at once, before the system takes the sandbox down. Before 1.68 the font
+went into a new home screen's sandbox while the system was still building
+it. On 2026-10-29, waking from rest mode, two home screens in a row never
+started; the plugin's font overlay was still on the system's font folder in
+their sandboxes, so the system couldn't take them down, and no home screen
+started again until the console was restarted. Now, for 30 seconds after
+the home screen exits, the plugin looks for the next one every 10 ms and
+covers its sandbox as soon as it is found, early enough for what it reads
+as it starts (confirmed on 13.42: the font and the game icons show after
+one wake). A view where an overlay of the plugin's is already present, even
+under another mount, never gets a second one.
+
+The same care when overlays come out (since 1.69):
+
+- **Only what is exactly ours.** An unmount by path takes off the newest
+  mount at that point. Where the system has made a mount over one of ours,
+  that would be the system's, so such an overlay of ours stays (the log
+  says how many) and the system's mount is left as it is. Our own layers on
+  one point come off newest first.
+- **When the exit can't be watched.** Should the console refuse to report
+  the process's exit as an event, the watcher looks every 50 ms instead.
+  Before, it asked again at once, for good, which would have kept a
+  processor core busy for as long as the home screen ran.
+- **When the plugin crashes.** With no copy running, nothing would take its
+  overlays out of the home screen's sandbox when the home screen exits at
+  rest mode. The crash handler takes them out first, with system calls only,
+  from the plugin's records, and only those the path shows as ours; the
+  crash report says so.
 
 Some views are views of views. The console shows `/user` again as
 `/original_user`, and ShellUI's sandboxes then show
@@ -173,7 +221,7 @@ harmless to every decoder that reads it:
 So a file can pass and still be damaged further in; the home screen's own
 decoders then decide what happens. Theme files are your own, and the likely
 result of a bad one is a picture or sound that doesn't show or play, or the
-home screen restarting. **Restore stock** or a restart brings it back.
+home screen restarting. **No theme** or a restart brings it back.
 
 The plugin's own parsers read whatever is uploaded, so they get the most
 care: every read is bounds-checked, each kind of file has a size limit, a
@@ -254,7 +302,7 @@ percentage never goes backwards.
 
 The selected theme is stored in `/data/ps5-theme/active`. After a reboot the
 plugin applies it again at start, with a notification on the console.
-**Restore stock** sets the selection to `none`.
+**No theme** sets the selection to `none`.
 
 When the plugin itself restarts without a reboot (an update, or etaHEN's
 Stop, which ends a plugin at once), the overlays are still in place. After
@@ -539,7 +587,7 @@ keep playing.
 
 ## Overlays still in use
 
-Switching themes or choosing **Restore stock** takes the current overlays
+Switching themes or choosing **No theme** takes the current overlays
 down. If an app is still reading from one (ShellUI keeps the home music and
 its interface files open), the plugin waits a moment and then leaves it
 where it is. It never forces it off. On 13.42, forcing it broke the
@@ -557,7 +605,7 @@ start until a restart. Instead:
 - if the new theme's overlay can't go on there, or fails its check, a
   verified copy of the system's own folder goes on top instead, so the
   console never shows the theme that was taken down;
-- for **Restore stock**, a verified copy of the system's own folder goes on
+- for **No theme**, a verified copy of the system's own folder goes on
   top, so the console looks stock;
 - the app keeps reading what it already had open;
 - the next switch tries again from the top down, and a restart clears
@@ -579,6 +627,82 @@ and changes nothing.
 Sandboxes left by earlier restarts can stay on the console for good, so the
 plugin counts only sandboxes newer than the ones it found when the theme was
 applied.
+
+## The console's own pictures in the manager
+
+The manager draws the console's own pictures where a theme leaves things as
+they are, and its list of a theme's parts with the console's own icons
+(since 1.66). None of them are part of the plugin or the page: two read-only
+requests read them from the console as the page runs, from the console's own
+copy of each file (`stock_path`), never a theme's.
+
+- **`/api/ui-icon?id=iconid_…`**: one icon of the main interface file
+  (`Sce.PlayStation.PUI_UI3.rco`). Only the part of the file before its
+  pictures is read to find them (about 200 KB of 39 MB on 13.42), once while
+  the file stays the same (its device, inode, size and time), then each icon
+  on its own. Only `iconid_` ids of letters, digits and underscores are
+  accepted, and the reply carries `Content-Security-Policy: default-src
+  'none'`, so an SVG opened on its own can't run anything.
+- **`/api/asset/picture?path=…`**: a system texture as a quarter-size
+  picture, one RGBA pixel per 4x4 block (the block's average, its colour
+  weighted by how opaque each pixel is): a 4K background becomes 960x540, an
+  Appearance piece 640x205. The console's textures are zstd-compressed BC7
+  using all eight of its modes, which no browser reads; the plugin's decoder
+  follows Microsoft's specification, with its partition and anchor tables,
+  and matched Pillow's decoder exactly on the console's own textures (the
+  four looks' pieces and the 4K background) and on the tests' fixture, whose
+  result the tests pin. BC1 and 8-bit RGBA/BGRA textures are read too.
+
+## Icons styled in the background
+
+A theme's icon style (Games and apps) reaches games installed after it was
+used without the manager open (since 1.66). `src/autostyle.c` looks every
+minute, and only between applies, at the theme that is applied, if its style
+says to (`icon-style/style.ini`, `auto=1`) and its template is whole
+(`base.png`, `mask.png` and `known.txt`; without the list of titles
+installed then, every title would look new, so nothing is styled and the log
+says to open the theme in the manager, which keeps it again):
+
+- **Which titles:** a folder in `/user/appmeta` named like a title ID, not in
+  the titles installed when the page last used the style (`known.txt`), not
+  styled here before (`made.txt`), and with no file of the theme's for it (a
+  title you changed by hand; the page styles those, with your picture kept
+  in `icon-style/own/<ID>.png`). A title whose icon you put back is never
+  styled again behind your back.
+- **When:** once nothing in its folders (`/user/appmeta/<ID>`,
+  `/user/app/<ID>`, its `sce_sys`) and its package (`app.pkg`, or a patch's
+  under `/user/patch/<ID>`) has changed for 10 minutes. The console writes
+  those while it installs, downloads or updates a game (a package grows
+  without its folder changing), and a theme over them would keep it from
+  writing, so the styler waits. A theme deleted while a title is styled gets
+  nothing written into it.
+- **How:** the title's own icon is read as pixels (`png_decode_rgba`: 8-bit
+  RGB or RGBA PNGs, at most 2048 pixels a side, through the same inflate the
+  checks use, since a homebrew package's icon is untrusted), set into the
+  shape over the page's template, and written as each of its icon files is:
+  `png_encode_like` keeps every chunk of the console's PNG and its zlib
+  header, with stored blocks; `texture_encode_like` writes the console's DDS
+  header and every mip, with the page's own BC7 mode-6 and BC1 encoders.
+  Each file is checked exactly as an upload is (`asset_validate`) before it
+  goes into the theme; a title whose files can't all be made (a compressed
+  texture, a picture of another kind) is left for the page. Each title is
+  tried once per run of the plugin.
+- **Not while you play:** while a game or app is being played, the styler
+  does nothing, neither styling nor applying; an apply owed from while one
+  was played waits too. A title's process is named after the program it runs
+  (`eboot.bin`), but a game left on the home screen is still there: the
+  console suspends it. So a game counts as played only while its process
+  uses the processor: more than 2% of one core between two looks, read from
+  the kernel's process records (`ki_runtime`, its threads' time). A suspended
+  game uses none. A process seen for the first time, or whose time can't be
+  read, counts as played until the next look. The log names the titles
+  waiting, once; `/api/diag/procs` shows each process's processor time.
+- **Then:** the theme is applied again (only the new title's folders are
+  new), and the console says which titles were styled.
+
+A title that isn't installed (uninstalled, or not yet) keeps its pictures in
+the theme: an apply leaves its folders out and logs "isn't installed; its
+pictures stay in the theme", without calling the apply partial.
 
 ## Preview pictures
 
@@ -636,6 +760,15 @@ and the ATRAC9 module, both built into the plugin) and a JSON API. The page
 reloads itself when the plugin is updated, so it never runs code older than
 the plugin.
 
+The status the manager asks for every few seconds (every second during an
+apply), from every device that has it open, used to walk every theme's
+files each time. Since 1.66 that walk (each theme's file count and the
+pictures on its card) is kept: until the plugin writes anything (the write
+guard counts its writes, after each one, so a change made through the
+plugin shows at once) or for 10 seconds, so a change made from outside, over
+FTP, shows within that. Everything else in the status (names, music, the
+unsaved mark, the preview picture) is read every time.
+
 ## The tile
 
 A deep-link app: only `param.json` and `icon0.png` under
@@ -644,6 +777,32 @@ the console's browser. It is registered through AppInstUtil. On firmware
 without the single-title install function, the plugin uses the system's
 registration scan instead, as etaHEN's Toolbox card does. An ownership marker
 and a receipt keep it from being registered twice.
+
+## Threads, and what they share
+
+The plugin's threads: the engine (applies), the web listener and its four
+workers, the tile installer, the interface guard and the icon styler. What
+they share, and how:
+
+- **A theme's files** change under one lock (`themes_lock`): an apply holds
+  it throughout; uploads, settings, the icon style's settings and list, and
+  the styler's placing of its files take it for their change.
+- **Each whole-file write** goes through a temporary name of its own
+  (`fs_write_file`, since 1.66), so two threads writing one file (the chosen
+  theme, from two requests at once) never write into each other's, and the
+  last one wins whole. The temporary names end in `.part`, which applies and
+  listings skip, so one cut off by a crash or a power loss is never taken for
+  a theme's file.
+- **The chosen theme** is written only by a request to apply one; the
+  styler only asks for the chosen theme to be applied again, and only if it
+  is still the theme it styled for (`reapply_active`), so a theme chosen
+  while it works is never undone.
+- **Caches** (the status's walk of each theme, the interface icons' index,
+  the remembered checks) each have their own lock, held briefly, with no
+  other lock taken inside it, so no two threads can wait on each other.
+
+ThreadSanitizer runs the whole suite (`tests/host/run.sh tsan`, see
+[Testing](testing.md)) without a race reported.
 
 ## Crashes, logs and threads
 

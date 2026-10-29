@@ -35,6 +35,7 @@ The problems met while building this, and how each was solved. Part of the [PS5 
 - [A slow start after every reboot](#a-slow-start-after-every-reboot)
 - ["It forgot my theme after a reboot"](#it-forgot-my-theme-after-a-reboot)
 - [An import that lost the backgrounds](#an-import-that-lost-the-backgrounds)
+- [A home screen that never came back](#a-home-screen-that-never-came-back)
 - [Small things that confused people](#small-things-that-confused-people)
 - [Testing without the console](#testing-without-the-console)
 
@@ -680,6 +681,30 @@ folders, not the home screen's asset folder, and a manager page left open
 across an update kept running the old code. **Solution:** import takes
 everything under the theme's `files/` folder, the page reloads itself when
 the plugin is updated, and import and export say exactly what they contain.
+
+## A home screen that never came back
+
+With 1.67 and a theme with its own font, the console woke from rest mode to
+nothing and stayed that way. The plugin's log showed the home screen
+(ShellUI) starting twice in two seconds and never running; its guard took the
+theme down, but no home screen started again until the console was
+restarted. The cause was a race the plugin had always won until then: it
+covered a new home screen's font folder the moment the system made it, while
+the system was still building that home screen's sandbox, and this time it
+covered it twice, a sign it was in the system's way. Neither home screen
+started, and when the system took their sandboxes down, the plugin's overlay
+was still on their font folder, so it couldn't; after that, it started no
+home screen at all. The same theme had woken fine an hour earlier.
+**Solution (1.68):** nothing of the theme's goes into a home screen's
+sandbox until its process is running and the plugin is watching it, so
+everything comes out the moment it exits. For 30 seconds after one exits,
+the plugin looks for the next every 10 ms, which is early enough: the font
+and the game icons still show after one wake. 1.69 then went through what
+else could leave something behind there: the plugin crashing (its crash
+handler now takes those overlays out first), an exit the console won't
+report (the plugin no longer spins waiting for it), and a mount of the
+system's over one of the plugin's (only what is exactly the plugin's comes
+off). See [How it works](how-it-works.md#reaching-the-home-screen-through-its-sandbox-views).
 
 ## Small things that confused people
 

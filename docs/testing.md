@@ -7,7 +7,7 @@ tests/host/run.sh
 ```
 
 Builds the real plugin sources for Linux with AddressSanitizer and UBSan and
-runs 59 end-to-end tests against a fake console tree in a privileged
+runs 66 end-to-end tests against a fake console tree in a privileged
 container (GitHub Actions runs them on every push: see
 [Building](building.md#continuous-integration)). They cover:
 
@@ -62,7 +62,14 @@ container (GitHub Actions runs them on every push: see
   once, also with an overlay missing from the records, and also while the
   plugin is held in the middle of an apply, before or after mounting
   (nothing goes into that sandbox afterwards); its older sandboxes and ones
-  the system left behind never covered; its next sandbox covered;
+  the system left behind never covered; a sandbox the system builds for a
+  home screen that never starts gets nothing and is taken down cleanly; its
+  next sandbox covered only once its process runs, then within half a
+  second; with its exit not reported as an event, the plugin doesn't spin
+  and still takes everything out within a second; with a mount of the
+  system's over one of ours, only what is exactly ours comes off;
+- the plugin crashing with a theme applied: its overlays out of the home
+  screen's sandbox before it exits, and the report saying so;
 - your own picture inside a vector icon, a home screen tile icon numbered
   by the page in its exact format, and tile icon files mapped to their
   apps, all accepted;
@@ -94,6 +101,34 @@ container (GitHub Actions runs them on every push: see
 - Save and Discard, preview pictures and duplicates; Discard applying the
   theme again only when the console shows other files than the ones it puts
   back;
+- Writes from many threads: four threads renaming a theme, changing its
+  icon style and its choices and reading the status, and two choosing
+  themes, all at once: every request answered, every file whole with one of
+  the values written, and no temporary file left;
+- The status's walk of each theme kept: a change made through the plugin
+  shows at once, one made from outside within 10 seconds (and not at once);
+- Icons styled in the background: each template part answered with the
+  size and checksum stored, and the template whole only with all three
+  parts; with its style on, nothing is styled while a stand-in game uses the
+  processor, then, with a stand-in game left idle (as a suspended one is), a
+  title installed 15 minutes ago is styled by the plugin (one whose package
+  is still downloading is not)
+  (its PNGs the icon in the shape over the template, its textures BC7), the
+  theme applied again and the console told; a title still being written and
+  the titles known when the style was used are left alone; bad template
+  parts and settings refused; once uninstalled, its pictures stay in the
+  theme and the apply isn't partial;
+- The console's own pictures: an interface icon by id (the SVG and the PNG
+  one, byte for byte from the file, the SVG with a policy that runs
+  nothing), a missing one and bad ids refused; a texture's quarter-size
+  picture, pinned (its decoder matched Pillow's), and non-textures refused;
+  the icon style's backdrop picture kept, read, refused under an unknown kind
+  and removed;
+- The storage reserve: with the free space set just above 1 GB, an upload is
+  refused (507, "storage is nearly full") with no temporary file left, the
+  status reports the room left, and a mix that needs a copy is refused as
+  such with no theme left; with room again, the same upload and mix go
+  through;
 - Mix and match: a new theme made of three themes' parts, each file,
   original, song and the music settings copied byte for byte, the themes
   taken from unchanged, then applied; a list naming another theme's file, a
@@ -123,6 +158,18 @@ tests/host/run.sh emulated
 
 The same suite in an unprivileged build step, with mounts emulated and the
 read-only checks skipped.
+
+```bash
+tests/host/run.sh tsan
+```
+
+The same suite against a ThreadSanitizer build of the plugin, which stops at
+the first data race between its threads (the engine, the web listener and
+its four workers, the tile installer and the icon styler). It builds for the
+machine's own architecture (ThreadSanitizer can't run under the x86-64
+emulation Docker uses on an Apple Silicon Mac; the plugin's code is
+portable). On 29 October 2026 every test passed under it, natively on ARM64,
+with no race reported, the test of writes from many threads included.
 
 ```bash
 tests/host/run.sh serve
@@ -250,3 +297,7 @@ After any failure the console was restarted before the next test.
 | 1.63 | Theme switches while the home screen held the interface folder, the same theme applied again among them | One layer per switch, but the same theme again was refused on three folders ("Resource deadlock avoided"): the console's files went on top, then the theme again, three layers and "applied partly" |
 | 1.63 | The fix, after a restart: Yakuza 0, Yakuza 0 again, Snoopy, Yakuza 0 | **Works**: each applied completely; exactly one theme layer on every folder afterwards (13 after a day of tests with 1.62) |
 | 1.64 | The update from 1.63 through the update folder; the options menu's opening and closing sounds, the screenshot's and a dialog's replaced, applied, then rest mode | **Works** |
+| 1.66 | Icon style (a shape over a picture) with games installed later on; choosing options with the controller; a homebrew app installed afterwards | **Three faults**: "the console stored something different" (the plugin answered the style's template upload without its checksum, so only the first part was kept and the setting never saved); a chosen option showed only after Save (the white focus hid its ring); the new app wasn't styled (no template, and a game left on the home screen counted as one being played). The running game's process is named `eboot.bin`, as assumed |
+| 1.67 | The fixes above; Yakuza 0 (with its own font) applied, then rest mode | **The console didn't wake**: the plugin covered the new home screen's font while the system was still building it; two home screens in a row never started and none started again until the console was restarted (see [A home screen that never came back](challenges.md#a-home-screen-that-never-came-back)) |
+| 1.68 | Nothing in a home screen's sandbox until its process runs; Yakuza 0, rest mode | **Works**: wakes, and the font and the game icons show after one wake |
+| 1.69 | The update from 1.68, then two rest-mode cycles with Yakuza 0 | **Works**: each time the overlays came out of the old home screen in about 65 ms, and the new one was covered only once it was running |
