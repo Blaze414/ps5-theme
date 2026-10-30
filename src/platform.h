@@ -65,13 +65,6 @@ uint64_t plat_free_bytes(const char *path);
 /* The process whose kernel command name is `name`, or -1. */
 int      plat_find_process(const char *name);
 
-/* A live process: its pid, when it started (as plat_process_start tells it) and the processor time it has used,
-   in microseconds (0 where that can't be told). */
-typedef struct { int pid; unsigned long long start; unsigned long long cpu_us; } plat_proc_t;
-
-/* The live processes whose kernel command name is `name`, up to `max` of them: how many, or -1 if the
-   process list can't be read. */
-int      plat_processes_named(const char *name, plat_proc_t *out, int max);
 
 /* The live process with a thread named `name` (see plat_set_name), other
    than `except`, or -1: how another program finds the running plugin, as

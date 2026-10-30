@@ -220,6 +220,26 @@ fs_open_write(const char *path) {
 }
 
 
+/* One more line at the end of a file, in one write and without waiting for the disk: for records that matter only
+   while the console runs (the overlays this plugin mounted go with a restart), where waiting for each was most of
+   the time the home screen showed its own look during a switch. */
+int
+fs_append_file(const char *path, const void *data, size_t len) {
+  if(!fs_write_allowed(path)) return deny("append", path);
+  int fd = written(open(path, O_WRONLY | O_CREAT | O_APPEND | O_NOFOLLOW, 0644));
+  if(fd < 0) return -1;
+  const char *p = data;
+  while(len) {
+    ssize_t n = write(fd, p, len);
+    if(n < 0 && errno == EINTR) continue;
+    if(n <= 0) { close(fd); return -1; }
+    p += n;
+    len -= (size_t)n;
+  }
+  return close(fd) ? -1 : 0;
+}
+
+
 int
 fs_mkdirs(const char *path) {
   char tmp[PATH_MAX];
@@ -336,28 +356,63 @@ fs_is_dir(const char *path) {
 }
 
 
+/* Deeper than any folder the plugin makes or the system has. A tree deeper still (put there by hand, or a broken
+   copy) is left as it is rather than walked: each level takes stack, and a web worker has 512 KB of it. */
+#define RM_MAX_DEPTH 64
+
 static int
-rm_rf(const char *path) {
+rm_rf_at(const char *path, int depth) {
   struct stat st;
 
+  if(depth > RM_MAX_DEPTH) return -2;   /* (said as ELOOP by fs_rm_rf_under, whatever fails after it) */
   if(lstat(path, &st)) return errno == ENOENT ? 0 : -1;
   if(!S_ISDIR(st.st_mode)) return fs_unlink(path);
 
   DIR *d = opendir(path);
   if(!d) return -1;
+  char *child = malloc(PATH_MAX);   /* (from the heap: see RM_MAX_DEPTH) */
+  if(!child) { closedir(d); return -1; }
   struct dirent *e;
   int ret = 0;
   while((e = readdir(d))) {
     if(!strcmp(e->d_name, ".") || !strcmp(e->d_name, "..")) continue;
-    char child[PATH_MAX];
-    if(snprintf(child, sizeof(child), "%s/%s", path, e->d_name) >= (int)sizeof(child)) {
+    if(snprintf(child, PATH_MAX, "%s/%s", path, e->d_name) >= PATH_MAX) {
       ret = -1;
       continue;
     }
-    if(rm_rf(child)) ret = -1;
+    int r = rm_rf_at(child, depth + 1);
+    if(r && ret != -2) ret = r;
   }
   closedir(d);
-  return fs_rmdir(path) ? -1 : ret;
+  free(child);
+  return fs_rmdir(path) && ret != -2 ? -1 : ret;
+}
+
+/* 1 if a folder under `path` is deeper than RM_MAX_DEPTH: then nothing is deleted at all, rather than part of it
+   (a theme's settings gone and its files left). */
+static int
+too_deep(const char *path, int depth) {
+  struct stat st;
+  if(depth > RM_MAX_DEPTH) return 1;
+  if(lstat(path, &st) || !S_ISDIR(st.st_mode)) return 0;
+  DIR *d = opendir(path);
+  char *child = d ? malloc(PATH_MAX) : NULL;
+  int deep = 0;
+  struct dirent *e;
+  while(child && !deep && (e = readdir(d))) {
+    if(!strcmp(e->d_name, ".") || !strcmp(e->d_name, "..")) continue;
+    if(e->d_type != DT_DIR && e->d_type != DT_UNKNOWN) continue;   /* (a file: no stat needed to know) */
+    if(snprintf(child, PATH_MAX, "%s/%s", path, e->d_name) < PATH_MAX) deep = too_deep(child, depth + 1);
+  }
+  if(d) closedir(d);
+  free(child);
+  return deep;
+}
+
+static int
+rm_rf(const char *path) {
+  if(too_deep(path, 0)) return -2;
+  return rm_rf_at(path, 0);
 }
 
 
@@ -368,7 +423,9 @@ fs_rm_rf_under(const char *root, const char *path) {
   if(strncmp(path, root, n) || path[n] != '/' || !path[n + 1] || !lexical_ok(path)) {
     return deny("delete", path);
   }
-  return rm_rf(path);
+  int r = rm_rf(path);
+  if(r == -2) errno = ELOOP;
+  return r ? -1 : 0;
 }
 
 
@@ -436,9 +493,10 @@ fs_crc32_file(const char *path, uint32_t *crc, uint64_t *size) {
 /* Copy plain directories and regular files (never symlinks) from src to dst,
    e.g. to duplicate a theme. dst must not exist yet. */
 static int
-copy_tree_into(const char *src, const char *dst, int links) {
+copy_tree_into(const char *src, const char *dst, int links, int depth) {
   struct stat st;
 
+  if(depth > RM_MAX_DEPTH) { errno = ELOOP; return -1; }   /* (deeper than anything the plugin makes: see there) */
   if(!lstat(dst, &st)) return deny("copy over existing", dst);
   if(fs_mkdirs(dst)) return -1;
 
@@ -447,7 +505,8 @@ copy_tree_into(const char *src, const char *dst, int links) {
   struct dirent *e;
   int ret = 0;
   uint8_t *buf = malloc(64 * 1024);
-  if(!buf) { closedir(d); return -1; }
+  char *paths = malloc(2 * PATH_MAX);   /* this level's two paths, from the heap too */
+  if(!buf || !paths) { free(buf); free(paths); closedir(d); return -1; }
 
   while(!ret && (e = readdir(d))) {
     if(!strcmp(e->d_name, ".") || !strcmp(e->d_name, "..")) continue;
@@ -455,17 +514,18 @@ copy_tree_into(const char *src, const char *dst, int links) {
        Discard goes back to, would otherwise bring it back as a file of the theme. */
     size_t len = strlen(e->d_name);
     if(len > 5 && !strcmp(e->d_name + len - 5, ".part")) continue;
-    char s[PATH_MAX], t[PATH_MAX];
-    if(snprintf(s, sizeof(s), "%s/%s", src, e->d_name) >= (int)sizeof(s) ||
-       snprintf(t, sizeof(t), "%s/%s", dst, e->d_name) >= (int)sizeof(t)) {
+    char *s = paths, *t = paths + PATH_MAX;
+    if(snprintf(s, PATH_MAX, "%s/%s", src, e->d_name) >= PATH_MAX ||
+       snprintf(t, PATH_MAX, "%s/%s", dst, e->d_name) >= PATH_MAX) {
       ret = -1;
       break;
     }
     if(lstat(s, &st)) continue;
     if(S_ISDIR(st.st_mode)) {
-      ret = copy_tree_into(s, t, links);
+      ret = copy_tree_into(s, t, links, depth + 1);
     } else if(S_ISREG(st.st_mode)) {
       if(links && !fs_link(s, t)) continue;
+      if(fs_room_for((uint64_t)st.st_size)) { ret = -1; break; }   /* the console's share stays free (logged) */
       int in = open(s, O_RDONLY);
       int out = in < 0 ? -1 : fs_open_write(t);
       if(in < 0 || out < 0) ret = -1;
@@ -486,6 +546,7 @@ copy_tree_into(const char *src, const char *dst, int links) {
     }
   }
   free(buf);
+  free(paths);
   closedir(d);
   return ret;
 }
@@ -493,7 +554,7 @@ copy_tree_into(const char *src, const char *dst, int links) {
 
 int
 fs_copy_tree(const char *src, const char *dst) {
-  return copy_tree_into(src, dst, 0);
+  return copy_tree_into(src, dst, 0, 0);
 }
 
 
@@ -502,5 +563,5 @@ fs_copy_tree(const char *src, const char *dst) {
    renamed over it) and never changes one in place. */
 int
 fs_link_tree(const char *src, const char *dst) {
-  return copy_tree_into(src, dst, 1);
+  return copy_tree_into(src, dst, 1, 0);
 }

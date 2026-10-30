@@ -5,8 +5,9 @@
 
    Whether a copy runs is decided by the plugin's instance lock alone, and
    overlays are only touched while this program holds that lock, so never
-   under a running copy. A running copy (found by running_copy) is asked to
-   stop (SIGUSR2): it takes out only the overlays of games' and apps'
+   under a running copy. A running copy is asked to stop over its web port
+   first (since 1.73: nothing to look for), else, found by running_copy, by
+   its signal (SIGUSR2): it takes out only the overlays of games' and apps'
    pictures, which must not stay in the home screen's view without a copy
    running to take them out at rest mode (no game or app would start after
    it), and exits. The rest of the theme stays; the next copy carries on and
@@ -135,6 +136,10 @@ write_report(void) {
   if(pid && !fgets(line, sizeof(line), pid)) line[0] = 0;
   if(pid) fclose(pid);
   fprintf(f, "# %s: %s", PID_FILE, line[0] ? line : "(none)\n");
+  int recorded = atoi(line);   /* that process's start time as the console says it now, to compare */
+  if(recorded > 0) fprintf(f, "# pid %d starts now at %llu\n", recorded, plat_process_start(recorded));
+  char reply[256];
+  fprintf(f, "# web port: %s\n", local_request("GET", "/api/status", reply, sizeof(reply)) ? "no answer" : "answers");
   fprintf(f, "# threads (pid tid name / process name)\n");
   plat_dump_threads(f);
   fclose(f);
@@ -154,8 +159,21 @@ main(void) {
     say("ps5-theme-stop: cannot open %s (%s)", INSTANCE_LOCK, strerror(errno));
     return 1;
   }
+  int asked = 0;
   if(flock(lock, LOCK_EX | LOCK_NB)) {
-    /* A copy runs. */
+    /* A copy runs: asked over its web port first, which needs no looking for its process. */
+    char reply[256];
+    int web = 1;
+#ifdef TEST_HOOKS
+    web = !getenv("PS5THEME_TEST_NOT_FOUND") && !getenv("PS5THEME_TEST_NO_WEB");
+#endif
+    if(web && !local_request("POST", "/api/stop", reply, sizeof(reply))) {
+      log_msg("asked ps5-theme to stop over its web port");
+      asked = !lock_within(lock, STOP_WAIT_SECONDS);
+      if(!asked) log_msg("ps5-theme did not stop within %d s of being asked", STOP_WAIT_SECONDS);
+    }
+  }
+  if(!asked && flock(lock, LOCK_EX | LOCK_NB)) {
     pid = running_copy(getpid());
     if(pid <= 0) {
       write_report();
@@ -180,7 +198,7 @@ main(void) {
   if(out) log_msg("took %d overlay(s) of games' and apps' pictures out", out);
   if(stuck) {
     say("ps5-theme-stop: %d game picture(s) are still in use. Start ps5-theme again before rest mode.", stuck);
-  } else if(pid <= 0) {
+  } else if(pid <= 0 && !asked) {
     say("ps5-theme isn't running. Start it to open the manager.");
   } else {
     say("ps5-theme %s. The theme stays; start ps5-theme again to open the manager.", ended ? "was ended" : "stopped");

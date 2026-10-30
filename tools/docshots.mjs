@@ -7,8 +7,9 @@
 // No picture of Sony's (or of other publishers' games) is captured: the console's own interface icons
 // (/api/ui-icon) are refused, so the page draws its own; every picture read from the console's files
 // (/api/asset?path=<picture>, /api/asset/picture) is answered with a neutral stand-in, the same size where it
-// matters; textures and the 30th Anniversary theme's pictures likewise. The theme's own pictures (the author's test
-// themes) are shown as they are.
+// matters; textures and the 30th Anniversary theme's pictures likewise, and so are a theme's styled system-tile icons
+// (the icon style makes them from the console's own glyphs). The theme's own pictures (the author's test themes) are
+// shown as they are.
 //
 // The manager is opened at PS5_THEME_URL (http://<console-ip>:8095) in BROWSER (any Chromium: Chrome, Edge, Brave),
 // headless. The themes it opens (yakuza-0, snoopy) are the author's; change them below for yours.
@@ -105,6 +106,12 @@ ws.onmessage = async e => {
     if (path === "/api/asset" && /\.dds$/i.test(asset)) return await reply(requestId, 404, '{"error":"left out of the docs"}', "application/json");
     if (/^\/api\/theme\/(file|source)$/.test(path) && /^\/user\//.test(asset) && /\.(png|jpe?g|webp|dds)$/i.test(asset)) {
       return await reply(requestId, 200, /pic\d|background/i.test(asset) ? STAND_IN_WIDE : STAND_IN, "image/png");
+    }
+    /* A system tile's icon in a theme: styled from the console's own glyph (the icon style), so the console's picture
+       is in it. Stood in like the console's own; the tile's background, cut from the theme's picture, stays. */
+    if (/^\/api\/theme\/(file|source)$/.test(path) && /^\/(system_ex|mnt)\/rnps\/apps\/NPXS\d+\//.test(asset) &&
+        /icon[^/]*\.(png|jpe?g|webp|dds)$/i.test(asset)) {
+      return await reply(requestId, 200, STAND_IN, "image/png");
     }
     if (/^\/api\/theme\/(preview|file|source)$/.test(path) && id === "playstation-30th-anniversary" &&
         (path !== "/api/theme/file" || /\.(png|jpe?g|webp|dds|svg)$/i.test(asset))) {

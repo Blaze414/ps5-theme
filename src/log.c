@@ -72,6 +72,14 @@ vlog(const char *level, const char *fmt, va_list ap) {
 }
 
 
+long long
+mono_seconds(void) {
+  struct timespec ts;
+  clock_gettime(CLOCK_MONOTONIC, &ts);
+  return (long long)ts.tv_sec;
+}
+
+
 void
 log_msg(const char *fmt, ...) {
   va_list ap;

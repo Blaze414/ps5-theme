@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>PS5 Themes</title>
+<meta name="author" content="Blaze414">
 <link rel="icon" href="/icon.png">
 <style>
 /* Visual language modelled on the PS5 system UI: deep navy field, white type,
@@ -100,6 +101,9 @@ h2 { font-size: 1.0625rem; margin: 0; font-weight: 500; }
 .btn.ghost:hover { background: var(--surface-hover); color: var(--text); }
 .btn.danger { color: var(--danger); }
 .btn.danger.armed { background: var(--danger); color: #fff; }
+/* Stopping a run part-way leaves some icons in the style and some not: red as soon as it is pointed at or selected
+   (the controller's focus), before it is pressed. */
+.btn.stop-run:hover, .btn.stop-run:focus-visible { background: var(--danger); color: #fff; }
 .btn:focus-visible {
   background: #fff; color: #000; transform: scale(1.05);
   box-shadow: 0 0 0 2px #fff, 0 10px 28px rgba(0, 0, 0, .5);
@@ -425,6 +429,18 @@ input[type=number]:focus-visible { box-shadow: 0 0 0 2px #fff; }
 .icon-style .opts[aria-busy="true"] canvas { opacity: .45; }
 .istyle-busy:empty { display: none; }
 .istyle-row { display: grid; gap: 14px; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); align-items: start; }
+.istyle-groups { display: grid; gap: 12px; }   /* stacked: the tiles' cards get the whole width */
+.istyle-group { border: 0; margin: 0; min-width: 0; padding: 12px 14px 14px; border-radius: var(--radius); background: rgba(255, 255, 255, .04); display: grid; gap: 10px; }
+.istyle-group legend { float: left; width: 100%; padding: 0; font-size: .875rem; font-weight: 600; color: var(--text); }
+.istyle-group legend .count { margin-left: 6px; font-weight: 400; color: var(--faint); }
+.istyle-group .note { margin: 0; }
+.istyle-cat { display: grid; gap: 6px; }
+.istyle-cat > span { font-size: .75rem; color: var(--muted); }
+.icon-style .opts.istyle-tiles { grid-template-columns: repeat(auto-fill, minmax(96px, 112px)); gap: 8px; }
+.istyle-tiles .opt { padding: 6px; }
+.istyle-tiles .opt b { font-size: .75rem; line-height: 1.25; }
+.istyle-tiles .opt[aria-pressed="true"]::after { top: 10px; right: 10px; width: 20px; height: 20px; background-size: 12px; }
+.istyle-tiles .opt[aria-pressed="false"] canvas { opacity: .7; }
 input[type=color] { width: 56px; height: 36px; border: 0; border-radius: 10px; background: var(--surface-strong); padding: 4px; cursor: pointer; margin-top: 8px; }
 input[type=color]:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
 .opts { display: grid; gap: 10px; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); }
@@ -439,9 +455,9 @@ input[type=color]:focus-visible { outline: 2px solid #fff; outline-offset: 2px; 
 .opt:focus-visible small { color: rgba(0, 0, 0, .62); }
 /* The chosen one: a blue ring and a tick on its picture, both kept when it is focused (white), so a choice shows the
    moment it is made, wherever the focus is. */
-.opt[aria-checked="true"] { background: rgba(31, 124, 240, .16); box-shadow: inset 0 0 0 3px var(--blue); }
-.opt[aria-checked="true"]:focus-visible { background: #fff; box-shadow: inset 0 0 0 3px var(--blue); }
-.opt[aria-checked="true"]::after {
+.opt[aria-checked="true"], .opt[aria-pressed="true"] { background: rgba(31, 124, 240, .16); box-shadow: inset 0 0 0 3px var(--blue); }
+.opt[aria-checked="true"]:focus-visible, .opt[aria-pressed="true"]:focus-visible { background: #fff; box-shadow: inset 0 0 0 3px var(--blue); }
+.opt[aria-checked="true"]::after, .opt[aria-pressed="true"]::after {
   content: ""; position: absolute; top: 14px; right: 14px; width: 24px; height: 24px; border-radius: 50%;
   background: var(--blue) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M3.5 8.5l3 3 6-6.5' fill='none' stroke='%23fff' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") center / 14px no-repeat;
   box-shadow: 0 0 0 2px rgba(0, 0, 0, .35), 0 2px 8px rgba(0, 0, 0, .45);
@@ -702,7 +718,10 @@ const state = {
   filters: {},           /* per-aspect search text */
   trim: null,            /* home music part being chosen (see openTrim) */
 };
-let stamp = Date.now();  /* busts cached thumbnails after an upload */
+/* Bumped when this page changes a theme's files, so a picture it shows again is the new one (a page keeps its own
+   copy of a picture it has shown). The same at every load: the browser asks the console each time (no-cache), and an
+   unchanged picture is "not modified" in a few bytes instead of sent again. */
+let stamp = 0;
 
 const $ = (sel, root = document) => root.querySelector(sel);
 const view = $("#view");
@@ -744,19 +763,38 @@ function crc32(bytes) {
 }
 const hex8 = n => n.toString(16).padStart(8, "0");
 
-async function api(method, path, params = {}, body) {
+/* Changes being sent to the console right now: the page doesn't redraw from the console's side meanwhile. */
+let writing = 0;
+/* `timeout` (ms): given up after that long without a whole answer. For the status, read every few seconds: a request
+   left hanging (the console went into rest mode as it answered) would otherwise hold every later look back for good. */
+async function api(method, path, params = {}, body, { timeout = 0 } = {}) {
   const url = path + (Object.keys(params).length ? "?" + q(params) : "");
   const opts = { method, headers: {} };
   if (method !== "GET") opts.headers["X-PS5-Theme"] = "1";
   if (body !== undefined) opts.body = body;
-  let res;
-  for (let attempt = 0; ; attempt++) {
-    res = await fetch(url, opts);
-    if (res.status !== 503 || attempt === 4) break;  /* console busy: retry briefly */
-    await sleep(400 * (attempt + 1));
+  let res, timer = 0;
+  if (timeout && typeof AbortController === "function") {
+    const ctl = new AbortController();
+    opts.signal = ctl.signal;
+    timer = setTimeout(() => ctl.abort(), timeout);
   }
+  if (method !== "GET") writing++;
+  try {
+    for (let attempt = 0; ; attempt++) {
+      res = await fetch(url, opts);
+      if (res.status !== 503 || attempt === 4) break;  /* console busy: retry briefly */
+      await sleep(400 * (attempt + 1));
+    }
+  } catch (e) {
+    clearTimeout(timer);
+    if (e && e.name === "AbortError") throw new Error("the console didn't answer in time");
+    throw e;
+  } finally { if (method !== "GET") writing--; }
   const type = res.headers.get("Content-Type") || "";
-  const data = type.includes("json") ? await res.json() : await res.text();
+  let data;
+  try { data = type.includes("json") ? await res.json() : await res.text(); }
+  catch (e) { throw e && e.name === "AbortError" ? new Error("the console didn't answer in time") : e; }
+  finally { clearTimeout(timer); }
   if (!res.ok) throw new Error((data && data.error) || `HTTP ${res.status}`);
   return data;
 }
@@ -770,9 +808,13 @@ async function uploadVerified(path, params, blob) {
   const bytes = new Uint8Array(await blob.arrayBuffer());
   const crc = hex8(crc32(bytes));
   const shown = progressStack.filter(x => x.el.isConnected).pop();
-  const r = shown && typeof XMLHttpRequest === "function"
-    ? await putWatched(path, { ...params, crc }, bytes, f => shown.upload(f))
-    : await api("PUT", path, { ...params, crc }, bytes);
+  let r;
+  writing++;
+  try {
+    r = shown && typeof XMLHttpRequest === "function"
+      ? await putWatched(path, { ...params, crc }, bytes, f => shown.upload(f))
+      : await api("PUT", path, { ...params, crc }, bytes);
+  } finally { writing--; }
   if (r.crc32 !== crc || r.size !== bytes.length) throw new Error("the console stored something different from what was sent");
   return r;
 }
@@ -1015,7 +1057,7 @@ async function readBytes(res, onProgress) {
 
 async function refreshStatus() {
   try {
-    state.status = await api("GET", "/api/status");
+    state.status = await api("GET", "/api/status", {}, undefined, { timeout: 10000 });
   } catch (e) {
     $("#pills").innerHTML = `<span class="pill">Console unreachable</span>`;
     return false;
@@ -1026,15 +1068,14 @@ async function refreshStatus() {
   if (!state.pageVersion) state.pageVersion = s.version;
   else if (s.version !== state.pageVersion && !state.reloading) {
     state.reloading = true;
-    const busy = () => document.querySelector(".toast .progress") || state.trim;
-    toast(`The plugin is now ${s.version}. ${busy() ? "Reload this page when the current task is done." : "Loading the new page…"}`, "", 0);
-    if (!busy()) setTimeout(() => location.reload(), 1500);
+    toast(`The plugin is now ${s.version}. ${pageBusy() ? "Reload this page when the current task is done." : "Loading the new page…"}`, "", 0);
+    if (!pageBusy()) setTimeout(() => location.reload(), 1500);
   }
   const nameOf = id => (themeById(id) || { name: id }).name;
-  $("#pills").innerHTML =
-    `<span class="pill">Firmware <b>${esc(s.fw)}</b></span>` +
+  const pills = `<span class="pill">Firmware <b>${esc(s.fw)}</b></span>` +
     (s.applying ? `<span class="pill">Applying <b>${esc(nameOf(s.applying))}…</b></span>`
       : `<span class="pill">Theme <b>${esc(s.applied ? nameOf(s.applied) : "None")}</b></span>`);
+  setHtml($("#pills"), pills);
   if (state.route === "edit") syncEditorHead();
   return true;
 }
@@ -1051,6 +1092,83 @@ function syncEditorHead() {
   if (exp) { exp.disabled = !has; exp.title = has ? "" : "Add something to the theme first."; }
   const bar = $("#savebar");
   if (bar) bar.hidden = !t.unsaved;
+}
+
+/* ---- Following the console ----
+
+   A game or app installed or removed, and what the console's icon styler did by itself, show here without reloading
+   the page: the status says when either changed (`titles`), and the page reads the console's titles and the theme
+   again, then says what changed. Never while something else is under way here (a change being sent, an upload, a
+   picture being placed, a form open): it waits for that to finish. */
+const titleName = t => (state.titleNames && state.titleNames.get(t)) || (state.tileNames && state.tileNames.get(t)) || STYLE_TILES[t] || t;
+/* "Itemzflow", "Itemzflow and Astro Bot", "Itemzflow, Astro Bot and Bloodborne", "Itemzflow, Astro Bot and 3 more" */
+function namesOf(titles) {
+  const n = titles.length, shown = n > 3 ? 2 : n, names = titles.slice(0, shown).map(titleName);
+  if (n > shown) return `${names.join(", ")} and ${n - shown} more`;
+  return n > 1 ? `${names.slice(0, -1).join(", ")} and ${names[n - 1]}` : names[0] || "";
+}
+function pageBusy() {
+  const a = document.activeElement;
+  return writing > 0 || styling || !!following || !!autoRun || progressStack.length > 0 || !!state.trim || !!state.creating || !!state.mix ||
+    !!document.querySelector(".pv-overlay") ||
+    !!(a && (/^(SELECT|TEXTAREA)$/.test(a.tagName) || (a.tagName === "INPUT" && /^(text|search|number|email|url|tel|password)$/.test(a.type))));   /* typing */
+}
+let following = null, followTimer = 0;   /* (the read under way) */
+/* Read the console's titles and the theme again if they changed (`force`: whether or not), then say what changed
+   and, on the theme's page, style what is new and installed (`act`). `now`: for an action of yours, which waits
+   for a read under way and goes ahead whatever else is happening. */
+async function followConsole({ force = false, act = true, now = false } = {}) {
+  const s = state.status;
+  if (following) { if (now) await following.catch(() => {}); return; }
+  if (!s || !state.assets) return;      /* nothing read yet: the first read is as the console is */
+  const changed = s.titles && s.titles !== state.assetsSeen, due = force || state.followDue || changed;
+  if (!due || (!now && pageBusy())) return;           /* (looked at again at the next poll) */
+  const settledOnly = state.followDue === "settled" && !changed && !force;   /* only a wait ending */
+  let finish;
+  following = new Promise(r => { finish = r; });
+  state.followDue = false;
+  try {
+    const id = state.route === "edit" ? state.editId : null;
+    const was = new Set(titleGroups().map(g => g.title));
+    const madeWas = new Set(styleMadeByPlugin.id === id ? styleMadeByPlugin.titles : []);
+    await loadAssets(true);
+    if (id) await Promise.all([loadThemeFiles(id), loadPluginStyled(id)]);
+    const here = state.route === "edit" && state.editId === id;
+    const after = titleGroups().map(g => g.title), added = after.filter(t => !was.has(t)), gone = [...was].filter(t => !after.includes(t));
+    const byConsole = here ? styleMadeByPlugin.titles.filter(t => !madeWas.has(t)) : [];
+    if (added.length) { titleNamesEnsure(); if (titleNamesLoading) await titleNamesLoading.catch(() => {}); }
+    const said = [], busy = installingNow(), installing = added.filter(t => t in busy), done = added.filter(t => !(t in busy));
+    if (done.length) said.push(`Installed on the console: ${namesOf(done)}.`);
+    if (installing.length) said.push(`Installing on the console: ${namesOf(installing)}.`);
+    if (gone.length) said.push(`No longer on the console: ${namesOf(gone)}.`);
+    if (byConsole.length) said.push(`Styled by the console: ${namesOf(byConsole)}.`);
+    if (said.length) toast(said.join(" "), "", 8000);
+    if (here) { syncEditorHead(); renderAspect(aspectById("titles")); }
+    /* A title's install just counted as finished, on the theme the console has applied, whose styler does the same
+       within a minute: left to it (both at once would apply the theme twice); this page follows when it has. */
+    if (settledOnly && state.status.applied === id && styleMadeByPlugin.auto && styleMadeByPlugin.template) act = false;
+  } finally { following = null; finish(); }
+  if (act && state.route === "edit") await autoStyleIcons();
+}
+/* Before the icons are styled or the style removed: the console's titles and the style's record as they are now. */
+async function catchUp() {
+  if (await refreshStatus()) await followConsole({ act: false, now: true });
+}
+async function pollConsole(tick) {
+  if (document.hidden) return;
+  const lib = state.route === "library" && !state.creating && !state.mix;   /* a form open keeps its focus */
+  if (!(lib && state.status && state.status.applying) && tick % 4) return;   /* every second while a theme is being applied */
+  if (!lib && pageBusy()) return;   /* the page's own work says what is happening meanwhile */
+  const before = JSON.stringify(state.status);
+  if (!await refreshStatus()) return;
+  /* Looked at again after the wait: a theme opened, or a form, meanwhile is never drawn over by the library. */
+  const stillLib = state.route === "library" && !state.creating && !state.mix;
+  if (lib && stillLib && JSON.stringify(state.status) !== before) {
+    /* Only what changed is redrawn: the cards (and their pictures) when the themes or what is applied change; the
+       apply's progress in place, so the bar moves smoothly and nothing under the pointer or the focus is rebuilt. */
+    if (libKey(state.status) !== state.libKey || !patchLibraryBanner()) renderLibrary();
+  }
+  await followConsole();
 }
 
 async function saveTheme(id, btn = null) {
@@ -1194,7 +1312,7 @@ function renderLibrary() {
       ${s.themes.length > 1 ? `<button class="btn" data-act="mix">Mix and match</button>` : ""}
       <button class="btn primary" data-act="new">New theme</button>
     </div>
-    ${resultBanner()}
+    <div id="lib-banner">${resultBanner()}</div>
     ${state.creating ? createForm() : ""}
     ${state.mix ? mixForm() : ""}
     ${s.themes.length ? `<div class="grid">
@@ -1214,10 +1332,45 @@ function renderLibrary() {
     <p class="hint">${isLocal() && s.ip
       ? `Adding pictures and music is easier from a computer or phone on the same network: open <code>http://${esc(s.ip)}:8095</code> there. `
       : ""}Your theme comes back by itself each time the plugin starts, after a restart or an update too. To go back to the console's own look, choose <b>No theme</b>.</p>`;
+  state.libKey = libKey(s);
   if (state.creating) $("#new-name").focus();
   if (state.mix && !state.mix.loading && !state.mixFocused) { state.mixFocused = true; const n = $("#mix-name"); if (n) n.focus(); }
   paintLoads(view);
   fillMissingPreviews();
+}
+
+/* What the library's cards show: they are drawn again only when this changes. */
+function libKey(s) {
+  return JSON.stringify([s.themes, s.applied, s.applying, s.active]);
+}
+/* The library's banner brought up to date where it is: the apply's text and percentage changed, and the bar moves
+   to the new width (its transition runs). Redrawn whole only when it becomes another kind of banner. False when the
+   library isn't the page shown. */
+function patchLibraryBanner() {
+  const box = $("#lib-banner");
+  if (!box) return false;
+  const s = state.status, pr = s.applying && s.progress, bar = box.querySelector(".progress i");
+  if (pr && bar) {
+    const label = box.querySelector(".label"), pct = box.querySelector(".pct");
+    const text = `Applying ${(themeById(s.applying) || { name: s.applying }).name}: ${pr.text}…`;
+    if (label && label.textContent !== text) label.textContent = text;
+    if (pct) pct.textContent = `${pr.percent}%`;
+    else { setHtml(box, resultBanner()); return true; }
+    bar.style.width = `${pr.percent}%`;
+    return true;
+  }
+  setHtml(box, resultBanner());
+  return true;
+}
+/* Sets an element's HTML only when it says something else: an unchanged one keeps its nodes (focus, hover, images).
+   What it last set is compared with what the element holds now, so a change made some other way is never kept. */
+const htmlSet = new WeakMap();
+function setHtml(el, html) {
+  if (!el) return;
+  const was = htmlSet.get(el);
+  if (was && was.html === html && el.innerHTML === was.out) return;
+  el.innerHTML = html;
+  htmlSet.set(el, { html, out: el.innerHTML });
 }
 
 function createForm() {
@@ -1262,8 +1415,11 @@ function applyBlocked(t, inEditor = state.route === "edit") {
   return "";
 }
 
-async function applyTheme(id) {
-  try { await api("POST", "/api/apply", { id }); } catch (e) { return toast(e.message, "err"); }
+/* `styled`: the titles this page styled by itself, which the theme is applied again for: the console says so once,
+   when it is done, by their names. */
+async function applyTheme(id, styled = null) {
+  const params = styled && styled.length ? { id, styled: styled.slice(0, 32).join(",") } : { id };
+  try { await api("POST", "/api/apply", params); } catch (e) { return toast(e.message, "err"); }
   const label = id === "none" ? "Removing the theme" : `Applying ${(themeById(id) || { name: id }).name}`;
   const p = progressToast(`${label}…`);
   p.el.dataset.apply = "1";   /* on the library, its banner shows the same progress: the message steps aside there */
@@ -1319,8 +1475,12 @@ async function duplicateTheme(id) {
     await api("POST", "/api/themes/duplicate", { id, new_id: uniqueId(name), name });
     await refreshStatus();
     toast(`Created ${name}.`, "ok");
-    renderLibrary();
+    libraryIfShown();
   } catch (e) { toast(e.message, "err"); }
+}
+/* After a wait: the library drawn again only if it is still the page shown (a theme opened meanwhile stays open). */
+function libraryIfShown() {
+  if (state.route === "library") renderLibrary();
 }
 
 /* ================================================================ mix and match */
@@ -1473,43 +1633,46 @@ async function mixRcoChanges(tid, path) {
 
 /* Read the interface files of the themes that have one, for choosing their contents element by element. */
 async function mixLoadRco() {
-  if (state.mix.rcoLoading) return;
-  state.mix.rcoLoading = true;
-  renderLibrary();
+  const m = state.mix;   /* this form: closed (or opened again) meanwhile, the reading stops and draws nothing */
+  if (!m || m.rcoLoading) return;
+  m.rcoLoading = true;
+  libraryIfShown();
   try {
-    const all = [...state.mix.themes.values()].flatMap(info => info.rco.map(path => [info.id, path]));
-    for (let i = 0; i < all.length; i++) {
+    const all = [...m.themes.values()].flatMap(info => info.rco.map(path => [info.id, path]));
+    for (let i = 0; i < all.length && state.mix === m; i++) {
       loadProgress("mix:rco", i / all.length);
       await mixRcoChanges(all[i][0], all[i][1]);
     }
     loadProgress("mix:rco", 1);
-  } catch (e) { toast(`The interface files could not be read: ${e.message}`, "err"); }
-  state.mix.rcoLoading = false;
-  state.mix.rcoReady = true;
-  renderLibrary();
+  } catch (e) { if (state.mix === m) toast(`The interface files could not be read: ${e.message}`, "err"); }
+  m.rcoLoading = false;
+  m.rcoReady = true;
+  if (state.mix === m) libraryIfShown();
 }
 
 async function openMix() {
   state.creating = false;
-  state.mix = { loading: true, themes: new Map(), name: "", picks: {}, elems: {}, open: {}, rco: new Map() };
+  const m = state.mix = { loading: true, themes: new Map(), name: "", picks: {}, elems: {}, open: {}, rco: new Map() };
   state.mixFocused = false;
   renderLibrary();
   try {
     await loadAssets();
     if (!state.assets) throw new Error(state.assetsError || "the console's files could not be listed");
     const list = state.status.themes.filter(x => x.compatible);
-    for (let i = 0; i < list.length; i++) {
+    for (let i = 0; i < list.length && state.mix === m; i++) {
       loadProgress("mix", i / list.length);
-      state.mix.themes.set(list[i].id, await mixThemeInfo(list[i]));
+      m.themes.set(list[i].id, await mixThemeInfo(list[i]));
     }
     loadProgress("mix", 1);
   } catch (e) {
+    if (state.mix !== m) return;   /* closed meanwhile: nothing to say */
     state.mix = null;
     toast(`Mix and match: ${e.message}`, "err");
-    return renderLibrary();
+    return libraryIfShown();
   }
-  state.mix.loading = false;
-  renderLibrary();
+  if (state.mix !== m) return;     /* closed, or opened again, meanwhile */
+  m.loading = false;
+  libraryIfShown();
 }
 
 function mixForm() {
@@ -1707,36 +1870,49 @@ function rcoMixEntries(r, changes, sourceOf, path) {
 
 /* ================================================================ assets & grouping */
 
-async function loadAssets() {
-  if (state.assets) return;
+/* The console's files, read once; again (`force`) when its games and apps change (followConsole). The list read
+   replaces the one shown only once it is whole. */
+async function loadAssets(force = false) {
+  if (state.assets && !force) return;
+  const seen = state.status && state.status.titles;
   try {
     const r = await api("GET", "/api/assets", { limit: 5000 });
     state.assets = r.assets;
     state.concepts = r.concepts || {};
     state.protectedCount = r.protected || 0;
     state.assetsError = "";
+    state.assetsSeen = seen;
   } catch (e) {
+    if (force && state.assets) return;   /* the list it has stays: read again at the next look */
     state.assets = null;
     state.assetsError = e.message;
   }
 }
 
+/* Each of the open theme's loaders keeps what it read only if that theme is still the one open: another opened
+   meanwhile (or the first one finishing last) never gets this one's files, choices or icons. */
 async function loadThemeFiles(id) {
+  let files;
   try {
     const r = await api("GET", "/api/theme/files", { id });
-    state.files = new Set(r.files.map(f => f.path));
-  } catch (e) { state.files = new Set(); }
+    files = new Set(r.files.map(f => f.path));
+  } catch (e) { files = new Set(); }
+  if (id !== state.editId) return;
+  state.files = files;
   /* Which files have the picture they were made from kept in the theme. */
   await loadOriginals(id);
 }
 
 /* Which files have their original kept, whether the theme keeps them, and the space they take. */
 async function loadOriginals(id = state.editId) {
+  let r = null;
+  try { r = await api("GET", "/api/theme/sources", { id }); } catch (e) { /* none known: the defaults below */ }
+  if (id !== state.editId) return;
   state.sources = new Set();
   state.keepOriginals = true;
   state.originalsBytes = 0;
   try {
-    const r = await api("GET", "/api/theme/sources", { id });
+    if (!r) throw new Error("not read");
     state.sources = new Set(r.have);
     state.keepOriginals = r.keep !== false;
     state.originalsBytes = r.bytes || 0;
@@ -1967,6 +2143,7 @@ function cleanChoices(c) {
     if (typeof st.mine === "boolean") o.mine = st.mine;
     if (Array.isArray(st.titles)) o.titles = st.titles.filter(x => typeof x === "string" && /^[A-Za-z0-9_-]{1,40}$/.test(x)).slice(0, 4000);
     if (Array.isArray(st.hand)) o.hand = st.hand.filter(x => typeof x === "string" && /^[A-Z0-9]{9}$/.test(x)).slice(0, 4000);
+    if (Array.isArray(st.tiles)) o.tiles = st.tiles.filter(x => typeof x === "string" && x in STYLE_TILES);   /* (the system tiles chosen) */
     if (Object.keys(o).length) out.iconStyle = o;
   }
   if (c.songs && typeof c.songs === "object" && !Array.isArray(c.songs)) {
@@ -2021,6 +2198,7 @@ async function loadChoices(id) {
     const old = legacyChoices(id);
     if (Object.keys(old).length) { c = old; putChoices(id, c, true).catch(() => {}); }
   }
+  if (id !== state.editId) return;
   state.choices = c || {};
   state.choicesId = id;
   state.fit = state.choices.fit || "cover";
@@ -3351,7 +3529,7 @@ function tileNamesEnsure() {
       }
       state.tileNames.set(g.title, name);
     }
-  })().finally(() => { tileNamesLoading = null; renderAspect(aspectById("tiles")); renderAspect(aspectById("background")); });
+  })().finally(() => { tileNamesLoading = null; renderAspect(aspectById("tiles")); renderAspect(aspectById("background")); renderAspect(aspectById("titles")); });
 }
 
 /* A tile's icon from your image (or its number, for the test), each copy in
@@ -3375,6 +3553,7 @@ async function tileIcon(title, file) {
       return encodePng(await imageRgba(file, f.w, f.h), f, zlibDeflate);
     });
     p.done(`${name} icon replaced and verified${g.icons.length > 1 ? ` (${plural(g.icons.length, "copy", "copies")})` : ""}. Apply the theme to use it.`, "ok");
+    if (title in STYLE_TILES) await iconChangedByHand(title);   /* yours now, not the icon style's */
   } catch (e) { p.done(`${name}: ${e.message}`, "err"); }
   stamp = Date.now();
   await refreshStatus();
@@ -3393,6 +3572,7 @@ async function numberTileIcons() {
       });
     }
     p.done(`${plural(groups.length, "tile icon")} numbered and verified. Apply the theme, then look at the home screen.`, "ok");
+    for (const g of groups) if (g.title in STYLE_TILES) await iconChangedByHand(g.title);
   } catch (e) { p.done(`Numbering failed: ${e.message}`, "err"); }
   stamp = Date.now();
   await refreshStatus();
@@ -3403,11 +3583,13 @@ function tilesBody(asp) {
   const groups = tileGroups();
   if (!groups.length) return `<p class="note">This firmware has no tile icons that can be themed.</p>`;
   setTimeout(tileNamesEnsure);
+  const styledNow = styledTitles();
   const rows = groups.map(g => {
     const rep = g.icons.some(a => state.files.has(a.path)), bgRep = g.bg && state.files.has(g.bg.path);
+    const inStyle = rep && styledNow.has(g.title);   /* (its icon the style's, set in Games and apps) */
     const name = state.tileNames && state.tileNames.has(g.title) ? state.tileNames.get(g.title) || "(no name)" : "Reading…";
     return `<div class="row-item${rep || bgRep ? " replaced" : ""}">
-      <div class="info"><div class="file">${g.n} · ${esc(name)}${help("One of the console's own tiles. Change icon: its icon on the home row and in the Game Library. Change background: the picture behind the home screen while it is selected. The home row shows a new icon after rest mode.")}${rep ? ` <span class="tag on">Icon changed</span>` : ""}${bgRep ? ` <span class="tag on">Background changed</span>` : ""}</div>
+      <div class="info"><div class="file">${g.n} · ${esc(name)}${help("One of the console's own tiles. Change icon: its icon on the home row and in the Game Library. Change background: the picture behind the home screen while it is selected. The home row shows a new icon after rest mode.")}${inStyle ? ` <span class="tag on">Icon style</span>` : rep ? ` <span class="tag on">Icon changed</span>` : ""}${bgRep ? ` <span class="tag on">Background changed</span>` : ""}</div>
         <div class="dir">${esc(g.title)}${g.icons.length > 1 ? ` · ${plural(g.icons.length, "copy", "copies")} of its icon` : ""}${g.bg ? " · has its own background" : ""}</div></div>
       <div class="strip">${thumbFor(g.icons.find(a => state.files.has(a.path)) || g.icons[0])}</div>
       <div class="acts">
@@ -3532,10 +3714,21 @@ async function titlePicture(title, stem, file, quiet = false) {
    Games installed later are styled when the theme is opened here (and by the plugin, autostyle.c); nothing is done
    while the console installs one, since a theme over a game's pictures keeps the console from writing them. */
 const ICON_SHAPES = [["", "None"], ["circle", "Circle"], ["rounded", "Rounded square"], ["square", "Square"], ["diamond", "Diamond"], ["hexagon", "Hexagon"], ["triangle", "Triangle"]];
-const ICON_STYLE_DEFAULT = { shape: "", scale: 72, behind: "colour", colour: "#0d1424", auto: true, mine: true, titles: [], hand: [] };
-const iconStyle = () => ({ ...ICON_STYLE_DEFAULT, ...(state.choices.iconStyle || {}) });
+const ICON_STYLE_DEFAULT = { shape: "", scale: 72, behind: "colour", colour: "#0d1424", auto: true, mine: true,
+  tiles: null, titles: [], hand: [] };   /* (tiles: the system tiles' IDs chosen; null: all of STYLE_TILE_SETS) */
+const allStyleTiles = () => STYLE_TILE_SETS.flatMap(t => t.ids);
+const iconStyle = () => {
+  const st = { ...ICON_STYLE_DEFAULT, ...(state.choices.iconStyle || {}) };
+  if (!Array.isArray(st.tiles)) st.tiles = st.tiles === false ? [] : allStyleTiles();
+  return st;
+};
 function setIconStyle(change) {
-  return setChoice(c => { const st = { ...ICON_STYLE_DEFAULT, ...(c.iconStyle || {}) }; change(st); c.iconStyle = st; });
+  return setChoice(c => {
+    const st = { ...ICON_STYLE_DEFAULT, ...(c.iconStyle || {}) };
+    if (!Array.isArray(st.tiles)) st.tiles = st.tiles === false ? [] : allStyleTiles();
+    change(st);
+    c.iconStyle = st;
+  });
 }
 function shapePath(x, shape, cx, cy, r) {
   x.beginPath();
@@ -3602,10 +3795,82 @@ async function titleOwnIcon(g) {
 /* The titles the plugin styled by itself, read from the theme (merged with the page's own list). */
 let styleMadeByPlugin = { id: null, titles: [] };
 async function loadPluginStyled(id = state.editId) {
+  let made;
   try {
     const r = await api("GET", "/api/theme/icon-style", { id });
-    styleMadeByPlugin = { id, titles: r.made || [], auto: r.auto, template: r.template, own: r.own || [] };
-  } catch (e) { styleMadeByPlugin = { id, titles: [], own: [] }; }
+    made = { id, titles: r.made || [], auto: r.auto, template: r.template, styledList: r.styledList, own: r.own || [],
+      settle: r.settle || 120, waiting: r.waiting || {} };
+  } catch (e) { made = { id, titles: [], own: [], waiting: {} }; }
+  if (id !== state.editId) return;
+  styleMadeByPlugin = made;
+  /* a title still installing: looked at again once it counts as installed */
+  clearTimeout(followTimer);
+  const secs = Object.values(styleMadeByPlugin.waiting);
+  if (secs.length) followTimer = setTimeout(() => { state.followDue = "settled"; }, (Math.min(...secs) + 2) * 1000);
+}
+/* Titles still installing (something in their folders changed lately), with the seconds until they count as
+   installed: none is styled until then, here or by the console, since a theme over a game's pictures keeps the
+   console from writing them. */
+const installingNow = () => styleMadeByPlugin.id === state.editId ? styleMadeByPlugin.waiting || {} : {};
+/* The console's own tiles the home screen shows, styled with the games when the style says so (since 1.74), by
+   their system IDs (the same in every language), each its own choice, in the home screen's groups. Their icons
+   are a symbol on the console's own dark backing, which keeps it readable in the shape. Left out, as a home screen
+   never shows them: the developer kits' apps (marked with a star: Debug Settings, Store Preview and the rest). A
+   choice can cover more than one tile (the two Compilation tiles). The names are the console's own once read. */
+const STYLE_TILE_SETS = [
+  { group: "Games home", name: "Welcome", ids: ["NPXS40063"] },
+  { group: "Games home", name: "PlayStation Store", ids: ["NPXS40047"] },
+  { group: "Games home", name: "PlayStation Plus", ids: ["NPXS40037"] },
+  { group: "Games home", name: "Game Library", ids: ["NPXS40071"] },
+  { group: "Games home", name: "Media Gallery", ids: ["NPXS40075"] },
+  { group: "Media home", name: "Discover", ids: ["NPXS40053"] },
+  { group: "Media home", name: "Music Home", ids: ["NPXS40054"] },
+  { group: "Media home", name: "All Apps", ids: ["NPXS40056"] },
+  { group: "Media home", name: "Live TV", ids: ["NPXS40305"] },
+  { group: "Media home", name: "App Library", ids: ["NPXS40139"] },
+  { group: "Discs", name: "PS5 Disc", ids: ["NPXS40149"] },
+  { group: "Discs", name: "PS4 Disc", ids: ["NPXS40150"] },
+  { group: "Discs", name: "Compilation", ids: ["NPXS40145", "NPXS40205"] },
+  { group: "Discs", name: "Unsupported Disc", ids: ["NPXS40144"] },
+  { group: "Discs", name: "Unreadable Disc", ids: ["NPXS40148"] },
+];
+const STYLE_TILES = Object.fromEntries(STYLE_TILE_SETS.flatMap(t => t.ids.map(id => [id, t.name])));   /* ID -> name */
+/* The choices this console has (a firmware without a tile leaves it out), each with only the IDs it has. */
+function styleTileSets() {
+  const present = new Set(tileGroups().map(g => g.title));
+  return STYLE_TILE_SETS.map(t => ({ ...t, ids: t.ids.filter(id => present.has(id)) })).filter(t => t.ids.length);
+}
+const tileSetName = t => (state.tileNames && state.tileNames.get(t.ids[0])) || t.name;
+/* Each as a title whose icon is in every file the tile's icon is (tileGroups): those you chose, or (`all`) the five
+   this firmware has. */
+function tileStyleGroups(all = false) {
+  const chosen = new Set(iconStyle().tiles);
+  return tileGroups().filter(g => g.title in STYLE_TILES && (all || chosen.has(g.title)))
+    .map(g => ({ title: g.title, tile: true, sets: [{ stem: "icon0", files: g.icons }] }));
+}
+/* The folders the theme changes files in (each a folder the plugin overlays), and the most it applies at once
+   (the status says; 64 before 1.74). With `more`, files it would have too. */
+function themeFolders(more = []) {
+  const dirs = new Set([...state.files].map(p => p.slice(0, p.lastIndexOf("/"))));
+  for (const p of more) dirs.add(p.slice(0, p.lastIndexOf("/")));
+  return dirs.size;
+}
+const maxFolders = () => (state.status && state.status.maxFolders) || 64;
+/* What the style is for: the installed games and apps, and the tiles you chose. */
+const styleGroups = () => [...titleGroups(), ...tileStyleGroups()];
+/* A styled icon written into all the files of a title's icon, or a tile's, each in the console's exact format. */
+async function stylePicture(g, file) {
+  if (!g.tile) return titlePicture(g.title, "icon0", file, true);
+  const t = tileGroups().find(x => x.title === g.title);
+  if (!t) return false;
+  try {
+    await tileIconFiles(t, async stock => {
+      const f = pngFormat(stock);
+      if (!f || !f.writable) throw new Error("this icon's format can't be written");
+      return encodePng(await imageRgba(file, f.w, f.h), f, zlibDeflate);
+    });
+    return true;
+  } catch (e) { return false; }
 }
 /* The titles whose icon is the style's: styled here, or by the plugin (unless you changed one by hand since). */
 function styledTitles() {
@@ -3618,7 +3883,7 @@ const ownPictureUrl = title => `/api/theme/icon-style?${q({ id: state.editId, ow
 /* Icons you changed by hand, not the style's: with "yours too", the style puts your picture in the shape. */
 function handChanged() {
   const made = styledTitles();
-  return titleGroups().filter(g => {
+  return styleGroups().filter(g => {
     const set = g.sets.find(x => x.stem === "icon0");
     return set && titleIcon(g) && !made.has(g.title) && set.files.some(a => state.files.has(a.path));
   });
@@ -3681,6 +3946,7 @@ async function iconChangedByHand(title, back = false) {
    with the shape's shadow, the shape alone, and the titles installed now, which it leaves to you. */
 async function keepStyleTemplate(st) {
   const id = state.editId, side = 512;
+  notStyle.clear();
   const behind = await iconBehind(st);
   const base = document.createElement("canvas"), mask = document.createElement("canvas"), none = document.createElement("canvas");
   base.width = base.height = mask.width = mask.height = side;
@@ -3695,15 +3961,20 @@ async function keepStyleTemplate(st) {
   /* always sent, even with no titles: without it the plugin can't tell a new title from one you had */
   const known = [...new Set(titleGroups().map(g => g.title).filter(t => /^[A-Z0-9]{9}$/.test(t)))];
   await uploadVerified("/api/theme/icon-style", { id, part: "known" }, new Blob([known.map(t => `${t}\n`).join("") || "\n"]));
+  /* the titles this style made, installed or not: one installed again later gets the style as it is then */
+  const styled = [...new Set(iconStyle().titles.filter(t => /^[A-Z0-9]{9}$/.test(t)))];
+  await uploadVerified("/api/theme/icon-style", { id, part: "styled" }, new Blob([styled.map(t => `${t}\n`).join("") || "\n"]));
   await api("POST", "/api/theme/icon-style", { id, auto: st.auto ? 1 : 0, scale: st.scale });
 }
 
-/* Titles the style is for: with an icon, and not changed by hand (one the style made counts as the style's). */
+/* Titles the style is for: with an icon, not still installing, and not changed by hand (one the style made counts
+   as the style's). `onlyNew`: games and apps installed since, never the console's tiles (always there: styled when
+   you style the icons, never by themselves). */
 function styleTargets(onlyNew) {
-  const st = iconStyle(), made = styledTitles();
-  return titleGroups().filter(g => {
+  const st = iconStyle(), made = styledTitles(), busy = installingNow();
+  return (onlyNew ? titleGroups() : styleGroups()).filter(g => {
     const set = g.sets.find(x => x.stem === "icon0");
-    if (!set || !titleIcon(g)) return false;
+    if (!set || !titleIcon(g) || g.title in busy) return false;
     const changed = set.files.some(a => state.files.has(a.path));
     return onlyNew ? !changed && !made.has(g.title) : !changed || made.has(g.title) || st.mine;
   });
@@ -3713,10 +3984,31 @@ function iconStyleHtml() {
   const st = iconStyle(), all = styleTargets(false).length, made = styledTitles().size, fresh = st.shape ? styleTargets(true).length : 0;
   const hand = handChanged().length, own = ownPictures().size;
   const byPlugin = styleMadeByPlugin.id === state.editId ? styleMadeByPlugin.titles.length : 0;
+  /* the tiles chosen, once the games are styled: those not styled yet (and not changed by hand) */
+  const madeNow = styledTitles(), changedNow = g => g.sets[0].files.some(a => state.files.has(a.path));
+  const tilesChosen = tileStyleGroups(), tileSets = styleTileSets();
+  const tilesPending = st.shape && madeNow.size ? tilesChosen.filter(g => !madeNow.has(g.title) && !changedNow(g)).length : 0;
+  const tileOn = t => t.ids.every(id => st.tiles.includes(id));
+  tileNamesEnsure();
+  const gamesTargets = all - styleTargets(false).filter(g => g.tile).length, tilesTargets = all - gamesTargets;
+  /* still installing: new ones get the style once installed; the style's own, or yours, being updated are left
+     as they are until then */
+  const busy = installingNow(), madeSet = styledTitles();
+  const held = st.shape ? titleGroups().filter(g => g.title in busy && titleIcon(g)) : [];
+  const isNew = g => !madeSet.has(g.title) && !g.sets.find(x => x.stem === "icon0").files.some(a => state.files.has(a.path));
+  const coming = held.filter(isNew), updating = held.filter(g => !isNew(g));
+  const mins = n => `${Math.max(1, Math.ceil(n / 60))} minute${Math.ceil(n / 60) > 1 ? "s" : ""}`;
+  const installingNote = [
+    !coming.length ? "" : coming.length === 1
+      ? `${titleName(coming[0].title)} is still installing: ${st.auto ? `its icon gets the style in about ${mins(busy[coming[0].title])}` : "style it once the install has finished"}.`
+      : `${coming.length} games and apps are still installing: ${st.auto ? `each gets the style ${mins(styleMadeByPlugin.settle || 120)} after its install finishes` : "style them once their installs have finished"}.`,
+    !updating.length ? "" : `${namesOf(updating.map(g => g.title))} ${updating.length === 1 ? "is" : "are"} installing or updating: left as ${updating.length === 1 ? "it is" : "they are"} until then.`,
+  ].filter(Boolean).join(" ");
   const t = themeById(state.editId);
-  const chip = (v, label, on) => `<button type="button" class="btn sm chip" data-act="istyle-behind" data-v="${v}" aria-pressed="${on}">${esc(label)}</button>`;
+  const chip = (v, label, on, off = false) => `<button type="button" class="btn sm chip" data-act="istyle-behind" data-v="${v}" aria-pressed="${on}"${off ? " disabled" : ""}>${esc(label)}</button>`;
+  const hasBg = !!(t && aspectReplaced(aspectById("background")));   /* (offered always: without one, said how to get it) */
   return `<section class="panel icon-style">
-    <div class="form-title"><h3 class="sub-head" style="margin:0">Icon style</h3><span class="note">Every game's and app's icon in a shape, over a colour or a picture.</span></div>
+    <div class="form-title"><h3 class="sub-head" style="margin:0">Icon style</h3><span class="note">Games', apps' and system tiles' icons in one shape, over a colour or a picture.</span></div>
     <div class="opts" role="radiogroup" aria-label="Shape">${ICON_SHAPES.map(([v, name]) =>
       `<button type="button" class="opt" role="radio" aria-checked="${st.shape === v}" data-act="istyle-shape" data-v="${v}">
         <canvas data-istyle="${v}" width="112" height="112"></canvas><b>${esc(name)}</b></button>`).join("")}</div>
@@ -3725,16 +4017,30 @@ function iconStyleHtml() {
       <label class="field">Size of the icon in the shape: <span id="istyle-scale-label">${st.scale}%</span>
         <input type="range" min="40" max="100" step="2" value="${st.scale}" id="istyle-scale"></label>
       <div class="field"><span>Behind it</span><div class="pv-tabs" style="flex-wrap:wrap">${chip("colour", "A colour", st.behind === "colour")}${
-        t && aspectReplaced(aspectById("background")) ? chip("background", "The theme's background", st.behind === "background") : ""}${chip("picture", "A picture of yours", st.behind === "picture")}</div>
+        chip("background", "The theme's background", st.behind === "background" && hasBg, !hasBg)}${chip("picture", "A picture of yours", st.behind === "picture")}</div>
+        ${hasBg ? "" : `<span class="note">The theme's background: give this theme one in <b>Background</b> first.</span>`}
         ${st.behind === "colour" ? `<input type="color" id="istyle-colour" value="${esc(st.colour)}" aria-label="Colour behind the icons">` : ""}
         ${st.behind === "picture" ? `<div class="pv-tabs" style="margin-top:8px"><button class="btn sm" type="button" data-act="istyle-adjust">Adjust picture</button>
           <button class="btn sm ghost" type="button" data-act="istyle-picture">Choose another</button></div>` : ""}</div>
     </div>
-    <label class="note check"><input type="checkbox" id="istyle-auto"${st.auto ? " checked" : ""}> Style games and apps installed later${help("While this theme is applied, the plugin styles a game or app on its own once its install has finished, nothing in its folders has changed for 10 minutes and no game is being played (one left on the home screen doesn't count), then applies the theme again; the console says so. It works from the template kept when you last styled the icons here. A title it can't style itself (a picture of another kind) is styled the next time you open this theme here. Titles installed when you styled the icons, and any icon you put back or changed by hand, are left as they are.")}</label>
+    <div class="istyle-groups">
+      <fieldset class="istyle-group"><legend>Games and apps <span class="count">${titleGroups().filter(g => titleIcon(g)).length}</span></legend>
+        <label class="note check"><input type="checkbox" id="istyle-auto"${st.auto ? " checked" : ""}> Style ones installed later${help("While this theme is applied, the console styles a new game or app on its own about 2 minutes after its install finishes, applies the theme again and says so, even with a game open. A game styled before and installed again gets the style as it is then. Ones you changed by hand stay as they are.")}</label>
+        ${byPlugin ? `<p class="note">${plural(byPlugin, "icon")} styled by the console on its own after ${byPlugin === 1 ? "its game was" : "their games were"} installed.</p>` : ""}
+        ${installingNote ? `<p class="note">${esc(installingNote)}</p>` : ""}
+      </fieldset>
+      ${tileSets.length ? `<fieldset class="istyle-group"><legend>System tiles <span class="count">${tileSets.filter(tileOn).length} of ${tileSets.length}</span></legend>
+        ${[...new Set(tileSets.map(t => t.group))].map(grp => `<div class="istyle-cat"><span>${esc(grp === "Discs" ? "Discs, shown while one is in" : grp)}</span>
+          <div class="opts istyle-tiles" role="group" aria-label="${esc(grp)}">${tileSets.filter(t => t.group === grp).map(t =>
+            `<button type="button" class="opt" aria-pressed="${tileOn(t)}" data-act="istyle-tile" data-v="${esc(t.ids.join(","))}">
+              <canvas data-istyle-tile="${esc(t.ids[0])}" data-on="${tileOn(t)}" width="144" height="144"></canvas><b>${esc(tileSetName(t))}</b></button>`).join("")}</div></div>`).join("")}
+        <p class="note">${tilesPending ? `${plural(tilesPending, "tile")} get${tilesPending === 1 ? "s" : ""} the style the next time you style the icons. ` : ""}Each is drawn as it will look: the style on the ones chosen, as now on the others.${help("Each chosen tile's icon goes in the shape, made from the console's own icon (one you changed by hand: as for games). Choosing one off puts it back as it was. Left out: the developer kits' apps, which a home screen doesn't show. The home row shows the tiles after rest mode.")}</p>
+      </fieldset>` : ""}
+    </div>
     ${hand ? `<label class="note check"><input type="checkbox" id="istyle-mine"${st.mine ? " checked" : ""}> The ${plural(hand, "icon")} you changed by hand too: your picture goes in the shape${help("Your picture is kept with the style first, so styling again starts from it, never from an icon already styled, and Remove the style puts it back. Unticked, the icons you changed stay as they are.")}</label>` : ""}
-    ${byPlugin ? `<p class="note">${plural(byPlugin, "icon")} styled by the console on its own after ${byPlugin === 1 ? "its game was" : "their games were"} installed.</p>` : ""}
     <div class="toolbar">
-      <button class="btn primary" type="button" data-act="istyle-run"${all ? "" : " disabled"}>${made && !fresh ? `Style ${plural(all, "icon")} again` : `Style ${plural(all, "icon")}`}</button>${styling ? `<span class="note">Styling…</span>` : ""}
+      <button class="btn primary" type="button" data-act="istyle-run"${all ? "" : " disabled"}${tilesTargets ? ` aria-describedby="istyle-what"` : ""}>${made && !fresh ? `Style ${plural(all, "icon")} again` : `Style ${plural(all, "icon")}`}</button>${styling ? `<span class="note">Styling…</span>` : ""}
+      ${tilesTargets ? `<span class="note" id="istyle-what">${plural(gamesTargets, "game or app", "games and apps")}, ${plural(tilesTargets, "system tile")}</span>` : ""}
       ${made ? `<button class="btn ghost danger" type="button" data-act="istyle-remove">Remove the style (${made})</button>` : ""}
       <span class="note">${made && st.ranAs && st.ranAs !== styleSig(st) ? "Your icons have the earlier style until you style them again. " : ""}${fresh && made ? `${plural(fresh, "game or app", "games and apps")} installed since.` : ""}${hand && !st.mine ? " Icons you changed by hand are kept." : ""}${own ? ` Remove the style puts your own ${own === 1 ? "picture" : "pictures"} back.` : ""}</span>
     </div>` : made ? `<div class="toolbar"><button class="btn ghost danger" type="button" data-act="istyle-remove">Remove the style (${made})</button>
@@ -3766,46 +4072,91 @@ async function iconStyleShow() {
     if (!icon) { x.fillStyle = "#1a2131"; x.fillRect(0, 0, c.width, c.height); continue; }
     drawStyledIcon(x, c.width, c.height, icon, { ...st, shape: c.dataset.istyle }, behind);
   }
+  await tileStylesShow(st, behind);
+}
+/* The system tiles as they will look: a chosen one in the style, from the picture styling will start from (your
+   picture kept with the style, or one you changed by hand if the style takes yours, else the console's icon); one
+   not chosen as it is now. */
+async function tileStylesShow(st, behind) {
+  const made = styledTitles(), own = ownPictures(), id = state.editId;
+  for (const c of document.querySelectorAll("canvas[data-istyle-tile]")) {
+    const t = c.dataset.istyleTile, g = tileGroups().find(x => x.title === t);
+    const stock = g && g.icons.find(a => ext(a.path) === "png"), mine = g && g.icons.find(a => ext(a.path) === "png" && state.files.has(a.path));
+    /* (one you changed by hand stays as it is unless the style takes yours) */
+    const on = c.dataset.on === "true" && !!st.shape && !(mine && !made.has(t) && !st.mine);
+    let url = stock ? `/api/asset?${q({ path: stock.path })}` : null;
+    if (on && made.has(t) && own.has(t)) url = ownPictureUrl(t);
+    else if (mine && !made.has(t) && (!on || st.mine)) url = `/api/theme/file?${q({ id, path: mine.path })}&v=${stamp}`;
+    let img = null;
+    try { img = url ? await cachedImage(url) : null; } catch (e) { img = null; }
+    if (!c.isConnected) continue;
+    const x = c.getContext("2d");
+    x.clearRect(0, 0, c.width, c.height);
+    x.fillStyle = "#24262d";   /* the home row's tile: under a see-through icon as the console draws it */
+    x.fillRect(0, 0, c.width, c.height);
+    if (!img) continue;
+    if (on) drawStyledIcon(x, c.width, c.height, img, st, behind);
+    else x.drawImage(img, 0, 0, c.width, c.height);
+  }
 }
 /* What the icons were last styled as: when the shape, size or what is behind differs, the part says so. */
 const styleSig = st => `${st.shape}|${st.scale}|${st.behind}|${st.colour}|${st.behind === "picture" ? st.picAt || 0 : 0}`;
 let styling = false, styleStop = false;
-/* Style the icons; `note`, said at the end in place of "apply the theme". How many were styled. */
+/* The console says what a styling run here is doing (the plugin words it: style_note), so whoever is at the TV
+   knows: as it starts, at most every 8 seconds as it goes, and as it ends. Never waited for. */
+let styleNotedAt = 0;
+function styleNote(note, params) {
+  if (note === "step" && Date.now() - styleNotedAt < 8000) return;
+  styleNotedAt = Date.now();
+  api("POST", "/api/theme/icon-style", { id: state.editId, note, ...params }).catch(() => {});
+}
+
+/* Style the icons; `note`, said at the end in place of "apply the theme". The titles styled. */
 async function styleIcons(onlyNew, note = null) {
-  if (styling) return 0;
+  if (styling) return [];
   const st = iconStyle();
-  if (!st.shape) return 0;
+  if (!st.shape) return [];
   const targets = styleTargets(onlyNew);
-  if (!targets.length) return 0;
+  if (!targets.length) return [];
+  /* never a theme the plugin can't apply: each icon's files are in a folder of their own the theme then changes */
+  const folders = themeFolders(targets.flatMap(g => g.sets.find(x => x.stem === "icon0").files.map(a => a.path)));
+  if (folders > maxFolders()) {
+    toast(`Styling these would make the theme change files in ${folders} folders, more than the ${maxFolders()} the plugin applies at once. ` +
+      `Style fewer: choose some system tiles off, or take some pictures out of the theme.`, "err");
+    return [];
+  }
   styling = true;
   styleStop = false;
   const p = progressToast(`Styling ${plural(targets.length, "icon")}…`);
   /* a long run can be stopped between two titles: those done stay styled */
   const stop = document.createElement("button");
-  stop.type = "button"; stop.className = "btn sm ghost"; stop.textContent = "Stop"; stop.style.marginTop = "8px";
+  stop.type = "button"; stop.className = "btn sm ghost stop-run"; stop.textContent = "Stop styling"; stop.style.marginTop = "8px";
   stop.addEventListener("click", () => { styleStop = true; stop.disabled = true; stop.textContent = "Stopping after this one…"; });
   p.el.append(stop);
-  const made = new Set(st.titles);
+  const made = new Set(st.titles), styledNow = [];
   let done = 0, failed = 0;
+  const auto = onlyNew ? 1 : 0, total = targets.length;
+  styleNote("start", { total, auto, ...(total === 1 && !targets[0].tile ? { title: targets[0].title } : {}) });
   try {
     const behind = await iconBehind(st);
     for (const g of targets) {
       if (styleStop) break;
-      const name = (state.titleNames && state.titleNames.get(g.title)) || g.title;
-      p.set(`Styling icons: ${name} (${done + 1} of ${targets.length})…`, done / targets.length, (done + 1) / targets.length);
+      p.set(`Styling icons: ${titleName(g.title)} (${done + 1} of ${targets.length})…`, done / targets.length, (done + 1) / targets.length);
+      if (done) styleNote("step", { n: done + 1, total });
       try {
         const icon = await styleSource(g);
         const c = document.createElement("canvas");
         c.width = icon.naturalWidth; c.height = icon.naturalHeight;
         drawStyledIcon(c.getContext("2d"), c.width, c.height, icon, st, behind);
         const blob = await new Promise(r => c.toBlob(r, "image/png"));
-        if (await titlePicture(g.title, "icon0", new File([blob], `${g.title}-icon.png`, { type: "image/png" }), true)) made.add(g.title);
+        if (await stylePicture(g, new File([blob], `${g.title}-icon.png`, { type: "image/png" }))) { made.add(g.title); styledNow.push(g.title); }
         else failed++;
       } catch (e) { failed++; }
       done++;
     }
   } finally {
     styling = false;
+    styleNote(styleStop ? "stopped" : "done", { n: done, total, failed, auto });
     await setIconStyle(x => { x.titles = [...made]; x.hand = x.hand.filter(t => !made.has(t)); if (!styleStop) x.ranAs = styleSig(st); });
     /* the plugin carries on from here for games installed later */
     try { await keepStyleTemplate(iconStyle()); await loadPluginStyled(); }
@@ -3814,8 +4165,9 @@ async function styleIcons(onlyNew, note = null) {
     stamp = Date.now();
     await refreshStatus();
     renderAspect(aspectById("titles"));
+    renderAspect(aspectById("tiles"));
   }
-  return done - failed;
+  return styledNow;
 }
 /* ---- The picture behind the icons, placed as a profile picture is ----
 
@@ -3975,58 +4327,187 @@ async function bgeSave() {
 async function iconBackdropKept() {
   try { return (await fetch(`/api/theme/preview?${q({ id: state.editId, kind: "iconbg" })}`, { method: "GET" })).ok; } catch (e) { return false; }
 }
-/* Games and apps installed since the style was last used: styled as the theme opens, if it is to be. */
-async function autoStyleIcons() {
+/* Games and apps installed since the style was last used: styled as the theme opens, if it is to be, and as the
+   console says one was installed. One run at a time. */
+let autoRun = null;
+function autoStyleIcons() {
+  if (!autoRun) autoRun = autoStyleIconsNow().catch(e => toast(`New icons could not be styled: ${e.message}`, "err")).finally(() => { autoRun = null; });
+  return autoRun;
+}
+async function autoStyleIconsNow() {
   const st = iconStyle();
   if (!st.shape || !st.titles.length || state.route !== "edit") return;
-  /* The console's copy of the template, kept again when it isn't whole (an upload that stopped) or its on/off
-     differs: only for the style the icons were made with, so later installs match them. */
+  /* The console's copy of the template, kept again when it isn't whole (an upload that stopped), lacks the list
+     of the titles the style made, or its on/off differs: only for the style the icons were made with, so later
+     installs match them. */
   const kept = styleMadeByPlugin.id === state.editId ? styleMadeByPlugin : null;
-  if (kept && "template" in kept && st.ranAs === styleSig(st) && (!kept.template || kept.auto !== !!st.auto)) {
+  if (kept && "template" in kept && st.ranAs === styleSig(st) &&
+      (!kept.template || kept.auto !== !!st.auto || kept.styledList === false)) {
     try { await keepStyleTemplate(st); await loadPluginStyled(); }
     catch (e) { toast(`The style for games installed later could not be kept: ${e.message}`, "err"); }
   }
+  await adoptStyledIcons();
   if (!st.auto) return;
-  const fresh = styleTargets(true);
+  const fresh = styleTargets(true);   /* (none still installing) */
   if (!fresh.length) return;
   /* Styled by the page on its own, as the plugin does: kept and applied again when the theme is the one applied,
      unless you have changes of your own waiting (applying would put them on the console too, unasked). */
   const id = state.editId, t = themeById(id);
   const yours = !!(t && t.unsaved), applied = state.status && state.status.applied === id;
-  toast(`${plural(fresh.length, "game or app", "games and apps")} installed since this theme's icon style was used: styling ${fresh.length === 1 ? "it" : "them"}.`, "", 6000);
-  const n = await styleIcons(true, applied && !yours ? "Applying the theme again to show them…" : null);
-  if (!n || state.editId !== id || yours) return;
+  titleNamesEnsure();
+  if (titleNamesLoading) await titleNamesLoading.catch(() => {});
+  toast(`Installed since this theme's icon style was used: ${namesOf(fresh.map(g => g.title))}. Styling ${fresh.length === 1 ? "its icon" : "their icons"}.`, "", 6000);
+  const done = await styleIcons(true, applied && !yours ? "Applying the theme again to show them…" : null);
+  if (!done.length || state.editId !== id || yours) return;
   try { await api("POST", "/api/theme/save", { id }); } catch (e) { return toast(`The styled icons are in the theme but not saved: ${e.message}`, "err"); }
   await refreshStatus();
-  if (applied && state.status.applied === id && !state.status.applying) await applyTheme(id);
+  if (applied && state.status.applied === id && !state.status.applying) await applyTheme(id, done);   /* said once on the console */
 }
 
-async function removeIconStyle() {
-  const made = styledTitles(), own = ownPictures();
-  const groups = titleGroups().filter(g => made.has(g.title));
-  const p = progressToast(`Removing the style from ${plural(groups.length, "icon")}…`);
+/* ---- An icon the style made that the page lost track of ----
+
+   Counted as changed by hand, styling again would put it, styled already, inside the shape a second time. One whose
+   every pixel outside the shape (clear of its edge) matches the template as the console keeps it is the style's:
+   it goes back on the style's list (and the console's), so styling again starts from the title's own icon. Looked
+   at once per page per title, and again when the template changes. */
+const notStyle = new Set();   /* "<theme>|<title>": looked at, not the style's */
+/* stylematch:begin */
+/* Whether an icon (RGBA bytes, w x h) is one the style made: outside the shape `mask` (its alpha), clear of the edge
+   by `edge` pixels, the same as the template's backdrop `base` (RGBA of the same size). */
+function styleMatch(icon, base, mask, w, h, edge = 2) {
+  let n = 0, diff = 0;
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      let near = false;
+      for (let dy = -edge; dy <= edge && !near; dy++) {
+        for (let dx = -edge; dx <= edge && !near; dx++) {
+          const xx = x + dx, yy = y + dy;
+          near = xx >= 0 && yy >= 0 && xx < w && yy < h && mask[(yy * w + xx) * 4 + 3] > 0;
+        }
+      }
+      if (near) continue;
+      const i = (y * w + x) * 4;
+      diff += Math.abs(icon[i] - base[i]) + Math.abs(icon[i + 1] - base[i + 1]) + Math.abs(icon[i + 2] - base[i + 2]);
+      n++;
+    }
+  }
+  /* enough of the backdrop to tell (a shape filling the square leaves too little), and the same but for rounding */
+  return n >= w * h * 0.03 && diff / (n * 3) < 6;
+}
+/* stylematch:end */
+async function adoptStyledIcons() {
+  const st = iconStyle(), id = state.editId, kept = styleMadeByPlugin.id === id ? styleMadeByPlugin : null;
+  if (!st.shape || !kept || !kept.template) return 0;
+  const candidates = handChanged().filter(g => !notStyle.has(`${id}|${g.title}`));
+  if (!candidates.length) return 0;
+  const N = 96, rgba = img => {
+    const c = document.createElement("canvas");
+    c.width = c.height = N;
+    const x = c.getContext("2d");
+    x.imageSmoothingQuality = "high";
+    x.drawImage(img, 0, 0, N, N);
+    return x.getImageData(0, 0, N, N).data;
+  };
+  let base, mask;
+  try { [base, mask] = (await Promise.all(["base", "mask"].map(part => loadImage(`/api/theme/icon-style?${q({ id, part })}&v=${Date.now()}`)))).map(rgba); }
+  catch (e) { return 0; }
+  const found = [];
+  for (const g of candidates) {
+    const set = g.sets.find(x => x.stem === "icon0"), png = set && set.files.find(a => ext(a.path) === "png" && state.files.has(a.path));
+    let ours = false;
+    if (png) { try { ours = styleMatch(rgba(await loadImage(`/api/theme/file?${q({ id, path: png.path })}&v=${stamp}`)), base, mask, N, N); } catch (e) { ours = false; } }
+    if (state.editId !== id) return 0;
+    if (ours) found.push(g.title); else notStyle.add(`${id}|${g.title}`);
+  }
+  if (!found.length) return 0;
+  const t = themeById(id), had = !!(t && t.unsaved);
+  await setIconStyle(x => { x.titles = [...new Set([...x.titles, ...found])]; x.hand = x.hand.filter(v => !found.includes(v)); });
+  const list = [...new Set(iconStyle().titles.filter(v => /^[A-Z0-9]{9}$/.test(v)))];
+  await uploadVerified("/api/theme/icon-style", { id, part: "styled" }, new Blob([list.map(v => `${v}\n`).join("") || "\n"])).catch(() => {});
+  if (!had) { await api("POST", "/api/theme/save", { id }).catch(() => {}); await refreshStatus(); }
+  titleNamesEnsure();
+  if (titleNamesLoading) await titleNamesLoading.catch(() => {});
+  toast(`${namesOf(found)}: ${found.length === 1 ? "its icon has" : "their icons have"} this style already, so ${found.length === 1 ? "it counts" : "they count"} as styled again.`, "", 8000);
+  renderAspect(aspectById("titles"));
+  return found.length;
+}
+
+/* The style taken off these titles' icons (installed ones, and tiles): your own picture again where you had changed
+   one, the console's icon for the rest. `p`, the progress to show it in. How many got your picture back. */
+async function unstyleGroups(groups, p) {
+  const own = ownPictures();
   let yours = 0;
   for (let i = 0; i < groups.length; i++) {
-    const g = groups[i], name = (state.titleNames && state.titleNames.get(g.title)) || g.title;
-    p.set(`Removing the style: ${name} (${i + 1} of ${groups.length})…`, i / groups.length, (i + 1) / groups.length);
+    const g = groups[i];
+    p.set(`Removing the style: ${titleName(g.title)} (${i + 1} of ${groups.length})…`, i / groups.length, (i + 1) / groups.length);
     if (own.has(g.title)) {   /* an icon you had changed: your picture again */
       try {
         const res = await fetch(ownPictureUrl(g.title));
         if (!res.ok) throw new Error("not kept");
         const file = new File([await res.blob()], `${g.title}-icon.png`, { type: "image/png" });
-        if (await titlePicture(g.title, "icon0", file, true)) { yours++; continue; }
+        if (await stylePicture(g, file)) { yours++; continue; }
       } catch (e) { /* not readable: the console's own, as for the others */ }
     }
     await resetAssets(g.sets.find(x => x.stem === "icon0").files);
   }
-  await setIconStyle(x => { x.titles = []; x.hand = []; x.auto = false; });
+  return yours;
+}
+
+async function removeIconStyle() {
+  titleNamesEnsure();
+  tileNamesEnsure();
+  const made = styledTitles(), own = ownPictures();
+  /* the console's tiles the style made, whether or not the style is still for them */
+  const groups = [...titleGroups(), ...tileStyleGroups(true)].filter(g => made.has(g.title));
+  /* Titles not installed now: the style's icon from the console's own goes (the console's icon when installed
+     again); one made from your picture stays, listed, with your picture kept: it can only go back as an icon file
+     of the console's form once the title is installed. */
+  const here = new Set(groups.map(g => g.title)), away = [...made].filter(t => !here.has(t));
+  const waiting = away.filter(t => own.has(t));
+  const iconFiles = t => [...state.files].filter(p => p.startsWith(`/user/appmeta/${t}/icon0.`) || p.startsWith(`/user/app/${t}/sce_sys/icon0.`)).map(path => ({ path }));
+  for (const t of away.filter(t => !own.has(t))) await resetAssets(iconFiles(t));
+  const p = progressToast(`Removing the style from ${plural(groups.length, "icon")}…`);
+  const yours = await unstyleGroups(groups, p);
+  await setIconStyle(x => { x.titles = waiting; x.hand = []; x.auto = false; });
   await api("POST", "/api/theme/icon-style", { id: state.editId, auto: 0, clear: 1 }).catch(() => {});
+  if (waiting.length) {   /* still the style's: listed, so it is put right once installed */
+    const list = new Blob([waiting.map(t => `${t}\n`).join("")]);
+    await uploadVerified("/api/theme/icon-style", { id: state.editId, part: "styled" }, list).catch(() => {});
+  }
   await loadPluginStyled();
   const rest = groups.length - yours;
-  p.done(`The style is off ${plural(groups.length, "icon")}: ${yours ? `${yours} with your own picture again${rest ? `, ${rest} with the console's` : ""}` : "the console's own again in this theme"}. Apply the theme to see it.`, "ok");
+  p.done(`The style is off ${plural(groups.length, "icon")}: ${yours ? `${yours} with your own picture again${rest ? `, ${rest} with the console's` : ""}` : "the console's own again in this theme"}.` +
+    `${waiting.length ? ` ${plural(waiting.length, "game")} not installed now ${waiting.length === 1 ? "keeps" : "keep"} the style, with your picture kept, until installed again: press Remove the style again then.` : ""} Apply the theme to see it.`, "ok");
   stamp = Date.now();
   await refreshStatus();
   renderAspect(aspectById("titles"));
+  renderAspect(aspectById("tiles"));
+}
+
+/* A system tile chosen, or not (`ids`: its tiles, "NPXS40145,NPXS40205"). Not: put back as it was (your picture,
+   or the console's) where the style made it, and left out of the style. Chosen: styled with the rest the next time
+   you style the icons. */
+async function styleTile(ids, on) {
+  const list = ids.split(",").filter(id => id in STYLE_TILES);
+  if (on) {
+    await setIconStyle(x => { x.tiles = [...new Set([...x.tiles, ...list])]; });
+    return renderAspect(aspectById("titles"));
+  }
+  const made = styledTitles(), groups = tileStyleGroups(true).filter(g => list.includes(g.title) && made.has(g.title));
+  await setIconStyle(x => { x.tiles = x.tiles.filter(t => !list.includes(t)); });
+  if (!groups.length) return renderAspect(aspectById("titles"));
+  const name = titleName(list[0]);
+  const p = progressToast(`Putting back the ${name} icon…`);
+  const yours = await unstyleGroups(groups, p);
+  const off = new Set(groups.map(g => g.title));
+  await setIconStyle(x => { x.titles = x.titles.filter(t => !off.has(t)); });
+  for (const t of off) if (ownPictures().has(t)) await api("POST", "/api/theme/icon-style", { id: state.editId, forget: t }).catch(() => {});
+  await loadPluginStyled();
+  p.done(`${name}: ${yours ? "your own picture" : "the console's icon"} again. Apply the theme to see it.`, "ok");
+  stamp = Date.now();
+  await refreshStatus();
+  renderAspect(aspectById("titles"));
+  renderAspect(aspectById("tiles"));
 }
 
 /* What a title's picture is, in plain words: [button label, where it shows]. */
@@ -5645,9 +6126,7 @@ async function previewFont(id) {
     if (!res.ok) return null;
     const ff = new FontFace("pvtheme", await res.arrayBuffer());
     await ff.load();
-    document.fonts.add(ff);
-    pvFont = ff;
-    return "pvtheme";
+    return ff;   /* added to the page by the preview it is for, if that is still the one open (previewGather) */
   } catch (e) { return null; }
 }
 
@@ -5670,21 +6149,23 @@ document.addEventListener("keydown", e => { if (e.key === "Escape" && $("#bge"))
 async function previewGather(id) {
   previewRevoke();
   previewDropFont();
-  pvData = { id, bg: null, tiles: [], fontFam: null, art: {}, cc: {}, colors: {} };
-  const [bg, fileIcons, rcoIcons, fontFam] = await Promise.all([
+  /* This preview's own: closed and opened again meanwhile, the newer one's pieces are never taken for these. */
+  const mine = pvData = { id, bg: null, tiles: [], fontFam: null, art: {}, cc: {}, colors: {} };
+  const [bg, fileIcons, rcoIcons, ff] = await Promise.all([
     previewBackground(id), previewFileIcons(id, 6), previewRcoIcons(id, 6), previewFont(id),
   ]);
-  if (!$("#pv-overlay") || state.editId !== id) {
+  const stale = () => !$("#pv-overlay") || state.editId !== id || pvData !== mine;
+  if (stale()) {
     [bg, ...fileIcons, ...rcoIcons].filter(Boolean).forEach(u => URL.revokeObjectURL(u));
-    previewDropFont();
     return false;
   }
-  pvData.bg = bg || await consoleBackground();   /* the console's own, decoded by the plugin; kept with the page */
-  pvData.tiles = [...fileIcons, ...rcoIcons].slice(0, 6);
-  pvData.tiles.push(...consoleTileIcons(6 - pvData.tiles.length));   /* the system tiles' own after yours */
-  pvData.fontFam = fontFam || await consoleFont();
   pvUrls.push(...[bg, ...fileIcons, ...rcoIcons].filter(Boolean));
-  return true;
+  if (ff) { previewDropFont(); document.fonts.add(ff); pvFont = ff; }
+  mine.bg = bg || await consoleBackground();   /* the console's own, decoded by the plugin; kept with the page */
+  mine.tiles = [...fileIcons, ...rcoIcons].slice(0, 6);
+  mine.tiles.push(...consoleTileIcons(6 - mine.tiles.length));   /* the system tiles' own after yours */
+  mine.fontFam = ff ? "pvtheme" : await consoleFont();
+  return !stale();
 }
 async function pvArtFor(look) {
   if (look in pvData.art) return pvData.art[look];
@@ -5973,7 +6454,10 @@ async function renderEditor() {
   loads.set("open", -1);
   view.innerHTML = loadingMarker("open", `Opening ${t.name}…`);
   paintLoads(view);
-  await Promise.all([loadAssets(), loadThemeFiles(t.id), loadChoices(t.id), loadPluginStyled(t.id)]);
+  const stale = !!(state.assets && state.status.titles && state.status.titles !== state.assetsSeen);   /* games came or went */
+  await Promise.all([loadAssets(stale), loadThemeFiles(t.id), loadChoices(t.id), loadPluginStyled(t.id)]);
+  /* Left meanwhile (the library, or another theme opened): that page is the one drawn, never this one over it. */
+  if (state.route !== "edit" || state.editId !== t.id) return;
   const on = state.status.applied === t.id;
   const blocked = applyBlocked(t);
   document.title = `${t.name} · PS5 Themes`;
@@ -5990,6 +6474,7 @@ async function renderEditor() {
       ? `<div class="banner">Adding pictures and music is easier from a computer or phone: open <b>http://${esc(state.status.ip)}:8095</b>.</div>` : ""}
     ${state.assetsError ? `<div class="banner err">${esc(state.assetsError)}. Choose No theme in the library and restart the plugin once, so it can list the console's files.</div>` : ""}
     ${!t.compatible ? `<div class="banner warn">${esc(blocked)}</div>` : ""}
+    ${themeFolders() > maxFolders() ? `<div class="banner warn">This theme changes files in ${themeFolders()} folders, more than the ${maxFolders()} the plugin applies at once, so it can't be applied. Take some of its pictures out, or choose fewer system tiles in Games and apps.</div>` : ""}
     <div class="editor${state.section ? " picked" : ""}" id="editor">
       <nav class="secnav" id="secnav" aria-label="Parts of ${esc(t.name)}">${secNavHtml()}</nav>
       <div class="pane" id="pane"></div>
@@ -7730,15 +8215,17 @@ async function loadLog() {
     el.textContent = text || "Nothing logged yet.";
     el.scrollTop = el.scrollHeight;
   } catch (e) { el.textContent = e.message; }
+  const box = $("#crashes");   /* (taken now: Activity left meanwhile, the answer goes nowhere) */
   try {
     const { crashes } = await api("GET", "/api/crashes");
-    $("#crashes").innerHTML = crashes.length ? `<div class="panel"><h2 style="margin-bottom:12px">Crash reports</h2>
+    if (!box) return;
+    box.innerHTML = crashes.length ? `<div class="panel"><h2 style="margin-bottom:12px">Crash reports</h2>
       <div class="rows">${crashes.sort().reverse().map(c => {
         const when = new Date(parseInt(c.slice(6), 10) * 1000).toLocaleString();
         return `<div class="row-item"><div class="info"><div class="file">${esc(when)}</div><div class="dir">${esc(c)}</div></div>
           <div class="acts"><button class="btn sm" data-act="view-crash" data-name="${esc(c)}">View</button></div></div>`;
       }).join("")}</div></div>` : "";
-  } catch (e) { $("#crashes").innerHTML = ""; }
+  } catch (e) { if (box) box.innerHTML = ""; }
 }
 
 /* ================================================================ zip import / export */
@@ -8181,6 +8668,7 @@ document.addEventListener("click", async e => {
     case "colors-close": state.colorEdit = null; return renderAspect(aspectById("appearance"));
     case "colors-save": el.disabled = true; el.textContent = "Saving…"; return saveColorEdit(el.dataset.path, el.dataset.palette);
     case "tiles-number": return numberTileIcons();
+    case "istyle-tile": el.disabled = true; return styleTile(el.dataset.v, el.getAttribute("aria-pressed") !== "true");
     case "istyle-shape": {   /* shown at once; kept on the console as it goes (setChoice says if it can't be) */
       const kept = setIconStyle(x => { x.shape = el.dataset.v; });
       renderAspect(aspectById("titles"));
@@ -8212,8 +8700,14 @@ document.addEventListener("click", async e => {
     case "bge-reset": if (bge) { bge.zoom = 1; bge.s = bge.fill; bge.ox = (bge.F - bge.iw * bge.s) / 2; bge.oy = (bge.F - bge.ih * bge.s) / 2; bgeZoom(1); } return;
     case "bge-file": { const file = await pickFile("image/*"); if (file) await openBgEditor(file); return; }
     case "bge-fromtheme": return openBgEditor(`/api/theme/preview?${q({ id: state.editId, kind: "background" })}&v=${stamp}`);
-    case "istyle-run": return styleIcons(false);
-    case "istyle-remove": el.disabled = true; el.textContent = "Removing…"; return removeIconStyle();
+    case "istyle-run": {
+      el.disabled = true;
+      await catchUp();
+      await adoptStyledIcons();
+      if (!(await styleIcons(false)).length) renderAspect(aspectById("titles"));
+      return;
+    }
+    case "istyle-remove": el.disabled = true; el.textContent = "Removing…"; await catchUp(); return removeIconStyle();
     case "title-pic": {
       const file = await pickFile("image/*"), title = el.dataset.title, stem = el.dataset.stem;
       if (!file || !(await titlePicture(title, stem, file))) return;
@@ -8237,7 +8731,12 @@ document.addEventListener("click", async e => {
     }
     case "tile-reset": {
       const g = tileGroups().find(x => x.title === el.dataset.title);
-      if (g) { await resetAssets(g.icons.concat(g.bg ? [g.bg] : [])); renderAspect(aspectById("tiles")); }
+      if (g) {
+        await resetAssets(g.icons.concat(g.bg ? [g.bg] : []));
+        if (g.title in STYLE_TILES) await iconChangedByHand(g.title, true);
+        renderAspect(aspectById("tiles"));
+        renderAspect(aspectById("titles"));
+      }
       return;
     }
     case "choose-cover": return chooseCover();
@@ -8528,7 +9027,21 @@ window.addEventListener("drop", e => {
   }
 });
 
-window.addEventListener("hashchange", () => {
+window.addEventListener("hashchange", e => {
+  /* Another theme isn't opened while the page is still writing into this one (an upload, styling the icons, a
+     save): each of those writes to the theme that is open as it goes, and would carry on into the other one. The
+     library and Activity can be opened meanwhile; this theme stays the one written to. */
+  if (writing > 0 || styling || autoRun || progressStack.length) {
+    const parts = location.hash.replace(/^#\/?/, "").split("/");
+    const next = parts[0] === "edit" ? decodeURIComponent(parts[1] || "") : "";
+    if (next && state.editId && next !== state.editId) {
+      history.replaceState(null, "", e.oldURL);
+      const t = themeById(state.editId), name = t ? t.name : "the theme";
+      toast(styling || autoRun ? `The icons of ${name} are being styled: open another theme once that is done, or stop styling.`
+        : "A change is still on its way to the console: open the other theme once it is done.", "", 6000);
+      return;
+    }
+  }
   bgeClose();   /* a dialog of the page being left goes with it */
   if ($("#pv-overlay")) previewClose();
   const left = state.route === "edit" ? themeById(state.editId) : null;
@@ -8584,14 +9097,10 @@ window.addEventListener("resize", () => { if (state.trim) drawTrim(); });
   if (!location.hash) history.replaceState(null, "", "#/library");
   await refreshStatus();
   render();
-  let tick = 0;
-  setInterval(async () => {
-    tick++;
-    if (document.hidden || state.route !== "library" || state.creating || state.mix) return;   /* a form open keeps its focus */
-    if (!state.status.applying && tick % 4) return;   /* every second while a theme is being applied */
-    const before = JSON.stringify(state.status);
-    if (await refreshStatus() && JSON.stringify(state.status) !== before) renderLibrary();
-  }, 1000);
+  let tick = 0, polling = false;
+  const poll = async t => { if (polling) return; polling = true; try { await pollConsole(t); } catch (e) { /* the next one */ } finally { polling = false; } };
+  setInterval(() => poll(++tick), 1000);
+  document.addEventListener("visibilitychange", () => { if (!document.hidden) poll(0); });   /* back to the page: at once */
 })();
 </script>
 </body>

@@ -1,0 +1,21 @@
+{
+  "name": "PS5 Themes",
+  "icons_url": "icons.json",
+  "payloads": [
+    {
+      "id": "ps5-theme",
+      "name": "PS5 Themes",
+      "filename": "ps5-theme.elf",
+      "url": "https://github.com/Blaze414/ps5-theme/releases/download/v1.80/ps5-theme.elf",
+      "description": "Custom home-screen themes: backgrounds, icons, sounds, fonts and home music, as read-only overlays that never write the system. Manage them from the Themes tile, or from a phone or computer at http://<console>:8095.",
+      "version": "v1.80",
+      "last_update": "2026-10-30",
+      "category": "Customization",
+      "checksum": "e27473f0f5d3a9c544ed075f3f0a0e831377e0ab5e6316dce81ad732a99c04eb",
+      "author": "Blaze414",
+      "icon_key": "ps5-theme",
+      "details_url": "https://raw.githubusercontent.com/Blaze414/ps5-theme/main/README.md",
+      "source": "https://github.com/Blaze414/ps5-theme"
+    }
+  ]
+}

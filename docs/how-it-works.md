@@ -139,7 +139,20 @@ started again until the console was restarted. Now, for 30 seconds after
 the home screen exits, the plugin looks for the next one every 10 ms and
 covers its sandbox as soon as it is found, early enough for what it reads
 as it starts (confirmed on 13.42: the font and the game icons show after
-one wake). A view where an overlay of the plugin's is already present, even
+one wake).
+
+Two more rules since 1.80, after 1.79 left the console unable to wake: two
+apps that start with the home screen (`NPXS40101` and `NPXS40102`) had their
+views covered as the system made them, during rest mode; they started again
+and the next home screen never did.
+
+- From the moment the home screen exits until the next one is running and
+  watched, nothing goes into any app's sandbox. What the system makes
+  meanwhile is covered once the new home screen runs, a second or two later.
+- A view in any other app's sandbox, or in one of the home screen's own
+  inner sandboxes (`sce_sbx`), is covered only once it has been there 2
+  seconds, when the system has finished making it. The home screen's own
+  views go in at once, as before. A view where an overlay of the plugin's is already present, even
 under another mount, never gets a second one.
 
 The same care when overlays come out (since 1.69):
@@ -253,14 +266,26 @@ are fuzzed with libFuzzer under AddressSanitizer and UBSan
 
 ## Stock copies, linked staging and the swap
 
+A theme may change files in up to 256 folders, each overlaid on its own (64
+before 1.75: a theme of 18 games with its icon style and the system tiles
+came to 66, and was refused). The status gives the limit (`maxFolders`), the
+manager checks a style against it before making it and says when a theme is
+over it, and an apply over it says so plainly ("changes files in more than
+256 folders") rather than that the theme couldn't be read. Each folder costs
+about 2 KB of the apply's tables for every view of it.
+
 An overlay must contain the whole folder, not just the files you replaced.
 The home screen's asset folder is 169 MB on 13.42.
 
 - **Once per firmware,** the first apply that touches a folder keeps a copy
   of it under `/data/ps5-theme/stock/<firmware>/`, checked byte for byte
   against the system. An installed title's folder changes when the title is
-  updated, so its copy is compared with the folder again at each apply
-  (while none of our overlays covers it) and made again if they differ.
+  updated, so at each apply its copy is checked against the folder (while
+  none of our overlays covers it) and made again if they differ. The check
+  compares each file's identity, size and time with what they were when the
+  copy was last found the same, and reads the files only when one of them
+  changed (since 1.78: 1.77 read every file of every game's folder both
+  ways at every apply, 30 of an apply's 36 seconds on the console).
 - **Every apply** builds its stage folder by hard-linking that copy's files,
   and your theme's files too, which takes no time and no space. Theme and
   stock files are only ever replaced, never edited in place, so neither can
@@ -326,6 +351,14 @@ as long as it runs, and the kernel releases it when the process ends.
   (checked by its header: `etaHEN_PLUGIN`, the title ID `THEM00001`, the
   version, then an ELF) or a plain `.elf` (checked by the marker
   `PS5THEME-VERSION:<version>:THEM00001` every build carries).
+- Only a whole copy is started (since 1.73). One written in the last 10
+  seconds must look the same (size and date) at two looks in a row; the
+  program sent must carry the version found and end with its section table
+  (a copy still coming in has zeros there). Some tools make the file its
+  full size first and fill it in within the same second: 1.72 could read it
+  then, remember it by size and date as no ps5-theme at all, and never look
+  again (2026-10-29). What it reads of a file changed in the last 5 seconds
+  is no longer remembered.
 - It sends that program to the ELF loader on port 9021 (the standard PS5
   payload loader, which etaHEN also runs), which starts it as a new process.
 - The new copy finds the lock taken, asks the running copy's version, and if
@@ -371,8 +404,14 @@ the only way to restart a plugin without restarting the console.
 `ps5-theme-stop.elf` is a small separate program for when the manager can't
 be reached. Whether the plugin runs is decided by its lock alone, and the
 tool changes overlays only while it holds that lock itself, never under a
-running copy. If a copy runs, the tool finds it (by `/data/ps5-theme/pid`,
-or its thread name) and asks it to stop (`SIGUSR2`). The plugin then takes
+running copy. If a copy runs, the tool asks it to stop over its web port
+first (`/api/stop`, accepted only from the console itself, since 1.73), which
+needs no looking for its process; else it finds it (by
+`/data/ps5-theme/pid`, or its thread name) and asks by signal (`SIGUSR2`).
+The pid file's start time is matched give or take two minutes since 1.73:
+the console's boot time moves when it sets its clock, and matched to the
+microsecond, a copy that had run for 43 minutes wasn't recognised
+(2026-10-29), with no thread names to fall back on on 13.42. The plugin then takes
 out only the overlays of games' and apps' pictures and exits. Those must not
 stay in the home screen's view with nothing running to take them out at rest
 mode (see [Apps that wouldn't start](challenges.md#apps-that-wouldnt-start)). The rest of
@@ -381,7 +420,9 @@ back. A copy that doesn't stop within two minutes is ended, and so is a copy
 from before 1.50, which ends on the signal at once; once the lock is free
 the tool takes out the pictures' overlays it left. A running copy the tool
 can't find is left alone, and what the tool saw is written to
-`/data/ps5-theme/dump/stop.txt`. It says what it did in a notification.
+`/data/ps5-theme/dump/stop.txt` (the pid file, that process's start time as
+the console gives it now, whether the web port answers, and the threads it
+could list). It says what it did in a notification.
 
 Overlays are taken out (here, and when ShellUI exits at rest mode) by what
 the console's mount table shows, not only by the plugin's records, so an
@@ -589,8 +630,12 @@ keep playing.
 
 Switching themes or choosing **No theme** takes the current overlays
 down. If an app is still reading from one (ShellUI keeps the home music and
-its interface files open), the plugin waits a moment and then leaves it
-where it is. It never forces it off. On 13.42, forcing it broke the
+its interface files open), the plugin leaves it where it is. It never forces
+it off. Where the next theme goes on at the same place it tries once (since
+1.77; it used to wait 3 seconds for each, and the home screen keeps four
+such folders open for as long as it runs, which added 12 seconds to every
+apply); where nothing goes on after it, as for **No theme**, it waits those
+3 seconds first. On 13.42, forcing it broke the
 system's own views stacked on it ("Bad file descriptor"), and apps wouldn't
 start until a restart. Instead:
 
@@ -613,6 +658,16 @@ start until a restart. Instead:
 
 A stage folder that an overlay still uses is never deleted.
 
+The apply's summary line in Activity says how long each step took (since
+1.77): "… 2 file(s) compared by content; 18.4 s (preparing 4.1, switching
+12.9, checking 1.4)". Each overlay is added to the plugin's record of them
+as one more line as it goes on, not by writing the whole record again and
+waiting for the disk each time (since 1.79: 217 of them took seconds of the
+switch on the console, while the home screen showed its own look). The
+record matters only while the console runs, as the overlays go with a
+restart; a last line cut short as the power went is never read as a record,
+and the record is written whole again before the next line goes on.
+
 ## When the interface keeps restarting
 
 A picture, sound or interface file the console can't handle can make one of
@@ -626,7 +681,17 @@ the console and in the manager. One restart, as after rest mode, is normal
 and changes nothing.
 Sandboxes left by earlier restarts can stay on the console for good, so the
 plugin counts only sandboxes newer than the ones it found when the theme was
-applied.
+applied. The restarts are timed by the console's clock, so rest mode counts
+between them; when that clock is set back meanwhile (the console sets it
+from the network after it starts), a restart before the change never counts
+as within the time (since 1.77).
+
+A view the watcher leaves as it is (one of the plugin's overlays is already
+there, under a mount the system made on top of it later, as after a game is
+installed again) is looked at again every minute but written in Activity
+once per apply (since 1.77; 1.76 wrote the same lines every minute, 5,800 a
+day, and pushed what mattered out of the log). The theme shows there again
+after rest mode, when the home screen's new sandbox gets its views.
 
 ## The console's own pictures in the manager
 
@@ -657,7 +722,7 @@ copy of each file (`stock_path`), never a theme's.
 
 A theme's icon style (Games and apps) reaches games installed after it was
 used without the manager open (since 1.66). `src/autostyle.c` looks every
-minute, and only between applies, at the theme that is applied, if its style
+15 seconds (every minute before 1.73), and only between applies, at the theme that is applied, if its style
 says to (`icon-style/style.ini`, `auto=1`) and its template is whole
 (`base.png`, `mask.png` and `known.txt`; without the list of titles
 installed then, every title would look new, so nothing is styled and the log
@@ -670,12 +735,22 @@ says to open the theme in the manager, which keeps it again):
   in `icon-style/own/<ID>.png`). A title whose icon you put back is never
   styled again behind your back.
 - **When:** once nothing in its folders (`/user/appmeta/<ID>`,
-  `/user/app/<ID>`, its `sce_sys`) and its package (`app.pkg`, or a patch's
-  under `/user/patch/<ID>`) has changed for 10 minutes. The console writes
-  those while it installs, downloads or updates a game (a package grows
-  without its folder changing), and a theme over them would keep it from
-  writing, so the styler waits. A theme deleted while a title is styled gets
-  nothing written into it.
+  `/user/app/<ID>`, its `sce_sys`), its package (`app.pkg`, or a patch's
+  under `/user/patch/<ID>`) and its download (`/user/download/<ID>`, since
+  1.73) has changed for 2 minutes (10 before 1.73). The console writes those while it
+  installs, downloads or updates a game (a package grows without its folder
+  changing; a download is written in place, its size fixed from the start),
+  and a theme over them would keep it from writing, so the styler waits. A
+  theme deleted while a title is styled gets nothing written into it.
+- **Timed on its own clock** (since 1.73): each look takes a print of every
+  one of those files' dates and sizes, and the 2 minutes run from the last
+  time the print changed, by the plugin's own clock. Before, they ran from
+  the newest date on the files, and an installer can date them wrong: one
+  dated an app's files an hour ahead of the console's clock (2026-10-29), so
+  the wait couldn't start for an hour, and the newest date hid its download
+  still being written. Only at the first look (the plugin just started) do
+  the dates say how long a title has been as it is, never more than until
+  now. The page asks the same (`autostyle_wait`).
 - **How:** the title's own icon is read as pixels (`png_decode_rgba`: 8-bit
   RGB or RGBA PNGs, at most 2048 pixels a side, through the same inflate the
   checks use, since a homebrew package's icon is untrusted), set into the
@@ -687,18 +762,40 @@ says to open the theme in the manager, which keeps it again):
   goes into the theme; a title whose files can't all be made (a compressed
   texture, a picture of another kind) is left for the page. Each title is
   tried once per run of the plugin.
-- **Not while you play:** while a game or app is being played, the styler
-  does nothing, neither styling nor applying; an apply owed from while one
-  was played waits too. A title's process is named after the program it runs
-  (`eboot.bin`), but a game left on the home screen is still there: the
-  console suspends it. So a game counts as played only while its process
-  uses the processor: more than 2% of one core between two looks, read from
-  the kernel's process records (`ki_runtime`, its threads' time). A suspended
-  game uses none. A process seen for the first time, or whose time can't be
-  read, counts as played until the next look. The log names the titles
-  waiting, once; `/api/diag/procs` shows each process's processor time.
+- **With a game open too:** 1.67 to 1.69 waited while a game was being
+  played, judged by its use of the processor, on the idea that the console
+  suspends a game left on the home screen. Measured on 13.42 (2026-10-29)
+  it doesn't: Yakuza 0 left on the home screen used about 41% of one core,
+  and 21 to 44% while played, and the home screen's own process was no
+  surer guide. Waiting for no game to be open could mean waiting for good,
+  so since 1.70 the styler doesn't wait. An apply never touches a game's own
+  sandbox (its 31 mounts held nothing of the theme's), only the home
+  screen's folders and the system's. `/api/diag/procs` shows each process's
+  processor time.
 - **Then:** the theme is applied again (only the new title's folders are
-  new), and the console says which titles were styled.
+  new), quietly (`reapply_quietly`, since 1.72): no "applying…", no steps,
+  no tips, only the note, by the games' names (`title_name`: its
+  `param.json` in its default language, else English, else any; a PS4
+  title's `param.sfo`; else the ID), once the apply is done. An apply you
+  ask for meanwhile is said as usual, the note after it. A title it can't
+  style is said too, for the page.
+- **Told once:** a new title (or one coming back) seen still installing is
+  said once per install, with when the style follows.
+- **The page follows:** the status carries `titles`, a short text that
+  changes when a title folder appears or goes in `/user/appmeta`, and when
+  the styler styles, puts back or leaves a title (`titles_stamp`). An open
+  page reads the titles and the theme again when it changes. The style's
+  answer lists the titles still installing, with the seconds left
+  (`autostyle_wait`, the same rule), so the page styles none of them early
+  either, and the kept template (`part=base`, `part=mask`), against which
+  the page tells an icon the style made from one changed by hand.
+- **Installed again:** an apply lists the titles the theme has pictures for
+  whose metadata folder isn't there (`titles_awaiting_install`). Once one is
+  installed again and its install is over, the theme is applied again for
+  it (since 1.70), once per install. If its pictures were the style's (the
+  page's list, `icon-style/styled.txt`, or `made.txt`), they are made again
+  first with the template as it is then, from `icon-style/own/<ID>.png`
+  where there is one, else from the title's own icon.
 
 A title that isn't installed (uninstalled, or not yet) keeps its pictures in
 the theme: an apply leaves its folders out and logs "isn't installed; its
@@ -755,10 +852,26 @@ A new theme made of parts of others (since 1.65).
 
 A small HTTP/1.1 server in C (`src/web.c`): one listener thread and four
 workers fed by a bounded queue, which answers `503 busy` when full, so a slow
-or broken client can't hold up others. It serves the manager (one HTML page
+or broken client can't hold up others. A request's line and headers get 10
+seconds in all (since 1.77; before, only each read was timed, and a client
+sending a byte every few seconds could hold a worker for as long as it
+liked).
+
+The page (518 KB) and the ATRAC9 module (84 KB) are built into the plugin
+compressed too, and a browser that takes gzip gets them at a third of the
+size (151 KB and 28 KB). Both are asked for again each time the page opens
+(`no-cache`), and while the plugin is the same they are answered "not
+modified" (an `ETag` of the plugin's version and a checksum of the bytes),
+so an updated plugin's page is never an old one (the plugin's logo too,
+sent as it is: a PNG is compressed already). A theme's files and
+preview pictures have an `ETag` of their own (the file's identity, size and
+time: they are only ever replaced, never changed in place): the library
+redrawing its cards costs a few bytes for each picture, not the picture.
+Before 1.77 everything was sent whole every time (`no-store`). It serves the manager (one HTML page
 and the ATRAC9 module, both built into the plugin) and a JSON API. The page
 reloads itself when the plugin is updated, so it never runs code older than
-the plugin.
+the plugin, and reads the console's games again when the status' `titles`
+changes (since 1.72), never while it is sending something.
 
 The status the manager asks for every few seconds (every second during an
 apply), from every device that has it open, used to walk every theme's
@@ -800,6 +913,40 @@ they share, and how:
 - **Caches** (the status's walk of each theme, the interface icons' index,
   the remembered checks) each have their own lock, held briefly, with no
   other lock taken inside it, so no two threads can wait on each other.
+
+- **Discard** puts a theme back by moving its folder aside and the saved
+  copy in its place. For that moment the theme has no folder, so it does it
+  holding a lock of its own to write (`swap_lock`): a request that finds the
+  folder missing waits for it and looks again, and the status and the short
+  reads of a theme (its files, choices, icon style, originals) hold it to
+  read, so none ever sees a theme gone or half put back. An upload is
+  received in a folder of its own (`/data/ps5-theme/incoming`, emptied at
+  each start), not in the theme's, and moved in under the themes lock once
+  it has passed its checks, so an upload under way neither goes with a
+  folder moved aside, copied or deleted meanwhile nor fails for it (since
+  1.77; the seeded test of every combination found all three: "no such
+  theme", "could not store the file" and a good picture refused as
+  unreadable). No request that only reads takes the themes lock, so the two
+  are always taken in the same order. A theme's folders are made only under
+  the themes lock, as a file is put in place, by the manager and the icon
+  styler alike (since 1.78: an upload made the folders for its file before
+  it was received, and doing that while Discard had the theme moved aside
+  left Discard unable to put either copy back, with the theme's files left
+  aside and the theme empty; the same test found it). A Discard cut off
+  between its two steps by a crash or a power loss is put right at the next
+  start: the theme's files go back.
+- **Waits and intervals** (the update check, the watcher's look every 30
+  seconds, a view refused for a minute, the guard's quick looks after the
+  home screen exits, a request's 10 seconds, the notes during an apply) are
+  timed on a clock that only goes forward (since 1.77): the console sets
+  its own clock from the network after it starts, and an interval measured
+  across that stalled or ended early.
+- **Folder walks** never go deeper than any of the console's folders (32
+  levels for a theme's files, 64 for deleting and copying), and the walks a
+  web worker makes keep their paths on the heap, not its 512 KB stack: a
+  theme with folders nested 100 deep (put there by hand) crashed the status
+  until 1.77. Deleting such a theme deletes nothing and says to use FTP,
+  rather than leaving part of it.
 
 ThreadSanitizer runs the whole suite (`tests/host/run.sh tsan`, see
 [Testing](testing.md)) without a race reported.

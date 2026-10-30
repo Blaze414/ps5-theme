@@ -7,7 +7,7 @@ tests/host/run.sh
 ```
 
 Builds the real plugin sources for Linux with AddressSanitizer and UBSan and
-runs 66 end-to-end tests against a fake console tree in a privileged
+runs 72 end-to-end tests against a fake console tree in a privileged
 container (GitHub Actions runs them on every push: see
 [Building](building.md#continuous-integration)). They cover:
 
@@ -84,7 +84,16 @@ container (GitHub Actions runs them on every push: see
   overlay fails its check, its stage folder kept, and every layer off once it
   is free;
 - read-only overlays, sandbox views and symlink containment;
-- concurrent requests during an apply, slow and malformed clients;
+- concurrent requests during an apply, slow and malformed clients (one
+  sending a byte of its headers every few seconds cut off after 10 seconds);
+- the page and its ATRAC9 module sent compressed and inflating to exactly
+  the built-in bytes, sent whole to a browser that turns gzip off, and "not
+  modified" while the plugin is the same; a theme's picture "not modified"
+  while unchanged and the new one as soon as it is replaced;
+- a theme with folders nested 100 deep (put there by hand): its status,
+  apply, delete (nothing deleted, "delete it over FTP") and, once within
+  reach, duplicate and delete, with the plugin running throughout (until
+  1.77 the status crashed on it, over and over);
 - recovery after a hard kill, log rotation and the crash handler;
 - new sandbox views made after a theme is applied (as after rest mode);
 - updating in place, from a `.plugin` in etaHEN's folder and from a plain
@@ -100,24 +109,55 @@ container (GitHub Actions runs them on every push: see
   folder emptied of the copy, and nothing else in it touched;
 - Save and Discard, preview pictures and duplicates; Discard applying the
   theme again only when the console shows other files than the ones it puts
-  back;
+  back; a Discard cut off between its two steps put right at the next start;
 - Writes from many threads: four threads renaming a theme, changing its
   icon style and its choices and reading the status, and two choosing
   themes, all at once: every request answered, every file whole with one of
   the values written, and no temporary file left;
+- Every combination: six clients at once, each drawing 40 steps from
+  everything the manager does (applying a theme or none, uploading a
+  picture, a broken one, removing it, renaming, the icon style, the
+  choices, Save, Discard, duplicating and deleting, creating and deleting,
+  reading), in an order fixed by a seed so a failure is the same failure
+  again, five seeds in a row. After each: never a server error or a dropped
+  connection, the plugin running, the console showing exactly the applied
+  theme's file (or its own), every overlay recorded and every record
+  mounted, and no stage folder or temporary file left behind;
 - The status's walk of each theme kept: a change made through the plugin
   shows at once, one made from outside within 10 seconds (and not at once);
 - Icons styled in the background: each template part answered with the
   size and checksum stored, and the template whole only with all three
-  parts; with its style on, nothing is styled while a stand-in game uses the
-  processor, then, with a stand-in game left idle (as a suspended one is), a
-  title installed 15 minutes ago is styled by the plugin (one whose package
-  is still downloading is not)
+  parts; with its style on and a stand-in game busy all along, a title
+  installed 15 minutes ago is styled by the plugin (one whose package is
+  still downloading is not)
   (its PNGs the icon in the shape over the template, its textures BC7), the
-  theme applied again and the console told; a title still being written and
-  the titles known when the style was used are left alone; bad template
+  theme applied again and the console told once, by the title's name (from
+  its `param.json` in its default language with escapes, a PS4 title's
+  `param.sfo`, or its ID when the name can't be read), with no steps or tips
+  from the apply; the titles still installing said once, and one it can't
+  read left for the page and said; a title whose files are dated an hour
+  ahead, and one whose download is still being written, kept waiting; one
+  seen before that comes back with other files, dated long ago, waiting the
+  whole time from then and said as installing again, and one that comes back
+  as it was put back at once; the status' `titles` changing as titles
+  come and go, the titles still installing listed with the seconds left, the
+  kept template read back; the page's own styling applied again the same way,
+  and an apply you ask for said as usual; a title still being written and
+  the titles known when the style was used are left alone; two titles the
+  theme has pictures for, uninstalled and installed again: the theme applied
+  again by itself, the style's made again from the picture kept for it and
+  yours put back as it was, and the style's list cleared with the style; bad template
   parts and settings refused; once uninstalled, its pictures stay in the
   theme and the apply isn't partial;
+- A styling run said on the console as it starts, goes (no more often than
+  every 8 seconds) and ends, by name for a game installed since, and bad
+  requests refused;
+- A theme of 71 folders applied; one of more than 256 refused, saying so and
+  what to do; the status giving the limit;
+- The page telling an icon the style made from one changed by hand: the
+  same backdrop outside the shape (but for rounding) is the style's; a
+  picture of yours, another backdrop, or a shape that leaves too little of
+  it is not;
 - The console's own pictures: an interface icon by id (the SVG and the PNG
   one, byte for byte from the file, the SVG with a policy that runs
   nothing), a missing one and bad ids refused; a texture's quarter-size
@@ -204,6 +244,48 @@ JSON, SVG, PNG pictures with the plugin's inflate, interface resource files)
 with libFuzzer, AddressSanitizer and UBSan, 60 seconds each by default
 (`FUZZ_SECONDS` changes it). Inputs that crash or hang are saved in
 `tests/fuzz/out/`.
+
+## How the bugs were found
+
+1.77 to 1.80 were a pass over the whole plugin for stability, speed and
+safety, each finding checked before it was fixed and each fix tested before
+it went to the console. What was used, and what each turned up:
+
+- **The console's own log, read only.** The log, the mount table, the list
+  of processes and ShadowMountPlus's log (which records the console's power
+  states), read over FTP and the plugin's own diagnostics, never changing
+  anything on the console. They showed a line repeated every minute, the
+  apply's slow steps once 1.77 timed each step, and why 1.79 didn't wake.
+- **A static analyser** (Clang's) over every source file: four warnings,
+  three of them false; the fourth made safer anyway.
+- **The full suite under AddressSanitizer and UBSan**, on real mounts and with
+  mounts emulated, and **under ThreadSanitizer**, which stops at the first
+  data race between threads: none reported, in any version.
+- **New tests for what was found**: a client sending its headers a byte at a
+  time; a theme nested 100 folders deep (it crashed the status until 1.77);
+  the page and pictures answered "not modified"; a game update noticed
+  without reading every game's folder; a list of overlays with a last line
+  cut short; a Discard cut off between its two steps; nothing going into an
+  app's sandbox while the home screen restarts, and an app's new view waiting
+  2 seconds.
+- **The test of every combination**: six clients at once, each taking 40
+  steps drawn from everything the manager does, five seeds, then the
+  console checked against what must always hold. It found the Discard races
+  of 1.77 and 1.78 (see
+  [Challenges](challenges.md#discard-that-could-empty-a-theme)); after the
+  fix it passed 10 times in a row, on real and emulated mounts, 12,000
+  requests in all.
+- **Fuzzing**: all 15 parsers (pictures, textures, sounds, fonts, interface
+  files, JSON, zstd), 46 seconds each, about 35 million inputs: no crash, hang
+  or memory error.
+- **The page in a browser** against the test rig: through an apply, the cards,
+  pictures and progress bar stay the same elements, the bar slides, and no
+  picture is fetched again; a reload costs a few hundred bytes; opening one
+  theme then another quickly, leaving during a styling run, closing Mix and
+  match while it loads, and opening and closing the Preview quickly all
+  behave.
+- **The console**, after each: 1.77 and 1.78 applied and rested; 1.79 applied
+  in 2 seconds but didn't wake from rest; 1.80 woke three times in a row.
 
 ## Tests on the console
 
@@ -301,3 +383,14 @@ After any failure the console was restarted before the next test.
 | 1.67 | The fixes above; Yakuza 0 (with its own font) applied, then rest mode | **The console didn't wake**: the plugin covered the new home screen's font while the system was still building it; two home screens in a row never started and none started again until the console was restarted (see [A home screen that never came back](challenges.md#a-home-screen-that-never-came-back)) |
 | 1.68 | Nothing in a home screen's sandbox until its process runs; Yakuza 0, rest mode | **Works**: wakes, and the font and the game icons show after one wake |
 | 1.69 | The update from 1.68, then two rest-mode cycles with Yakuza 0 | **Works**: each time the overlays came out of the old home screen in about 65 ms, and the new one was covered only once it was running |
+| 1.69 | Icon style run with your own icons included, then Itemzflow (installed in the 1.66 test, uninstalled) installed again with Yakuza 0 left on the home screen | **Partly**: your four icons were kept and styled, and the template kept whole. Itemzflow got nothing: the theme already had its icon from the 1.66 test, so it wasn't new, and nothing applied the theme again for it; and the open game counted as played, as Yakuza 0 used about 41% of one core on the home screen, as much as while played. Fixed in 1.70 |
+| 1.70 | Itemzflow uninstalled and installed again, with Yakuza 0 left open on the home screen | **Works**: ten minutes after the install the plugin applied the theme again by itself and said so, and Itemzflow's icon from the theme was overlaid and checked. Its icon was in the style, but the page had lost its record as the style's (Remove the style dropped games not installed at the time), fixed in 1.71 |
+| 1.71 | The update from 1.70; the manager opened on Yakuza 0 with a new app (PPSA99000) installed; Itemzflow after rest mode | **Works**: the page styled the new app on opening the theme, saved and applied it; Itemzflow showed its styled icon, which matched the style's backdrop pixel for pixel. Two gaps: a page left open didn't show games installed meanwhile, and Itemzflow's lost record made it count as changed by hand, so styling again with your icons included would have put it in the shape twice. Both fixed in 1.72 |
+| 1.72 | The update from 1.71; two homebrew apps installed with Yakuza 0 applied and the manager closed: Reload PS2 Disc, and PS5SX2 | **Reload PS2 Disc works**: "Reload PS2 Disc is installing" at 20:35, styled by itself at 20:45, one notification ("icon styled for Reload PS2 Disc"), nothing else; shown after rest mode. **PS5SX2 waited**: its installer dated its files an hour ahead of the console's clock, so the wait couldn't start until then, and its download was still being written, which the plugin didn't look at. Fixed in 1.73 (timed on the plugin's own clock; the download watched) |
+| 1.72 | Updating to 1.73 through the update folder (copied in with ps5upload) | **Didn't update**: the running copy read the file while it was being copied in, at its full size but not yet filled, remembered it as no ps5-theme by its size and date, and never looked again (the copy was byte for byte right). The stop tool couldn't find the running copy: its recorded start time differed by exactly an hour from the console's, and 13.42 has no thread list. The update check fixed in 1.73 (whole copies only, nothing remembered from a file still changing); the stop tool asks over the web port first, and matches the start time give or take two minutes |
+| 1.73 | The update from 1.72 (the new copy uploaded as `.part`, then renamed); PS5SX2 after it; the stop tool | **Works**: 1.72 took it at once; PS5SX2 styled 15 seconds after 1.73 started, one notification ("icon styled for PS5SX2"), its icon exactly the style's; two rest-mode cycles straight after, one during the apply, handled; the stop tool stopped the plugin over its web port and the next copy carried on |
+| 1.74 | Icon style with the system tiles: 37 icons (22 games and apps, 15 tiles), then Apply | **The icons were made right** (every tile in the shape, over Yakuza 0's background), **but the apply was refused**: the theme now changed files in 66 folders, over the plugin's limit of 64, and the message ("could not read Yakuza 0, or it touches more than 64 folders") didn't say which. Fixed in 1.75: up to 256 folders, the page checks before styling, the message says what to do; and **Stop styling** turns red when pointed at |
+| 1.75 | The update from 1.74; Yakuza 0 applied again (66 folders), then rest mode | **Works**: applied (217 overlays, 142 files checked; the staged copies rebuilt once, after the refused apply); at rest mode 103 overlays came out of the old home screen in 1.3 s and the new one got all of them, the 28 tile folders included |
+| 1.76 to 1.78 | Updates, applies, Apply again; rest mode on 1.77 | **Works**: rest mode on 1.77 (108 overlays out in 0.47 s, the next home screen covered in 3 s); Apply again 36.3 s on 1.77 (31.9 of it reading every game's folder), 5.7 s on 1.78 |
+| 1.79 | Apply again; then rest mode | Apply again **2.0 s**, but **the console didn't wake**: going into rest, two apps that start with the home screen had their views covered as the system made them, started again, and the next home screen never started; the console had to be switched off at its power button. Fixed in 1.80: nothing goes into any sandbox while the home screen restarts, and an app's new view waits 2 seconds |
+| 1.80 | The update from 1.79 (after the console was switched off at its power button); three rests in a row | **Works**: each woke; the home screen's overlays out in under a second and the next one covered at once; the two apps that start with it covered 2 to 3 seconds after they appeared |

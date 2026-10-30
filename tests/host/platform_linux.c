@@ -200,28 +200,6 @@ proc_times(const char *pid, unsigned long long *start, unsigned long long *cpu_u
   return 0;
 }
 
-int
-plat_processes_named(const char *name, plat_proc_t *out, int max) {
-  DIR *d = opendir("/proc");
-  if(!d) return -1;
-  struct dirent *e;
-  int n = 0;
-  while(n < max && (e = readdir(d))) {
-    char path[64], comm[64] = "";
-    if(e->d_name[0] < '1' || e->d_name[0] > '9') continue;
-    snprintf(path, sizeof(path), "/proc/%s/comm", e->d_name);
-    FILE *f = fopen(path, "r");
-    if(!f) continue;
-    if(fgets(comm, sizeof(comm), f)) comm[strcspn(comm, "\n")] = 0;
-    fclose(f);
-    if(strcmp(comm, name) || proc_times(e->d_name, &out[n].start, &out[n].cpu_us)) continue;
-    out[n++].pid = atoi(e->d_name);
-  }
-  closedir(d);
-  return n;
-}
-
-
 void
 plat_dump_processes(FILE *out) {
   DIR *d = opendir("/proc");
@@ -398,6 +376,12 @@ plat_process_start(int pid) {
                      &state, &start) != 2 || state == 'Z') {
     return 0;
   }
+  /* in microseconds since boot, as the console gives (its unit, so the slack running_copy allows means the same);
+     PS5THEME_TEST_START_SKEW: seconds added, as when the console sets its clock after the process started */
+  long ticks = sysconf(_SC_CLK_TCK);
+  start = start * (1000000ull / (unsigned long long)(ticks > 0 ? ticks : 100));
+  const char *skew = getenv("PS5THEME_TEST_START_SKEW");
+  if(skew && *skew) start += (unsigned long long)atoll(skew) * 1000000ull;
   return start + 1;
 }
 

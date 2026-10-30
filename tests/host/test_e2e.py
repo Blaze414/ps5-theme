@@ -7,6 +7,7 @@ Builds a fake console tree (/system_ex, /data, /user/app), runs the real plugin
 """
 import errno
 import functools
+import gzip
 import hashlib
 import http.client
 import json
@@ -603,7 +604,7 @@ S = {}  # shared state between ordered tests
 
 def t_startup():
     s = status()
-    assert s["fw"] == "13.42" and s["version"] == "1.69" and s["themes"] == [], s
+    assert s["fw"] == "13.42" and s["version"] == "1.80" and s["themes"] == [], s
     listing = open(f"{BASE}/dump/assets-v2-13.42.txt").read()
     assert f"{VSH}/bg_hub_default.dds.zst" in listing
     assert f"{HOME}/bg.png" in listing and "/mnt/rnps/apps/NPXS40099/a.png" in listing
@@ -613,7 +614,17 @@ def t_startup():
     assert open("/tmp/tile-registered").read().strip() == "THEM00001"
     assert "starting" in log_text()
     notes = open("/tmp/notifications.txt").read()
-    assert "ps5-theme 1.69 starting" in notes and "ps5-theme ready" in notes, notes
+    assert "ps5-theme 1.80 starting" in notes and "ps5-theme ready" in notes, notes
+
+
+def get_full(path, headers=None):
+    """GET with the response's headers: (status, headers, body), the body as sent (still compressed)."""
+    conn = http.client.HTTPConnection("127.0.0.1", PORT, timeout=30)
+    conn.request("GET", path, headers=headers or {})
+    res = conn.getresponse()
+    data = res.read()
+    conn.close()
+    return res.status, {k.lower(): v for k, v in res.getheaders()}, data
 
 
 def t_ui_and_icon_served():
@@ -623,6 +634,27 @@ def t_ui_and_icon_served():
     assert code == 200 and icon[:4] == b"\x89PNG"
     code, js = call("GET", "/atrac9.js")
     assert code == 200 and js == open("web/atrac9.js", "rb").read()
+    # The page and the encoder: compressed for a browser that takes it, the very same bytes once inflated; asked again
+    # each time (no-cache) and "not modified" in a few bytes while the plugin is the same.
+    for path, src in (("/", "web/index.html"), ("/atrac9.js", "web/atrac9.js")):
+        want = open(src, "rb").read()
+        code, h, body = get_full(path, {"Accept-Encoding": "gzip, deflate, br"})
+        assert code == 200 and h.get("content-encoding") == "gzip" and gzip.decompress(body) == want, (path, h)
+        assert len(body) < len(want) // 2 and h["cache-control"] == "no-cache" and "accept-encoding" in h["vary"].lower(), h
+        etag = h["etag"]
+        code, h2, plain = get_full(path)
+        assert code == 200 and "content-encoding" not in h2 and plain == want and h2["etag"] == etag, h2
+        code, h3, body = get_full(path, {"Accept-Encoding": "gzip;q=0, identity"})
+        assert code == 200 and "content-encoding" not in h3 and body == want, h3
+        code, h4, body = get_full(path, {"Accept-Encoding": "gzip", "If-None-Match": etag})
+        assert code == 304 and body == b"" and h4["etag"] == etag, (code, h4)
+        code, _, body = get_full(path, {"If-None-Match": '"1.0-00000000"'})
+        assert code == 200 and body == want
+    # The logo too: a PNG, so never compressed again, and "not modified" while the same.
+    code, h, body = get_full("/icon.png", {"Accept-Encoding": "gzip"})
+    assert code == 200 and body == open("assets/icon0.png", "rb").read() and "content-encoding" not in h, h
+    code, _, body = get_full("/icon.png", {"If-None-Match": h["etag"]})
+    assert code == 304 and body == b""
 
 
 def t_mutations_need_token():
@@ -1219,6 +1251,8 @@ def take_over(path, data, version, boot=False):
     os.makedirs(os.path.dirname(path), exist_ok=True)
     write(path + ".tmp", data)
     os.rename(path + ".tmp", path)
+    if boot:   # waiting there since before the restart
+        os.utime(path, (time.time() - 300, time.time() - 300))
     try:
         if boot:
             S["plugin"] = Plugin()
@@ -1257,7 +1291,8 @@ def t_update_from_payload_manager():
 
 
 def t_update_from_plain_elf():
-    """Without etaHEN: a newer ps5-theme.elf in the plugin's own update folder takes over."""
+    """Without etaHEN: a newer ps5-theme.elf in the plugin's own update folder takes over, once it is whole and has
+    looked the same at two checks: a copy still coming in is never started, nor remembered as something else."""
     unmounted, carried = log_text().count("unmounted " + HOME), log_text().count("carrying on with")
     data, dropped = plain_elf("9.98"), f"{BASE}/update/ps5-theme.elf"
     # Installed copies of an older version, where the console starts it from, and other people's payloads.
@@ -1271,6 +1306,17 @@ def t_update_from_plain_elf():
     write(os.path.dirname(local) + "/meta.json", meta)
     for path, body in others.items():
         write(path, body)
+    # A copy still coming in, at its full size already (some tools make the file that size first, then fill it in):
+    # its version is there but its end isn't yet. It is never started, and never taken for something else either.
+    cut = re.search(rb"PS5THEME-VERSION:9\.98:THEM00001", data).end() + 4096
+    half = data[:cut] + b"\0" * (len(data) - cut)
+    start = len(log_text())
+    write(dropped, half)
+    end = time.time() + 40
+    while "isn't a whole copy of ps5-theme 9.98" not in log_text()[start:]:
+        assert time.time() < end, "the half-copied file went unnoticed"
+        time.sleep(0.5)
+    assert "found version 9.98 but could not start it" not in open("/tmp/notifications.txt").read()
     try:
         got = take_over(dropped, data, "9.98")
         # The new copy puts itself in place of the older installed copies, so a restart runs it too...
@@ -1495,6 +1541,7 @@ def t_stop_tool_keeps_the_theme():
         assert S["plugin"].alive() and open(f"{BASE}/mounts").read() == records
         wait_icon(zlib.crc32(mine))
 
+        # Asked over its web port: nothing to look for (on 13.42 the process could not be found, 2026-10-29).
         old = S["plugin"]
         run = run_tool()
         assert run.returncode == 0, (run.stdout, run.stderr)
@@ -1503,6 +1550,7 @@ def t_stop_tool_keeps_the_theme():
         notes = open("/tmp/notifications.txt").read()
         assert "ps5-theme stopped. The theme stays; start ps5-theme again to open the manager." in notes, notes[-500:]
         assert "stopping on request: the theme stays" in log_text()
+        assert "ps5-theme-stop asked this copy to stop" in log_text()
         assert crc_file(f"{HOME}/bg.png") == zlib.crc32(S["bg"])        # the theme stays
         wait_icon(stock)
         assert not pictures(), recorded_mounts()
@@ -1512,6 +1560,21 @@ def t_stop_tool_keeps_the_theme():
         wait_icon(zlib.crc32(mine))                                      # put back
         assert log_text().count("carrying on with") == carried + 1
         assert bool(pictures()) == (not EMULATED)
+
+        # Its web port not answering, and the console's clock set since it started (its start time moved by a
+        # minute): still found by the pid it recorded, and stopped by its signal.
+        old = S["plugin"]
+        run = run_tool(PS5THEME_TEST_NO_WEB="1", PS5THEME_TEST_START_SKEW="60")
+        assert run.returncode == 0, (run.stdout, run.stderr)
+        old.proc.wait(10)
+        assert old.proc.returncode == 0 and "stopping on request: the theme stays" in log_text()
+        S["plugin"] = Plugin()
+        wait_icon(zlib.crc32(mine))
+        # Moved by much more (another process with that pid, started at another time): never taken for it.
+        run = run_tool(PS5THEME_TEST_NO_WEB="1", PS5THEME_TEST_START_SKEW="3600")
+        assert run.returncode == 1 and S["plugin"].alive(), (run.stdout, run.stderr)
+        report = open(f"{BASE}/dump/stop.txt").read()
+        assert "starts now at" in report and "# web port: answers" in report, report
 
         # Ended without stopping (etaHEN's Stop, or a copy before 1.50 on the signal).
         S["plugin"].kill()
@@ -1689,6 +1752,14 @@ def t_overlays_reach_system_views():
         assert seen in open(f"{BASE}/mounts").read()
         assert "SHELL_000" in open(f"{BASE}/dump/mounts.txt").read() or True
 
+        # The record's last line cut short (written as the power went) when the next copy starts: never a record,
+        # and the next overlay's line doesn't run on from it.
+        S["plugin"].kill()
+        with open(f"{BASE}/mounts", "a") as f:
+            f.write("/mnt/sandbox/TORN_000/x\t/data/ps5-theme/stage/g1-")
+        S["plugin"] = Plugin()
+        wait_applied("night")
+
         # An app restarts (after rest mode) in a new sandbox, whose view shows
         # stock: the plugin covers it by itself, without re-applying.
         os.makedirs(box2, exist_ok=True)
@@ -1705,6 +1776,10 @@ def t_overlays_reach_system_views():
             time.sleep(0.05)
         assert status()["applied"] == "night", "covering a new view must not re-apply"
         assert len(mounts_on(seen)) == 1 and len(mounts_on(seen2)) == 1
+        text = open(f"{BASE}/mounts").read()
+        assert text.endswith("\n") and "TORN_000" not in text, text[-400:]
+        assert all(len(l.split("\t")) == 3 for l in text.splitlines()), text[-400:]
+        assert seen2 in [l.split("\t")[0] for l in text.splitlines()]
         code, table = call("GET", "/api/mounts")
         assert code == 200 and b"SHELL_001" in table, table[:200]
 
@@ -1725,6 +1800,22 @@ def t_overlays_reach_system_views():
 
 
 def t_slow_clients_do_not_block_others():
+    # One sending a byte now and then, each within the 5 s a read may wait, never finishing its headers: cut off
+    # once its headers have taken 10 s, so a few such clients can't hold the workers for long.
+    trickle = socket.create_connection(("127.0.0.1", PORT), 5)
+    trickle.sendall(b"GET /api/status HTTP/1.1\r\n")
+    start, closed = time.time(), False
+    while time.time() - start < 25 and not closed:
+        try:
+            trickle.sendall(b"X")
+            trickle.settimeout(2)
+            closed = trickle.recv(64) == b""
+        except socket.timeout:
+            pass
+        except OSError:
+            closed = True
+    trickle.close()
+    assert closed and time.time() - start < 18, f"a trickling client held a worker for {time.time() - start:.0f} s"
     held = []
     for _ in range(3):  # three clients that never finish their headers
         s = socket.create_connection(("127.0.0.1", PORT), 5)
@@ -1751,6 +1842,59 @@ def t_slow_clients_do_not_block_others():
         th.join()
     assert all(r in (200, 503) for r in results) and results.count(200) >= 4, results
     assert status()["fw"] == "13.42" and S["plugin"].alive()
+
+
+def t_deep_folders_are_not_walked():
+    """A theme folder deeper than any of the console's (put there by hand, or a broken copy) is never walked: each
+    level takes stack, and a web worker has 512 KB. Applying it skips the depth, deleting it leaves it, and the
+    plugin carries on."""
+    root = f"{BASE}/themes/deep"
+    os.makedirs(f"{root}/files", exist_ok=True)
+    write(f"{root}/theme.ini", b"name=Deep\nfw=13.42\n")
+    path = f"{root}/files" + "/d" * 100
+    os.makedirs(path, exist_ok=True)
+    write(f"{path}/x.png", png(8, 8, (1, 2, 3)))
+    assert any(t["id"] == "deep" for t in status()["themes"])
+    mark = len(log_text())
+    assert call("POST", "/api/apply", {"id": "deep"})[0] == 200
+    end = time.time() + 60
+    while "deeper than any folder of the console" not in log_text()[mark:]:
+        assert time.time() < end, log_text()[mark:][-2000:]
+        time.sleep(0.2)
+    wait_result("Deep", timeout=60)
+    assert S["plugin"].alive()
+    apply_and_wait("night")
+    code, r = call("DELETE", "/api/themes", {"id": "deep"})   # (a web worker walking it to delete it)
+    assert code == 500 and "delete it over FTP" in r["error"], (code, r)
+    assert S["plugin"].alive() and status()["fw"] == "13.42"
+    # One within reach is deleted, and duplicated whole first (each a walk on a web worker).
+    os.makedirs(f"{root}/files" + "/d" * 40, exist_ok=True)
+    shutil.rmtree(f"{root}/files/d")
+    os.makedirs(f"{root}/files" + "/e" * 40, exist_ok=True)
+    write(f"{root}/files" + "/e" * 40 + "/x.png", png(8, 8, (1, 2, 3)))
+    assert call("POST", "/api/themes/duplicate", {"id": "deep", "new_id": "deep2", "name": "Deep 2"})[0] == 200
+    assert os.path.exists(f"{BASE}/themes/deep2/files" + "/e" * 40 + "/x.png")
+    for t in ("deep", "deep2"):
+        assert call("DELETE", "/api/themes", {"id": t})[0] == 200, t
+    assert S["plugin"].alive()
+    shutil.rmtree(root, ignore_errors=True)
+
+
+def t_pictures_are_revalidated():
+    """A theme's pictures are asked for again each time the page shows them, and an unchanged one is "not modified":
+    a page redrawing its cards costs a few bytes each, not the pictures; a changed one is always the new one."""
+    a, b = png(480, 270, (9, 90, 9)), png(480, 270, (90, 9, 9))
+    assert call("POST", "/api/themes", {"id": "reval", "name": "Reval"})[0] == 200
+    assert put_file("reval", f"{HOME}/bg.png", a)[0] == 200
+    url = "/api/theme/file?" + urllib.parse.urlencode({"id": "reval", "path": f"{HOME}/bg.png"})
+    code, h, body = get_full(url)
+    assert code == 200 and body == a and h["cache-control"] == "no-cache" and h["etag"].startswith('"'), h
+    code, h2, body = get_full(url, {"If-None-Match": h["etag"]})
+    assert code == 304 and body == b"", code
+    assert put_file("reval", f"{HOME}/bg.png", b)[0] == 200
+    code, h3, body = get_full(url, {"If-None-Match": h["etag"]})
+    assert code == 200 and body == b and h3["etag"] != h["etag"], (code, h3)
+    assert call("DELETE", "/api/themes", {"id": "reval"})[0] == 200
 
 
 def t_log_rotates():
@@ -2130,8 +2274,15 @@ def t_icon_style_for_titles_installed_later():
     kept with the style when it is styled: stored, listed, read back, forgotten one at a time and cleared with the
     style, and a change Discard can undo.
     Titles present when the style was used, titles still being installed, and themes without the style on are
-    left alone. A game being played (its process using the processor) holds it up; one left suspended on the home
-    screen (using none) doesn't."""
+    left alone. A game open doesn't hold it up (the PS5 keeps one on the home screen running as busily as one
+    being played). A title the theme has pictures for, installed again after the apply, gets them by itself: the
+    theme applied again, the style's made again first as the style is now, from your picture kept for it, and one
+    of yours put back as it is.
+    The console is told once of each new title still installing, and once when its icon is in place, by its name
+    (param.json in its default language, a PS4 title's param.sfo, else its ID); the apply that follows says nothing
+    else (no step-by-step, no hints): a game may be open. A title it can't style is said too, for the page. The
+    status' `titles` changes as titles come and go and as the styler acts, and the style says which titles are still
+    installing (the page styles none of those either). The page's own styling applies the theme again the same way."""
     side, r = 512, 512 / 2 * 60 / 100
     inside = lambda x, y: (x + .5 - 256) ** 2 + (y + .5 - 256) ** 2 <= r * r
     base = png_rgba(side, side, lambda x, y: (20, 40, 160, 255))
@@ -2185,18 +2336,30 @@ def t_icon_style_for_titles_installed_later():
     assert call("POST", "/api/apply", {"id": "iconic"})[0] == 200
     wait_applied("iconic")
 
-    # A game being played: a process named as games' are (eboot.bin) that keeps using the processor. Started
-    # before the titles arrive, so nothing can be styled before it is there.
+    # A game open all along (a process named as games' are, eboot.bin, busy all the time): it doesn't hold anything
+    # up. The theme never touches a game's own folders.
     shutil.copy("/usr/bin/yes", "/tmp/eboot.bin")
     game = subprocess.Popen(["/tmp/eboot.bin"], stdout=subprocess.DEVNULL)
+    stamp = status()["titles"]
+    notes_at = len(open("/tmp/notifications.txt").read())
     titles = {"NEWT00001": (200, 30, 30), "NEWT00002": (30, 200, 30), "NEWT00003": (30, 30, 200)}
     for tid, rgb in titles.items():
         for folder in (f"/user/appmeta/{tid}", f"/user/app/{tid}/sce_sys"):
             write(f"{folder}/icon0.png", png(512, 512, rgb))
             write(f"{folder}/icon0.dds", dds_bc7(512, 512, flags=0xa1007))
             write(f"{folder}/param.json", b'{"titleId":"' + tid.encode() + b'"}')
+    # Names: NEWT00001's in its default language (escapes and all), NEWT00003's from a PS4 title's param.sfo.
+    write("/user/appmeta/NEWT00001/param.json", json.dumps({"titleId": "NEWT00001", "localizedParameters": {
+        "defaultLanguage": "en-GB", "en-US": {"titleName": "Red Test"}, "en-GB": {"titleName": "Red \"Test\" \u2013 GB"}}}).encode())
+    write("/user/appmeta/NEWT00003/param.json", b'{"titleId":"NEWT00003","localizedParameters":{"defaultLanguage":"en-US"}}')
+    write("/user/appmeta/NEWT00003/param.sfo", sfo("Blue SFO Test"))
+    # NEWT00005's icon is no picture the console can read: left for the page, and said.
+    write("/user/appmeta/NEWT00005/icon0.png", b"not a picture")
+    write("/user/appmeta/NEWT00005/param.json", b'{"localizedParameters":{"en-US":{"titleName":"Cut off \\u00')   # no name read: its ID
+    write("/user/app/NEWT00005/sce_sys/icon0.png", b"not a picture")
+    titles["NEWT00005"] = None
     old = time.time() - 900
-    for tid in ("NEWT00001", "NEWT00003"):   # installed a while ago; NEWT00002 is still being written
+    for tid in ("NEWT00001", "NEWT00003", "NEWT00005"):   # installed a while ago; NEWT00002 is still being written
         for root, dirs, files in os.walk(f"/user/appmeta/{tid}"):
             for n in files + [""]:
                 os.utime(os.path.join(root, n), (old, old))
@@ -2206,39 +2369,111 @@ def t_icon_style_for_titles_installed_later():
     # NEWT00003's folders are old, but its package is still downloading: it grows, its folder doesn't change.
     write("/user/app/NEWT00003/app.pkg", b"\0" * 4096)
     os.utime("/user/app/NEWT00003", (old, old))
+    # NEWT00006's installer dated its files an hour ahead of the console's clock (seen on a PS5): the wait is timed
+    # by the plugin's own clock from when it first saw them, never from the dates.
+    # NEWT00007's files are old, but the console is still writing its download in place (/user/download/<ID>,
+    # its size fixed from the start, only its date moving): it waits until that stops.
+    ahead = time.time() + 3600
+    for tid in ("NEWT00006", "NEWT00007"):
+        for folder in (f"/user/appmeta/{tid}", f"/user/app/{tid}/sce_sys"):
+            write(f"{folder}/icon0.png", png(512, 512, (90, 30, 160)))
+            write(f"{folder}/param.json", b'{"titleId":"' + tid.encode() + b'"}')
+        titles[tid] = None
+        when = ahead if tid == "NEWT00006" else old
+        for d in (f"/user/appmeta/{tid}", f"/user/app/{tid}/sce_sys", f"/user/app/{tid}"):
+            for n in os.listdir(d) + [""]:
+                os.utime(os.path.join(d, n) if n else d, (when, when))
+    write("/user/download/NEWT00007/download0.dat", b"\0" * 65536)
+    downloading = threading.Event()
+    def download():
+        while not downloading.is_set():
+            os.utime("/user/download/NEWT00007/download0.dat")
+            downloading.wait(0.5)
+    threading.Thread(target=download, daemon=True).start()
+    assert status()["titles"] != stamp   # titles came: an open page reads them again
     styled = f"{BASE}/themes/iconic/files/user/appmeta/NEWT00001/icon0.png"
-    try:   # while it is played, nothing is styled or applied
-        time.sleep(4)
-        assert not os.path.exists(styled)
-        assert "icon style: NEWT00001 waits while a game is being played" in open(LOG).read(), open(LOG).read()[-1500:]
-    finally:
-        game.kill()
-        game.wait()
-    # A game left on the home screen: the console suspends it, and it uses no processor time. It holds nothing up.
-    shutil.copy("/bin/sleep", "/tmp/eboot.bin")
-    game = subprocess.Popen(["/tmp/eboot.bin", "120"])
     try:
         end = time.time() + 40
         while time.time() < end and not os.path.exists(styled):
             time.sleep(0.5)
         assert os.path.exists(styled), open(LOG).read()[-2000:]
-        assert game.poll() is None   # styled while it was there
+        assert game.poll() is None   # styled while it was open
     finally:
         game.kill()
         game.wait()
-    said = "styled the icon of 1 new game or app (NEWT00001)"
+    said = "ps5-theme: icon styled for Red \"Test\" \u2013 GB. Rest mode shows it on the home row."
     end = time.time() + 15
-    while time.time() < end and said not in open("/tmp/notifications.txt").read():   # said once it is applied again
+    notes = lambda: open("/tmp/notifications.txt").read()[notes_at:]
+    while time.time() < end and said not in notes():   # said once it is applied again
         time.sleep(0.3)
-    assert said in open("/tmp/notifications.txt").read(), open(LOG).read()[-1500:]
+    assert said in notes(), (notes(), open(LOG).read()[-1500:])
     assert "icon style: styled NEWT00001's icon in theme iconic" in open(LOG).read()
     wait_applied("iconic")
+    # Said once each: the installs seen (by name), the one left for the page; the apply itself says nothing else.
+    lines = notes().splitlines()
+    installing = [l for l in lines if "installing" in l]   # (titles written a moment apart may be seen in two looks)
+    def named(line):   # "A", "A and B", "A, B and C", "A, B and 2 more": how many titles, and which are named
+        who = re.match(r"ps5-theme: (.*) (?:is|are) installing\. ", line).group(1)
+        more = re.search(r" and (\d+) more$", who)
+        names = re.split(r", | and ", who[:more.start()] if more else who)
+        return len(names) + (int(more.group(1)) if more else 0), names
+    assert sum(named(l)[0] for l in installing) == 4, installing   # NEWT00002, NEWT00003, NEWT00006 and NEWT00007, once each
+    assert all(n in ("NEWT00002", "Blue SFO Test", "NEWT00006", "NEWT00007") for l in installing for n in named(l)[1]), installing
+    assert all(re.search(r"(is installing\. Its icon gets|are installing\. Their icons get) the theme's icon style 5 minutes after", l)
+               for l in installing), installing
+    assert "ps5-theme: NEWT00005's icon can't be styled on the console. Open the theme in the manager to style it." in lines, lines
+    assert not [l for l in lines if "applying 'Iconic'" in l or "%" in l or "To see the new" in l or l.endswith("'Iconic' applied")], lines
+    code, info = call("GET", "/api/theme/icon-style", {"id": "iconic"})
+    assert info["settle"] == 300 and {"NEWT00002", "NEWT00003", "NEWT00006", "NEWT00007"} <= set(info["waiting"]), info
+    assert info["waiting"]["NEWT00007"] >= 299, info   # (written a moment ago: the whole wait still to go)
+    downloading.set()
+    for tid in ("NEWT00006", "NEWT00007"):   # not styled while the dates were ahead, or the download went on
+        assert not os.path.exists(f"{BASE}/themes/iconic/files/user/appmeta/{tid}/icon0.png"), tid
+    assert not {"NEWT00001", "NEWT00005"} & set(info["waiting"]), info   # (the fixtures' own titles may be new too)
+    assert all(0 < v <= 300 for v in info["waiting"].values()), info
+    code, got = call("GET", "/api/theme/icon-style", {"id": "iconic", "part": "base"})
+    assert code == 200 and got == base
+    assert call("GET", "/api/theme/icon-style", {"id": "iconic", "part": "nope"})[0] == 400
+    stamp = status()["titles"]
+
+    # The page styled one by itself and applies the theme again for it: said the same way, once.
+    notes_at = len(open("/tmp/notifications.txt").read())
+    assert call("POST", "/api/apply", {"id": "iconic", "styled": "NEWT00001,bad"})[0] == 400
+    assert call("POST", "/api/apply", {"id": "iconic", "styled": "NEWT00001,NEWT00003"})[0] == 200
+    wait_applied("iconic")
+    end = time.time() + 10
+    while time.time() < end and "Rest mode" not in notes():
+        time.sleep(0.2)
+    assert notes().splitlines() == ["ps5-theme: icons styled for Red \"Test\" \u2013 GB and Blue SFO Test. Rest mode shows them on the home row."], notes()
+    assert "theme iconic: applied again for 2 icon(s) the manager styled" in open(LOG).read()
+    # An apply you ask for says each step as usual.
+    notes_at = len(open("/tmp/notifications.txt").read())
+    apply_and_wait("iconic")
+    assert "ps5-theme: applying 'Iconic'..." in notes() and "ps5-theme: 'Iconic' applied" in notes(), notes()
+    assert status()["titles"] == stamp   # nothing came or went, and the styler did nothing new
+
+    # A styling run in the manager is said on the console: as it starts, as it goes (not more often than every
+    # 8 seconds), as it ends; words made by the plugin from counts and title IDs.
+    note = lambda **q: call("POST", "/api/theme/icon-style", {"id": "iconic", **{k: str(v) for k, v in q.items()}})[0]
+    notes_at = len(open("/tmp/notifications.txt").read())
+    assert note(note="start", total=3) == 200 and note(note="step", n=2, total=3) == 200   # (too soon after the start)
+    assert note(note="done", n=3, total=3, failed=1) == 200
+    assert note(note="start", total=1, auto=1, title="NEWT00001") == 200
+    assert note(note="done", n=1, total=1, auto=1) == 200   # (the apply that follows says it)
+    assert note(note="stopped", n=2, total=5) == 200
+    assert notes().splitlines() == ["ps5-theme: styling 3 icons in the manager...",
+                                    "ps5-theme: 2 icons styled, 1 could not be. Apply the theme to see them.",
+                                    "ps5-theme: styling the icon of Red \"Test\" \u2013 GB, installed since the theme's icon style was used...",
+                                    "ps5-theme: styling stopped: 2 of 5 icons styled; those keep the style."], notes()
+    for bad in ({"note": "nope", "total": 1}, {"note": "start", "total": 0}, {"note": "step", "n": 4, "total": 3},
+                {"note": "start", "total": 1, "title": "../x"}):
+        assert note(**bad) == 400, bad
     for path in (styled, styled.replace("appmeta/NEWT00001", "app/NEWT00001/sce_sys")):
         px = png_pixels(open(path, "rb").read())
         assert px(256, 256) == (200, 30, 30) and px(4, 4) == (20, 40, 160), (px(256, 256), px(4, 4))
         dds = open(path[:-3] + "dds", "rb").read()
         assert len(dds) == len(dds_bc7(512, 512, flags=0xa1007)) and dds[148] == 0x40, dds[148]   # BC7 mode 6 blocks
-    for tid in ("NEWT00002", "NEWT00003", "PPSA01234", "CUSA09999"):
+    for tid in ("NEWT00002", "NEWT00003", "NEWT00005", "PPSA01234", "CUSA09999"):
         assert not os.path.exists(f"{BASE}/themes/iconic/files/user/appmeta/{tid}/icon0.png"), tid
     code, info = call("GET", "/api/theme/icon-style", {"id": "iconic"})
     assert code == 200 and info["auto"] and info["template"] and info["made"] == ["NEWT00001"], info
@@ -2251,15 +2486,119 @@ def t_icon_style_for_titles_installed_later():
     for tid in titles:
         shutil.rmtree(f"/user/appmeta/{tid}")
         shutil.rmtree(f"/user/app/{tid}")
+    shutil.rmtree("/user/download/NEWT00007")
+    assert status()["titles"] != stamp   # gone: an open page shows it
     assert call("POST", "/api/apply", {"id": "iconic"})[0] == 200
     s = wait_applied("iconic")
     assert "partly" not in s["result"] and "could not be used" not in s["result"], s["result"]
     assert "/user/appmeta/NEWT00001 isn't installed; its pictures stay in the theme" in open(LOG).read()
     assert os.path.exists(styled)
 
+    # Installed again later. NEWT00001's icon is the style's (the page's list says so) with your picture kept for it;
+    # NEWT00004's is a picture of yours. Both go back by themselves once their installs are over, the theme applied
+    # again: NEWT00001's made again first, as the style is now, from your picture; NEWT00004's as it is.
+    # NEWT00009, seen installed before, comes back with other files, dated long ago: the plugin saw them change just
+    # now, so it waits the whole time from then, whatever their dates say, and says so.
+    def install(tid, rgb, named=None, sfo_name=None):
+        for folder in (f"/user/appmeta/{tid}", f"/user/app/{tid}/sce_sys"):
+            write(f"{folder}/icon0.png", png(512, 512, rgb))
+            write(f"{folder}/icon0.dds", dds_bc7(512, 512, flags=0xa1007))
+            write(f"{folder}/param.json", b'{"titleId":"' + tid.encode() + b'"}')
+        if named:
+            write(f"/user/appmeta/{tid}/param.json", named)
+        if sfo_name:
+            write(f"/user/appmeta/{tid}/param.sfo", sfo(sfo_name))
+        for d in (f"/user/appmeta/{tid}", f"/user/app/{tid}/sce_sys", f"/user/app/{tid}"):
+            for n in os.listdir(d) + [""]:
+                os.utime(os.path.join(d, n) if n else d, (old, old))
+    install("NEWT00009", (60, 60, 60))
+    assert "NEWT00009" not in call("GET", "/api/theme/icon-style", {"id": "iconic"})[1]["waiting"]   # (seen, long installed)
+    shutil.rmtree("/user/appmeta/NEWT00009")
+    shutil.rmtree("/user/app/NEWT00009")
+    assert call("POST", "/api/theme/icon-style", {"id": "iconic", "auto": "1"})[0] == 200
+    for part, extra, data in (("styled", {}, b"NEWT00001\n"), ("own", {"title": "NEWT00001"}, png(512, 512, (250, 250, 0)))):
+        assert call("PUT", "/api/theme/icon-style", {"id": "iconic", "part": part, "crc": f"{zlib.crc32(data):08x}", **extra}, data)[0] == 200
+    assert call("GET", "/api/theme/icon-style", {"id": "iconic"})[1]["styledList"] is True
+    hand = f"{BASE}/themes/iconic/files/user/appmeta/NEWT00004/icon0.png"
+    write(hand, png(512, 512, (0, 250, 250)))
+    write(f"{BASE}/themes/iconic/files/user/appmeta/NEWT00009/icon0.png", png(512, 512, (0, 90, 250)))
+    apply_and_wait("iconic")   # (applied already: this waits for the new apply itself)
+    assert "/user/appmeta/NEWT00004 isn't installed" in open(LOG).read()
+    notes = len(open("/tmp/notifications.txt").read())
+    # NEWT00001 as it was when last seen (the same files, dated as they were); NEWT00004 never seen before, dated
+    # long ago: both counted as installed at once.
+    install("NEWT00001", (200, 30, 30), named=json.dumps({"titleId": "NEWT00001", "localizedParameters": {
+        "defaultLanguage": "en-GB", "en-US": {"titleName": "Red Test"}, "en-GB": {"titleName": "Red \"Test\" \u2013 GB"}}}).encode())
+    install("NEWT00004", (90, 90, 90))
+    end = time.time() + 40   # both, in one look or two (the plugin may see one installed before the other)
+    said = lambda: open("/tmp/notifications.txt").read()[notes:]
+    while time.time() < end and not ('Red "Test"' in said() and "NEWT00004" in said()):
+        time.sleep(0.3)
+    assert "the theme's pictures are back for" in said() and 'Red "Test"' in said() and "NEWT00004" in said(), \
+        (said(), open(LOG).read()[-2000:])
+    wait_applied("iconic")
+    notes = len(open("/tmp/notifications.txt").read())
+    install("NEWT00009", (70, 70, 70), sfo_name="Grey Again")   # (other files: a param.sfo it didn't have)
+    end = time.time() + 15
+    while time.time() < end and "installing again" not in said():
+        time.sleep(0.3)
+    assert said().strip() == "ps5-theme: Grey Again is installing again. The theme's pictures for it go back 5 minutes after " \
+        "the install finishes.", said()
+    assert call("GET", "/api/theme/icon-style", {"id": "iconic"})[1]["waiting"]["NEWT00009"] >= 290
+    log = open(LOG).read()
+    assert "icon style: styled NEWT00001's icon in theme iconic again, as the style is now" in log, log[-2000:]
+    assert "icon style: NEWT00004 is installed again; theme iconic is applied again for its pictures" in log
+    px = png_pixels(open(styled, "rb").read())
+    assert px(256, 256) == (250, 250, 0) and px(4, 4) == (20, 40, 160), (px(256, 256), px(4, 4))   # your picture, in the shape
+    px = png_pixels(open(hand, "rb").read())
+    assert px(256, 256) == (0, 250, 250) and px(4, 4) == (0, 250, 250)   # yours, as it was
+    assert call("POST", "/api/theme/icon-style", {"id": "iconic", "auto": "0", "clear": "1"})[0] == 200
+    info = call("GET", "/api/theme/icon-style", {"id": "iconic"})[1]
+    assert info["styledList"] is False and info["own"] == ["NEWT00001"], info   # cleared with the style, but for a picture
+    # whose title's icon is still in the theme: kept until it can go back
+    for tid in ("NEWT00001", "NEWT00004", "NEWT00009"):
+        shutil.rmtree(f"/user/appmeta/{tid}")
+        shutil.rmtree(f"/user/app/{tid}")
+
     assert call("POST", "/api/apply", {"id": before})[0] == 200
     wait_applied("" if before == "none" else before)
     assert call("DELETE", "/api/themes", {"id": "iconic"})[0] == 200
+
+
+def t_themes_of_many_folders():
+    """A theme may change files in up to 256 folders (64 before 1.74, which a theme of 18 games with its icon style
+    and the system tiles passed): one of 71 applies. One beyond the limit is refused with what to do, and the status
+    says the limit, which the page checks a style against before making it."""
+    before = status()["applied"] or "none"
+    assert status()["maxFolders"] == 256
+    ids = [f"MANY{n:05d}" for n in range(1, 261)]
+    try:
+        assert call("POST", "/api/themes", {"id": "many", "name": "Many"})[0] == 200
+        assert put_file("many", f"{HOME}/bg.png", S["bg"])[0] == 200
+        def titles(upto):
+            for tid in ids[:upto]:
+                write(f"/user/appmeta/{tid}/icon0.png", png(64, 64, (90, 90, 90)))
+                write(f"{BASE}/themes/many/files/user/appmeta/{tid}/icon0.png", png(64, 64, (200, 30, 30)))
+        titles(70)
+        assert call("POST", "/api/theme/save", {"id": "many"})[0] == 200
+        apply_and_wait("many")
+        s = status()
+        assert s["applied"] == "many" and "folders" not in s["result"], s["result"]
+        titles(260)
+        notes = len(open("/tmp/notifications.txt").read())
+        assert call("POST", "/api/apply", {"id": "many"})[0] == 200
+        end = time.time() + 30
+        while time.time() < end and "more than 256 folders" not in status()["result"]:
+            time.sleep(0.3)
+        s = status()
+        assert "Many changes files in more than 256 folders, more than the plugin applies at once." in s["result"], s["result"]
+        assert "ps5-theme: 'Many' changes too many folders to apply. See the manager." in open("/tmp/notifications.txt").read()[notes:]
+    finally:
+        for tid in ids:
+            shutil.rmtree(f"/user/appmeta/{tid}", ignore_errors=True)
+        assert call("POST", "/api/apply", {"id": before})[0] == 200
+        wait_applied("" if before == "none" else before)
+        call("DELETE", "/api/themes", {"id": "many"})
 
 
 def t_writes_from_many_threads_stay_whole():
@@ -2312,6 +2651,130 @@ def t_writes_from_many_threads_stay_whole():
     assert call("POST", "/api/apply", {"id": "none"})[0] == 200
     wait_applied("")
     assert call("DELETE", "/api/themes", {"id": "busy"})[0] == 200
+
+
+def t_every_combination_holds():
+    """Whatever the order: six clients at once drawing from everything the manager does (apply a theme or none,
+    upload a picture, a broken one, remove it, rename, icon style, choices, save, discard, duplicate and delete,
+    create and delete, read). Seeded, so a failure is the same failure again. After each round the console is
+    brought to a known theme and checked: every request answered and never a server error, the plugin running,
+    what the console shows is the applied theme's file (or its own), every overlay recorded and every record
+    mounted, no stage folder or temporary file left behind."""
+    themes = ("ca", "cb")
+    pics = [png(480, 270, (200, 30, 30)), png(480, 270, (30, 200, 30)), png(480, 270, (30, 30, 200))]
+    for t in themes:
+        assert call("POST", "/api/themes", {"id": t, "name": t.upper()})[0] == 200
+        assert put_file(t, f"{HOME}/icon.png", png(96, 96, (1, 1, 1)))[0] == 200   # (never removed: every apply has a file)
+        assert put_file(t, f"{HOME}/bg.png", pics[0])[0] == 200
+        assert call("POST", "/api/theme/save", {"id": t})[0] == 200   # what Discard goes back to has the icon too
+    stage_root = f"{BASE}/stage"
+
+    def op(rnd, k, i, errors):
+        t = rnd.choice(themes)
+        kind = rnd.choice(["apply", "apply", "put", "put", "bad", "delfile", "settings", "style", "choices", "save",
+                           "discard", "dup", "create", "read", "read"])
+        allowed = {200}
+        try:
+            if kind == "apply":
+                code, r = call("POST", "/api/apply", {"id": rnd.choice(themes + ("none",))})
+            elif kind == "put":
+                code, r = put_file(t, f"{HOME}/bg.png", rnd.choice(pics))
+            elif kind == "bad":
+                code, r = put_file(t, f"{HOME}/bg.png", rnd.randbytes(rnd.randint(1, 4000)))
+                allowed = {400, 415, 422}
+            elif kind == "delfile":
+                code, r = call("DELETE", "/api/theme/file", {"id": t, "path": f"{HOME}/bg.png"})
+                allowed = {200, 404}
+            elif kind == "settings":
+                code, r = call("POST", "/api/theme/settings", {"id": t, "name": f"{t.upper()} {k}-{i}"})
+            elif kind == "style":
+                code, r = call("POST", "/api/theme/icon-style", {"id": t, "auto": str(i % 2), "scale": str(40 + 10 * (i % 4))})
+            elif kind == "choices":
+                body = json.dumps({"v": 1, "fit": rnd.choice(["cover", "contain"])}).encode()
+                code, r = call("PUT", "/api/theme/choices", {"id": t, "crc": f"{zlib.crc32(body):08x}"}, body)
+            elif kind == "save":
+                code, r = call("POST", "/api/theme/save", {"id": t})
+            elif kind == "discard":
+                code, r = call("POST", "/api/theme/discard", {"id": t})
+                allowed = {200, 409}
+            elif kind == "dup":
+                new = f"dup-{k}-{i}"
+                code, r = call("POST", "/api/themes/duplicate", {"id": t, "new_id": new, "name": new})
+                if code == 200:
+                    code2, r2 = call("DELETE", "/api/themes", {"id": new})
+                    if code2 not in (200, 409):
+                        errors.append((kind, "delete copy", code2, r2))
+            elif kind == "create":
+                new = f"tmp-{k}-{i}"
+                code, r = call("POST", "/api/themes", {"id": new, "name": new})
+                if code == 200:
+                    code2, r2 = call("DELETE", "/api/themes", {"id": new})
+                    if code2 != 200:
+                        errors.append((kind, "delete", code2, r2))
+            else:
+                code, r = rnd.choice([lambda: call("GET", "/api/status"),
+                                      lambda: call("GET", "/api/theme/files", {"id": t}),
+                                      lambda: call("GET", "/api/theme/file", {"id": t, "path": f"{HOME}/bg.png"}),
+                                      lambda: call("GET", "/api/theme/preview", {"id": t}),
+                                      lambda: call("GET", "/api/log")])()
+                allowed = {200, 404}
+        except Exception as e:   # a dropped connection or a timeout is never all right
+            errors.append((kind, t, "exception", repr(e)))
+            return
+        if code not in allowed:
+            errors.append((kind, t, code, r if not isinstance(r, bytes) else r[:200]))
+
+    for seed in (11, 23, 37, 53, 71):
+        errors = []
+        def client(k):
+            rnd = random.Random(seed * 100 + k)
+            for i in range(40):
+                op(rnd, k, i, errors)
+        threads = [threading.Thread(target=client, args=(k,)) for k in range(6)]
+        for th in threads: th.start()
+        for th in threads: th.join()
+        assert not errors, (seed, errors[:6])
+        assert S["plugin"].alive(), seed
+
+        # Settle on a known theme and check the console shows exactly it.
+        final = random.Random(seed).choice(themes + ("none",))
+        if final == "none":
+            assert call("POST", "/api/apply", {"id": "none"})[0] == 200
+            wait_applied("")
+        else:
+            apply_and_wait(final)
+        mine = f"{BASE}/themes/{final}/files{HOME}/bg.png"
+        want = crc_file(mine) if final != "none" and os.path.exists(mine) else S["stock_bg"]
+        assert crc_file(f"{HOME}/bg.png") == want, (seed, final)
+        if not EMULATED:
+            recorded = recorded_mounts()
+            for on in recorded:
+                assert mounts_on(on), (seed, "recorded but not mounted", on)
+            with open("/proc/self/mountinfo") as f:
+                ours = [l.split()[4] for l in f if "/ps5-theme/stage/" in l.split()[3]]
+            assert sorted(ours) == sorted(recorded), (seed, "mounted and recorded differ", sorted(set(ours) ^ set(recorded)))
+            if final == "none":
+                assert not ours, (seed, ours)
+        kept = set(stage_records("live")) | set(stage_records("spare"))
+        try:
+            lines = open(f"{BASE}/mounts").read().splitlines()
+        except FileNotFoundError:
+            lines = []
+        kept |= {l.split("\t")[1] for l in lines if l}
+        on_disk = {f"{stage_root}/{d}" for d in os.listdir(stage_root)} if os.path.isdir(stage_root) else set()
+        assert on_disk <= kept, (seed, "stage folders left behind", sorted(on_disk - kept)[:5])
+        leftovers = [(r, f) for r, _, fs in os.walk(f"{BASE}/themes") for f in fs if f.endswith((".tmp", ".part"))]
+        assert not leftovers, (seed, leftovers[:5])
+        incoming = os.listdir(f"{BASE}/incoming") if os.path.isdir(f"{BASE}/incoming") else []
+        assert not incoming, (seed, "uploads left behind", incoming[:5])   # (refused ones too)
+        assert not [d for d in os.listdir(f"{BASE}/themes") if d.startswith(("dup-", "tmp-"))], seed
+        assert status()["fw"] == "13.42"
+
+    assert call("POST", "/api/apply", {"id": "none"})[0] == 200
+    wait_applied("")
+    for t in themes:
+        assert call("DELETE", "/api/themes", {"id": t})[0] == 200
+    apply_and_wait("night")
 
 
 def t_status_keeps_its_walk():
@@ -2570,6 +3033,29 @@ def t_save_and_discard():
     assert call("DELETE", "/api/themes", {"id": "scratch"})[0] == 200
     assert not os.path.exists(f"{BASE}/snapshots/scratch")
 
+
+
+def t_discard_cut_off_is_put_back():
+    """A Discard cut off between its two steps (the theme's folder moved aside, the saved copy not yet in its place:
+    a crash or a power loss) leaves no folder for the theme. At the next start its files go back, so the theme is
+    never lost; a leftover beside a theme that is there just goes."""
+    assert call("POST", "/api/themes", {"id": "cutdis", "name": "Cut Discard"})[0] == 200
+    assert put_file("cutdis", f"{HOME}/bg.png", png(480, 270, (11, 22, 33)))[0] == 200
+    assert call("POST", "/api/theme/save", {"id": "cutdis"})[0] == 200
+    edited = png(480, 270, (44, 55, 66))
+    assert put_file("cutdis", f"{HOME}/bg.png", edited)[0] == 200         # an unsaved change: a snapshot is kept
+    theme, trash = f"{BASE}/themes/cutdis", f"{BASE}/snapshots/cutdis.trash"
+    S["plugin"].kill()
+    os.rename(theme, trash)                                                # the first step only, then the end
+    os.makedirs(f"{BASE}/snapshots/night.trash", exist_ok=True)            # and a leftover beside a theme that is there
+    S["plugin"] = Plugin()
+    assert any(t["id"] == "cutdis" for t in status()["themes"])
+    assert open(f"{theme}/files{HOME}/bg.png", "rb").read() == edited     # the files as they were, unsaved change too
+    assert not os.path.exists(trash) and not os.path.exists(f"{BASE}/snapshots/night.trash")
+    assert "put back as it was before a Discard that was cut off" in log_text()
+    assert call("POST", "/api/theme/discard", {"id": "cutdis"})[0] == 200  # and Discard works on it as before
+    assert open(f"{theme}/files{HOME}/bg.png", "rb").read() == png(480, 270, (11, 22, 33))
+    assert call("DELETE", "/api/themes", {"id": "cutdis"})[0] == 200
 
 
 def t_cut_off_uploads_are_not_theme_files():
@@ -3065,6 +3551,25 @@ def t_title_pictures():
             assert f"{GAME_SYS} is an overlay this version doesn't make; applying again" in log_text()
             assert not mounts_on(GAME_SYS)
             shutil.rmtree(old, ignore_errors=True)
+
+            # The copy kept of a game's folder: at each apply it is compared with the folder by each file's identity,
+            # size and time, and read only when one of them changed, as when the game is updated (1.77 read every
+            # file of every game's folder, both ways, at every apply: 30 s on the console).
+            fp = f"{BASE}/stock/13.42/.complete{GAME}.ok.fp"
+            assert os.path.exists(fp), "no fingerprint kept for the game's copy"
+            mark = len(log_text())
+            apply_and_wait("games")
+            assert f"{GAME} changed since its copy was kept" not in log_text()[mark:]
+            was = open(f"{GAME}/pic0.png", "rb").read()
+            updated = png(96, 54, (9, 99, 199))
+            write(f"{GAME}/pic0.png", updated)                       # the game updated: a new picture
+            mark = len(log_text())
+            apply_and_wait("games")
+            assert f"{GAME} changed since its copy was kept; keeping a new one" in log_text()[mark:], log_text()[mark:][-1500:]
+            assert open(f"{BASE}/stock/13.42{GAME}/pic0.png", "rb").read() == updated
+            write(f"{GAME}/pic0.png", was)                           # as it was, for the tests after this one
+            apply_and_wait("games")
+            assert open(f"{BASE}/stock/13.42{GAME}/pic0.png", "rb").read() == was
     finally:
         if shellui:
             shellui.kill()
@@ -3311,6 +3816,35 @@ def t_page_builds_playlists():
     write("/tmp/playlist.js", PLAYLIST_JS.encode())
     out = subprocess.run(["node", "/tmp/playlist.js", WEB_PAGE], capture_output=True, text=True)
     assert out.returncode == 0 and "playlist ok" in out.stdout, out.stdout + out.stderr
+
+
+STYLEMATCH_JS = r"""
+const fs = require("fs");
+const html = fs.readFileSync(process.argv[2], "utf8");
+const block = html.slice(html.indexOf("/* stylematch:begin */"), html.indexOf("/* stylematch:end */"));
+const { styleMatch } = new Function(block + ";return { styleMatch };")();
+const ok = (cond, what) => { if (!cond) throw new Error(what); };
+const W = 48, H = 48, px = f => { const a = new Uint8ClampedArray(W * H * 4); for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) a.set(f(x, y), (y * W + x) * 4); return a; };
+const inside = (x, y, r) => (x + .5 - W / 2) ** 2 + (y + .5 - H / 2) ** 2 <= r * r;
+const base = px((x, y) => [x * 5, y * 5, 90, 255]);                       // a picture behind, with the shape's shadow in it
+const mask = px((x, y) => [255, 255, 255, inside(x, y, 16) ? 255 : 0]);
+const styled = px((x, y) => inside(x, y, 17) ? [200, 30, 30, 255] : [x * 5, y * 5, 90, 255]);   // an icon in the shape, a little over its edge
+ok(styleMatch(styled, base, mask, W, H), "an icon the style made is told as one");
+ok(styleMatch(px((x, y) => inside(x, y, 17) ? [9, 9, 9, 255] : [x * 5 + 3, y * 5 - 2, 92, 255]), base, mask, W, H), "rounding differences are the same");
+ok(!styleMatch(px(() => [200, 30, 30, 255]), base, mask, W, H), "a picture of yours is not");
+ok(!styleMatch(px((x, y) => inside(x, y, 17) ? [9, 9, 9, 255] : [y * 5, x * 5, 90, 255]), base, mask, W, H), "another backdrop is not");
+ok(!styleMatch(styled, base, px(() => [255, 255, 255, 255]), W, H), "a shape filling the square can't be told");
+console.log("stylematch ok");
+"""
+
+
+def t_page_tells_styled_icons():
+    """The page tells an icon the style made (one it lost track of) from one changed by hand: outside the shape,
+    clear of its edge, it is the template's backdrop, but for rounding. A shape that leaves too little of the
+    backdrop can't be told, and isn't taken as the style's."""
+    write("/tmp/stylematch.js", STYLEMATCH_JS.encode())
+    out = subprocess.run(["node", "/tmp/stylematch.js", WEB_PAGE], capture_output=True, text=True)
+    assert out.returncode == 0 and "stylematch ok" in out.stdout, out.stdout + out.stderr
 
 
 def t_page_writes_the_consoles_zstd_frames():
@@ -3671,6 +4205,18 @@ def t_shellui_exit_releases_sandbox():
         time.sleep(1.5)   # the leftover is now the newest ShellUI sandbox there is
         assert not [l for l in recorded_mounts() if l.startswith(left + "/")], recorded_mounts()
 
+        # While the home screen restarts, nothing goes into any app's sandbox: on the console (1.79) two apps that
+        # start with it had their views covered as the system made them, and the next home screen never started.
+        def app_view(name):
+            box = f"/mnt/sandbox/{name}/system_ex"
+            os.makedirs(box, exist_ok=True)
+            subprocess.run(["mount", "--bind", "/system_ex", box], check=True)
+            boxes.append(box)
+            return f"/mnt/sandbox/{name}"
+        early = app_view("NPXS40101_001")
+        time.sleep(3)
+        assert not ours_in(early), ("covered while the home screen restarts", ours_in(early))
+
         # A sandbox built for a ShellUI that never starts (as on the console, waking from rest mode): nothing of
         # ours goes in while it is being built, and the launcher takes it down cleanly.
         failed = sandbox(2)
@@ -3690,6 +4236,19 @@ def t_shellui_exit_releases_sandbox():
                or crc_file(f"{new}{HOME}/bg.png") != zlib.crc32(S["bg"])):
             assert time.time() < end, "the new sandbox was not covered within half a second"
             time.sleep(0.02)
+        # The app's view made meanwhile, once the new home screen runs.
+        end = time.time() + 5
+        while crc_file(f"{early}{HOME}/bg.png") != zlib.crc32(S["bg"]):
+            assert time.time() < end, "the app's view was not covered once the home screen ran"
+            time.sleep(0.1)
+        # A view of another app's new sandbox, with the home screen running: covered once it has been there 2 s,
+        # not as the system makes it.
+        later = app_view("NPXS40102_001")
+        made = time.time()
+        while crc_file(f"{later}{HOME}/bg.png") != zlib.crc32(S["bg"]):
+            assert time.time() - made < 6, "the app's new view was not covered"
+            time.sleep(0.05)
+        assert time.time() - made >= 1.9, f"covered {time.time() - made:.2f} s after it was made, before it settled"
 
         # An older sandbox of it showing up again is never covered.
         again = f"{old}/user"
@@ -4132,8 +4691,8 @@ TESTS = [t_startup, t_ui_and_icon_served, t_mutations_need_token, t_create_theme
          t_stock_mirror_and_linked_staging, t_stage_folders_reused_without_links,
          t_firmware_mismatch_is_refused, t_delete_rules, t_concurrent_requests_during_apply,
          t_restore_stock_cleans_up, t_overlays_reach_system_views, t_crash_loop_takes_theme_down, t_busy_overlay_is_never_forced, t_recovers_after_hard_kill, t_update_from_payload_manager, t_update_from_plain_elf, t_update_hands_over, t_update_at_boot, t_web_comes_back_after_rest_mode, t_takeover_when_web_is_down, t_stop_tool_keeps_the_theme, t_failed_write_closes_its_file, t_survives_malformed_and_abusive_requests,
-         t_slow_clients_do_not_block_others, t_log_rotates, t_media_policy, t_music, t_music_playlist, t_theme_choices, t_settings_and_duplicate, t_mix_and_match, t_writes_from_many_threads_stay_whole, t_status_keeps_its_walk, t_storage_reserve, t_console_pictures, t_icon_style_for_titles_installed_later, t_preview_pictures, t_save_and_discard, t_discard_applies_only_when_needed, t_cut_off_uploads_are_not_theme_files,
-         t_home_background_textures, t_interface_pictures, t_title_pictures, t_fonts, t_bc7_keeps_transparency, t_page_writes_the_consoles_zstd_frames, t_page_builds_playlists, t_page_bleeds_colour_into_clear_pixels, t_page_places_textures_against_their_edge, t_texture_sources, t_appearance_textures, t_shellui_exit_releases_sandbox, t_shellui_guard_holds_up, t_crash_takes_overlays_out_of_shellui, t_shellui_exits_during_apply, t_title_where, t_watch_files, t_home_music_at9, t_long_mount_paths_use_parent_folder, t_system_is_byte_identical_afterwards, t_crash_is_reported_and_recovered,
+         t_slow_clients_do_not_block_others, t_deep_folders_are_not_walked, t_pictures_are_revalidated, t_log_rotates, t_media_policy, t_music, t_music_playlist, t_theme_choices, t_settings_and_duplicate, t_mix_and_match, t_writes_from_many_threads_stay_whole, t_every_combination_holds, t_status_keeps_its_walk, t_storage_reserve, t_console_pictures, t_icon_style_for_titles_installed_later, t_themes_of_many_folders, t_preview_pictures, t_save_and_discard, t_discard_applies_only_when_needed, t_discard_cut_off_is_put_back, t_cut_off_uploads_are_not_theme_files,
+         t_home_background_textures, t_interface_pictures, t_title_pictures, t_fonts, t_bc7_keeps_transparency, t_page_writes_the_consoles_zstd_frames, t_page_builds_playlists, t_page_tells_styled_icons, t_page_bleeds_colour_into_clear_pixels, t_page_places_textures_against_their_edge, t_texture_sources, t_appearance_textures, t_shellui_exit_releases_sandbox, t_shellui_guard_holds_up, t_crash_takes_overlays_out_of_shellui, t_shellui_exits_during_apply, t_title_where, t_watch_files, t_home_music_at9, t_long_mount_paths_use_parent_folder, t_system_is_byte_identical_afterwards, t_crash_is_reported_and_recovered,
          t_privilege_failure_exits_cleanly]
 
 
@@ -4149,6 +4708,19 @@ def main():
         write(f"{GAME}/icon0.dds", dds_bc7(512, 512, flags=0xa1007))     # as on the console
         write(f"{GAME_SYS}/icon0.dds", dds_bc7(512, 512, flags=0xa1007))
         write(f"{PS4_APP}/icon0.dds", dds_dxt1(512, 512))
+        # Three of the console's tiles the icon style can take (a symbol on a dark see-through backing, as theirs are).
+        for path, name, rgb in (("NPXS40047/appdb/default", "PlayStation Store", (40, 140, 230)),
+                                ("NPXS40071/appdb/default", "Game Library", (240, 240, 240)),
+                                ("NPXS40071/appdb/NPXS40139", "App Library", (240, 240, 240)),
+                                ("NPXS40063/appdb/default", "Welcome", (240, 240, 240)),
+                                ("NPXS40075/appdb/default", "Media Gallery", (240, 240, 240)),
+                                ("NPXS40016/appdb/NPXS40056", "All Apps", (240, 240, 240)),
+                                ("NPXS40144/appdb/NPXS40149", "PS5 Disc", (240, 240, 240)),
+                                ("NPXS40008/appdb/NPXS20993", "\u2605Debug Settings", (0, 0, 0))):   # (a developer kit's: never offered)
+            mark = lambda x, y, rgb=rgb: rgb + (255,) if 176 <= x < 336 and 176 <= y < 336 else (30, 30, 34, 200)
+            write(f"/system_ex/rnps/apps/{path}/icon0.png", png_rgba(512, 512, mark))
+            write(f"/system_ex/rnps/apps/{path}/param.json", json.dumps({"localizedParameters": {
+                "defaultLanguage": "en-US", "en-US": {"titleName": name}}}).encode())
         Plugin()
         print(f"plugin running; open http://localhost:18095 (container port {PORT})", flush=True)
         while True:
@@ -4161,7 +4733,9 @@ def main():
     S["game_before"] = snapshot("/user/app/PPSA01234")
     S["plugin"] = Plugin()
     failed = 0
-    for test in TESTS:
+    only = [n for n in os.environ.get("PS5THEME_TESTS", "").split(",") if n]   # a few tests by name, while working on them
+    chosen = [t for t in TESTS if not only or t.__name__ in only]
+    for test in chosen:
         t0 = time.time()
         try:
             test()
@@ -4176,7 +4750,7 @@ def main():
                 print(open("/tmp/plugin-out.txt", errors="replace").read()[-4000:], flush=True)
                 S["plugin"] = Plugin()
     S["plugin"].kill()
-    print(f"\n{len(TESTS) - failed}/{len(TESTS)} passed", flush=True)
+    print(f"\n{len(chosen) - failed}/{len(chosen)} passed", flush=True)
     if failed:
         print("---- plugin log tail ----")
         print(open(LOG, errors="replace").read()[-3000:] if os.path.exists(LOG) else "(no log)")

@@ -34,6 +34,12 @@ made](#how-the-appearance-textures-are-made) explains the technical side.
 corner piece (the clock stays clear), and as its home screen artwork. The pink
 numbers are the interface icons' numbered test, applied at the same time.*
 
+![The Yakuza 0 theme's Control Center on the console: a street at night on the bottom panel, a red corner piece behind the clock, and the theme's background above](screenshots/console-control-center-yakuza.jpg)
+
+*Another theme's: a street at night on the Control Center's bottom panel and
+a red corner piece behind the clock, with the theme's font in the panel's
+text (a screenshot taken on the console).*
+
 ## Step by step
 
 1. **Make the picture.** A PNG or WebP, with transparent parts wherever the

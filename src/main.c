@@ -41,7 +41,10 @@
 #include "theme.h"
 
 
-#define MAX_TARGETS      64
+/* The folders a theme may change files in. An icon style takes two a game (its metadata and its sce_sys) and some
+   thirty for the system tiles, so 64 (before 1.74) was passed by a theme of 18 games with its tiles styled. 256 holds
+   a library of over a hundred; each costs about 2 KB of the tables below for every view of it. */
+#define MAX_TARGETS      256
 #define STAGE_SIZE_LIMIT (512ull * 1024 * 1024)
 #define POLL_SECONDS     1
 #define UPDATE_CHECK_SECONDS 10
@@ -61,6 +64,7 @@ static atomic_int shellui_seen;     /* found at least once (for the apply's hint
    ours goes into a ShellUI sandbox but this one (see mount_overlay). */
 static atomic_int watched_box = -1;
 static atomic_int guard_hunting;    /* ShellUI exited moments ago: its successor is looked for, and covered, at once */
+static atomic_int shellui_between;  /* from ShellUI's exit until the next one is watched: no sandbox is touched */
 
 /* Themable folders: ShellUI's React Native apps and its own VSH assets
    (home screen backgrounds, sounds), and installed titles' metadata (their
@@ -95,6 +99,15 @@ static int  progress_pct = -1;   /* how far the apply is, -1 when idle */
 static char progress_text[128];  /* what it is doing, in plain words */
 static char result[RESULT_MAX];  /* outcome of the last apply, for the UI */
 static atomic_int reapply_requested;
+/* An apply asked for by the icon styler or the page's own styling of new icons (reapply_quietly): said once on the
+   console when it is done, with what it was for, and not step by step as one you start: a game may be open. One you
+   ask for meanwhile (write_active) is said as usual, the note after it. */
+static char quiet_note[1024];    /* (state_lock) said once the next apply of quiet_theme is done */
+static char quiet_theme[128];    /* (state_lock) */
+static int  loud_wanted;         /* (state_lock) an apply asked for by you since the last one began */
+static atomic_int apply_quiet;   /* this apply is said only once it is done */
+static char apply_note[1024];    /* (main thread) and with this */
+static void say_apply_note(void);
 
 
 static void
@@ -104,7 +117,7 @@ set_progress(int pct, const char *fmt, ...) __attribute__((format(printf, 2, 3))
    apply gets at most one progress notification every PROGRESS_NOTE_SECONDS
    (and none in its first seconds), on top of the start and the result. */
 #define PROGRESS_NOTE_SECONDS 8
-static time_t progress_started, progress_noted;   /* main thread only */
+static long long progress_started, progress_noted;   /* main thread only (forward-only clock) */
 
 /* What the apply is doing, for the manager and the console. The percentage
    never goes back. */
@@ -128,12 +141,12 @@ set_progress(int pct, const char *fmt, ...) {
   }
   pthread_mutex_unlock(&state_lock);
 
-  time_t now = time(NULL);
+  long long now = mono_seconds();
   if(shown < 0) {
     progress_started = 0;
   } else if(!progress_started) {
     progress_started = progress_noted = now;
-  } else if(now - progress_noted >= PROGRESS_NOTE_SECONDS && shown < 100) {
+  } else if(now - progress_noted >= PROGRESS_NOTE_SECONDS && shown < 100 && !atomic_load(&apply_quiet)) {
     progress_noted = now;
     notify("ps5-theme: %s... %d%%", text, shown);
   }
@@ -583,9 +596,25 @@ plan_free(plan_t *p) {
    themable kind and passes asset_validate() against it (for images: exactly
    the stock format and pixel size). Matching each stock file exactly is what
    keeps a theme correct at every output resolution the console renders at. */
+/* A theme's files mirror the console's folders, none of which is 32 levels deep. Deeper is never walked: each level
+   takes stack (see fsguard.c). */
+#define THEME_MAX_DEPTH 32
+
+static int
+rel_depth(const char *rel) {
+  int n = 0;
+  for(; *rel; rel++) n += *rel == '/';
+  return n;
+}
+
 static int
 plan_files(const char *theme_dir, const char *stock_dir, const char *stock_real, const char *rel, plan_t *p) {
   char dir[PATH_MAX];
+  if(rel_depth(rel) > THEME_MAX_DEPTH) {
+    log_err("theme: skipping %s%s, deeper than any folder of the console", theme_dir, rel);
+    p->skipped++;
+    return 0;
+  }
   snprintf(dir, sizeof(dir), "%s%s", theme_dir, rel);
 
   DIR *d = opendir(dir);
@@ -665,6 +694,14 @@ same_file(const char *a, const char *b) {
 
 static int verified_by_content;   /* files that needed a full comparison (main thread) */
 
+/* Milliseconds on a clock that only goes forward, for timing the steps of an apply. */
+static long long
+mono_ms(void) {
+  struct timespec ts;
+  clock_gettime(CLOCK_MONOTONIC, &ts);
+  return (long long)ts.tv_sec * 1000 + ts.tv_nsec / 1000000;
+}
+
 /* Every planned theme file must be what other_dir shows: the same file, or
    if not, the same bytes (checksum and size). */
 static int
@@ -691,7 +728,7 @@ verify_plan(const plan_t *p, const char *theme_dir, const char *other_dir, const
 /* Stage folders to keep through a revert, so a later apply can reuse them:
    the applied theme's (after a reboot) and the spares of the theme shown
    before it. Main thread only. */
-static char kept_stages[64][PATH_MAX];
+static char kept_stages[MAX_TARGETS * 2][PATH_MAX];
 static int nkept_stages;
 
 /* MOUNTS_FILE holds one line per overlay this plugin mounted, oldest first:
@@ -709,13 +746,17 @@ typedef struct {
 
 static mount_rec_t records[MAX_RECORDS];   /* main thread only */
 
+static int records_torn;   /* the last read found a last line cut short (main thread) */
+
 static int
 read_mount_records(mount_rec_t *recs, int max) {
   char line[PATH_MAX + 256 + 512 + 8];
   int n = 0;
   FILE *f = fopen(MOUNTS_FILE, "r");
   if(!f) return 0;
+  records_torn = 0;
   while(n < max && fgets(line, sizeof(line), f)) {
+    if(!strchr(line, '\n')) { records_torn = 1; break; }   /* a last line cut short: not a record (see record_mount) */
     line[strcspn(line, "\r\n")] = 0;
     if(!line[0]) continue;
     char *src = strchr(line, '\t'), *real = src ? strchr(src + 1, '\t') : NULL;
@@ -730,8 +771,11 @@ read_mount_records(mount_rec_t *recs, int max) {
   return n;
 }
 
+static int nrecorded = -1;   /* lines in MOUNTS_FILE, -1 until read (main thread) */
+
 static int
 write_mount_records(const mount_rec_t *recs, int n) {
+  nrecorded = -1;
   if(!n) return fs_unlink(MOUNTS_FILE) && errno != ENOENT ? -1 : 0;
   size_t cap = (size_t)n * (sizeof(*recs) + 3), len = 0;
   char *buf = malloc(cap);
@@ -739,17 +783,30 @@ write_mount_records(const mount_rec_t *recs, int n) {
   for(int i = 0; i < n; i++) len += snprintf(buf + len, cap - len, "%s\t%s\t%s\n", recs[i].on, recs[i].src, recs[i].real);
   int ret = fs_write_file(MOUNTS_FILE, buf, len);
   free(buf);
+  if(!ret) nrecorded = n;
   return ret;
 }
 
 static int
 record_mount(const char *on, const char *src, const char *real) {
-  int n = read_mount_records(records, MAX_RECORDS);
-  if(n == MAX_RECORDS) return -1;
-  snprintf(records[n].on, sizeof(records[n].on), "%s", on);
-  snprintf(records[n].src, sizeof(records[n].src), "%s", src);
-  snprintf(records[n].real, sizeof(records[n].real), "%s", real);
-  return write_mount_records(records, n + 1);
+  /* One line added, not the whole record written again and waited for at each overlay (217 of them took seconds
+     on the console, while the home screen showed its own look): the record matters only while the console runs. */
+  if(nrecorded < 0) {
+    int n = read_mount_records(records, MAX_RECORDS);
+    /* A last line cut short (written as the power went): the record is written whole again first, so the next line
+       never runs on from it. */
+    if(records_torn && write_mount_records(records, n)) return -1;
+    nrecorded = n;
+  }
+  if(nrecorded >= MAX_RECORDS) return -1;
+  char line[PATH_MAX + 256 + 512 + 8];
+  int len = snprintf(line, sizeof(line), "%s\t%s\t%s\n", on, src, real);
+  if(len < 0 || len >= (int)sizeof(line) || fs_append_file(MOUNTS_FILE, line, (size_t)len)) {
+    nrecorded = -1;
+    return -1;
+  }
+  nrecorded++;
+  return 0;
 }
 
 /* Is `dir` the source of an overlay still mounted (one that stayed because
@@ -843,10 +900,16 @@ revert_mounts(const char *keep, const char *const *covers, int ncovers, int *def
       gone[i] = 1;
       continue;
     }
-    if(plat_unmount(records[i].on)) {
+    /* Where the new theme goes on straight after, one try: an overlay in use then simply stays under the new one.
+       Waiting for it (3 s each on the console) bought nothing there, as the home screen keeps its font and
+       interface pictures open for as long as it runs: four such waits added 12 s to every apply. */
+    int replaced = 0;
+    for(int k = 0; k < ncovers && !replaced; k++) replaced = !strcmp(covers[k], records[i].on);
+    if(replaced ? plat_unmount_once(records[i].on) : plat_unmount(records[i].on)) {
       if(errno == EBUSY) busy++;
-      log_err("unmount %s: %s; it stays until it is no longer in use or the console restarts",
-              records[i].on, errno == EBUSY ? "still in use" : strerror(errno));
+      if(replaced && errno == EBUSY) log_msg("unmount %s: still in use; the new theme's overlay goes on top of it", records[i].on);
+      else log_err("unmount %s: %s; it stays until it is no longer in use or the console restarts",
+                   records[i].on, errno == EBUSY ? "still in use" : strerror(errno));
       continue;
     }
     log_msg("unmounted %s", records[i].on);
@@ -941,6 +1004,16 @@ home_view_only(const char *dir) {
   return title_target(dir) || font_target(dir);
 }
 
+/* 1 while the home screen is restarting (from its exit until the next one is found and watched, as when the console
+   goes into rest mode or wakes): then nothing goes into any app's sandbox. The system builds the next home screen's
+   sandbox and those of the apps that start with it meanwhile, and on 13.42 the next home screen never started, so
+   the console couldn't wake, after the plugin covered two such apps' views just as they were made (1.79). Their views
+   are covered once the new home screen runs (the guard asks for that). */
+static int
+restart_hold(const char *on) {
+  return !strncmp(on, "/mnt/sandbox/", 13) && atomic_load(&shellui_between);
+}
+
 /* Is `on` in a ShellUI sandbox other than the one whose process the guard is watching? Nothing of ours goes into
    one (mount_overlay): a sandbox the system is still building (its process not started), one it is taking down,
    or one whose ShellUI is gone. On 13.42 (2026-10-29), the font overlaid in each new ShellUI sandbox while the
@@ -1002,10 +1075,63 @@ test_fail_verify(const char *on) {
 }
 #endif
 
+/* Games and apps the applied theme has pictures for that weren't installed when it was applied (collect_targets):
+   the background styler applies the theme again once one is (autostyle.c). The main thread writes them, the
+   styler reads them, under the lock. */
+static pthread_mutex_t awaiting_lock = PTHREAD_MUTEX_INITIALIZER;
+static char awaiting[64][16];
+static int nawaiting;
+
+static void
+awaiting_clear(void) {
+  pthread_mutex_lock(&awaiting_lock);
+  nawaiting = 0;
+  pthread_mutex_unlock(&awaiting_lock);
+}
+
+/* `rel` is one of a title's folders ("/user/appmeta/<ID>", "/user/app/<ID>/sce_sys"): its title, if the title
+   itself isn't installed (its metadata folder isn't there: not one of its folders missing, as a homebrew app's
+   sce_sys can be). */
+static void
+awaiting_note(const char *rel) {
+  const char *id = !strncmp(rel, APPMETA_DIR "/", sizeof(APPMETA_DIR)) ? rel + sizeof(APPMETA_DIR)
+                 : !strncmp(rel, APP_DIR "/", sizeof(APP_DIR)) ? rel + sizeof(APP_DIR) : NULL;
+  char t[16], meta[PATH_MAX];
+  struct stat st;
+  if(!id || strlen(id) < 9 || (id[9] && id[9] != '/')) return;
+  memcpy(t, id, 9);
+  t[9] = 0;
+  snprintf(meta, sizeof(meta), "%s/%s", APPMETA_DIR, t);
+  if(!stat(meta, &st) && S_ISDIR(st.st_mode)) return;
+  pthread_mutex_lock(&awaiting_lock);
+  int seen = 0;
+  for(int i = 0; i < nawaiting && !seen; i++) seen = !strcmp(awaiting[i], t);
+  if(!seen && nawaiting < (int)(sizeof(awaiting) / sizeof(*awaiting))) snprintf(awaiting[nawaiting++], sizeof(awaiting[0]), "%s", t);
+  pthread_mutex_unlock(&awaiting_lock);
+}
+
+int
+titles_awaiting_install(char (*out)[16], int max) {
+  pthread_mutex_lock(&awaiting_lock);
+  int n = nawaiting < max ? nawaiting : max;
+  memcpy(out, awaiting, sizeof(*out) * (size_t)n);
+  pthread_mutex_unlock(&awaiting_lock);
+  return n;
+}
+
 /* Collect parent directories of every file under files_root. */
+static int targets_overflow;   /* (main thread) the last collect_targets stopped at MAX_TARGETS */
+
+int max_theme_folders(void) { return MAX_TARGETS; }
+
 static int
 collect_targets(const char *files_root, const char *rel,
                 char targets[][PATH_MAX], int *count) {
+  if(!*rel) targets_overflow = 0;
+  if(rel_depth(rel) > THEME_MAX_DEPTH) {
+    log_err("theme: skipping %s%s, deeper than any folder of the console", files_root, rel);
+    return 0;
+  }
   char dir[PATH_MAX];
   snprintf(dir, sizeof(dir), "%s%s", files_root, rel);
 
@@ -1032,9 +1158,10 @@ collect_targets(const char *files_root, const char *rel,
     struct stat ts;
     if(title_target(rel) && (stat(rel, &ts) || !S_ISDIR(ts.st_mode))) {
       log_msg("theme: %s isn't installed; its pictures stay in the theme for when it is", rel);
+      awaiting_note(rel);
       return 0;
     }
-    if(*count >= MAX_TARGETS) return -1;
+    if(*count >= MAX_TARGETS) { targets_overflow = 1; return -1; }
     snprintf(targets[(*count)++], PATH_MAX, "%s", rel);
   }
   return ret;
@@ -1043,7 +1170,8 @@ collect_targets(const char *files_root, const char *rel,
 
 #define MAX_VIEWS     256       /* views that can show a themable folder */
 #define MAX_ALL_VIEWS 8192      /* every nullfs mount on the console (1,072 seen on 13.42) */
-#define MAX_JOBS      (MAX_TARGETS * 8)
+#define MAX_JOBS      (MAX_TARGETS * 6)   /* (a game's folders have two or three views; the system's about a dozen) */
+#define MAX_PREV      (MAX_TARGETS * 2)   /* stage folders kept: the applied theme's and the previous one's */
 
 typedef struct job {
   char on[PATH_MAX];      /* mount point */
@@ -1227,6 +1355,42 @@ mirror_ready(const char *real) {
 }
 
 
+static void fingerprint_walk(char *path, size_t len, size_t root, uint64_t *sum, uint64_t *count);
+
+/* A game's or app's folder as it is now: each file's name, identity, size and time, no file read. 0 if it can't be
+   told. Kept beside the copy's mark (never in it: the mark's own identity is part of what a stage folder was built
+   from, and changing it would rebuild them all). */
+static uint64_t
+live_fingerprint(const char *real) {
+  char *path = malloc(PATH_MAX);
+  uint64_t sum = 0, count = 0;
+  if(!path) return 0;
+  int len = snprintf(path, PATH_MAX, "%s", real);
+  if(len > 0 && len < PATH_MAX) fingerprint_walk(path, (size_t)len, (size_t)len, &sum, &count);
+  free(path);
+  return count ? (sum ^ (count * 0xff51afd7ed558ccdull)) | 1 : 0;
+}
+
+static uint64_t
+read_fingerprint(const char *mark) {
+  char path[PATH_MAX], line[32] = "";
+  snprintf(path, sizeof(path), "%s.fp", mark);
+  FILE *f = fopen(path, "r");
+  if(!f) return 0;
+  if(!fgets(line, sizeof(line), f)) line[0] = 0;
+  fclose(f);
+  return strtoull(line, NULL, 16);
+}
+
+static void
+write_fingerprint(const char *mark, uint64_t fp) {
+  char path[PATH_MAX], line[32];
+  if(!fp) return;
+  snprintf(path, sizeof(path), "%s.fp", mark);
+  int n = snprintf(line, sizeof(line), "%016llx\n", (unsigned long long)fp);
+  if(fs_write_file(path, line, (size_t)n)) log_err("could not write %s", path);
+}
+
 /* 0 with the mirror's path in `dir`; 1 if it must first be made but one of
    our overlays covers the folder; -1 if it could not be made. */
 static int
@@ -1240,8 +1404,14 @@ ensure_mirror(const char *real, char *dir, size_t size) {
        updated: a copy that no longer matches is made again, while none of
        our overlays covers the folder (system folders only change with the
        firmware). */
-    if(!title_folder(real) || covered_by_us(real) || source_in_use(dir) ||
-       (!same_tree(real, dir, 0) && !same_tree(dir, real, 0))) {
+    if(!title_folder(real) || covered_by_us(real) || source_in_use(dir)) return 0;
+    /* Unchanged since it was last found the same (each file's identity, size and time): nothing is read. Comparing
+       every file of every game's folder, both ways, at every apply took 30 s on the console (1.77): the theme's
+       overlays are in the home screen's view, never on the folders themselves, so none of them was ever skipped. */
+    uint64_t now = live_fingerprint(real);
+    if(now && now == read_fingerprint(mark)) return 0;
+    if(!same_tree(real, dir, 0) && !same_tree(dir, real, 0)) {
+      write_fingerprint(mark, now);
       return 0;
     }
     log_msg("%s changed since its copy was kept; keeping a new one", real);
@@ -1260,6 +1430,7 @@ ensure_mirror(const char *real, char *dir, size_t size) {
   snprintf(mark_dir, sizeof(mark_dir), "%s", mark);
   *strrchr(mark_dir, '/') = 0;
   if(fs_mkdirs(mark_dir) || fs_write_file(mark, "ok\n", 3)) return -1;
+  if(title_folder(real)) write_fingerprint(mark, live_fingerprint(real));   /* (as it was copied) */
   return 0;
 }
 
@@ -1369,9 +1540,12 @@ static char live_theme[128];
 
 #define SPARE_FILE BASE_DIR "/spare"   /* stage folders of the theme shown before it */
 
+static void awaiting_clear(void);
+
 /* Drop the applied theme's state; with `drop_record`, LIVE_FILE too. */
 static void
 forget_live(int drop_record) {
+  awaiting_clear();
   for(int k = 0; k < live_stages; k++) plan_free(&stages[k].plan);
   live_stages = 0;
   ntargets = 0;
@@ -1483,6 +1657,7 @@ keep_spares(prev_stage_t *prev, int nprev) {
   for(int k = 0; k < nprev; k++) {
     prev_stage_t *pv = &prev[k];
     if(pv->used || pv->live != (outgoing > 0) || !fs_is_dir(pv->dir)) continue;
+    if(nkept_stages >= (int)(sizeof(kept_stages) / sizeof(*kept_stages))) break;
     snprintf(kept_stages[nkept_stages++], PATH_MAX, "%s", pv->dir);
     if(f) fprintf(f, "stage\t0\t%s\t%s\t%llx\t%llx\n", pv->dir, pv->real, pv->fp_inputs, pv->fp_staged);
   }
@@ -1568,9 +1743,9 @@ sandbox_closed(const char *on) {
    to take out, so one of the two sees the mount). Every overlay of ours goes on through here. 1 if skipped. */
 static int
 mount_overlay(const char *src, const char *on) {
-  if(sandbox_closed(on) || shellui_box_unwatched(on)) return 1;
+  if(sandbox_closed(on) || shellui_box_unwatched(on) || restart_hold(on)) return 1;
   if(plat_mount_ro(src, on)) return -1;
-  if(!sandbox_closed(on) && !shellui_box_unwatched(on)) return 0;
+  if(!sandbox_closed(on) && !shellui_box_unwatched(on) && !restart_hold(on)) return 0;
   if(plat_is_our_mount(on, BASE_DIR "/")) plat_unmount_once(on);
   return 1;
 }
@@ -1689,7 +1864,7 @@ crash_release(void) {
 static void *
 shellui_guard(void *arg) {
   int logged = -1, after_exit = 0;
-  time_t exited = 0;
+  long long exited = 0;
   (void)arg;
   crash_thread_init(CRUMB_GUARD);
   for(;;) {
@@ -1699,7 +1874,7 @@ shellui_guard(void *arg) {
       atomic_store(&guard_looked, 1);
       /* Soon after it exits, a new one starts: looked for often then, so its views are covered as soon as its
          process is there (see watched_box), early enough for what it reads as it starts. */
-      int soon = after_exit && time(NULL) - exited < 30;
+      int soon = after_exit && mono_seconds() - exited < 30;
       atomic_store(&guard_hunting, soon);
       usleep(soon ? 10 * 1000 : 1000 * 1000);
       continue;
@@ -1708,6 +1883,7 @@ shellui_guard(void *arg) {
        ShellUI runs at a time. Only now does anything of ours go in. */
     int inst = newest_shellui_box();
     atomic_store(&watched_box, inst);
+    atomic_store(&shellui_between, 0);   /* (after: its own sandbox is the watched one first) */
     atomic_store(&guard_hunting, 0);
     atomic_store(&guard_looked, 1);
     if(pid != logged) log_msg("watching ShellUI (pid %d, sandbox _%03d) to take overlays out of its sandbox when it exits", pid, inst);
@@ -1718,10 +1894,11 @@ shellui_guard(void *arg) {
     while(!plat_wait_exit(pid, 5000)) {
       if(inst < 0) atomic_store(&watched_box, inst = newest_shellui_box());
     }
-    atomic_store(&watched_box, -1);   /* first: nothing more goes in (see mount_overlay) */
+    atomic_store(&shellui_between, 1);   /* first: nothing goes into any sandbox until the next one runs */
+    atomic_store(&watched_box, -1);      /* nor more into this one (see mount_overlay) */
     release_sandbox(inst);
     after_exit = 1;
-    exited = time(NULL);
+    exited = mono_seconds();
     atomic_store(&guard_hunting, 1);
   }
   return NULL;
@@ -1959,6 +2136,7 @@ static uint64_t applied_files_print;
 
 static void
 fingerprint_walk(char *path, size_t len, size_t root, uint64_t *sum, uint64_t *count) {
+  if(rel_depth(path + root) > THEME_MAX_DEPTH) { *count += 1ull << 40; return; }   /* not walked: never the same */
   DIR *d = opendir(path);
   if(!d) return;
   struct dirent *e;
@@ -2024,9 +2202,10 @@ static int
 apply_theme(const char *name) {
   char path[PATH_MAX], files_root[PATH_MAX], fw[16], want_fw[64], title[128];
   int count = 0, mounted = 0, verified = 0, failed = 0, skipped = 0;
+  long long t_start = mono_ms(), t_prepared = t_start, t_switched = t_start;
 
-  static prev_stage_t prev[64];
-  int nprev = load_prev_stages(prev, 64);   /* before the record is cleared */
+  static prev_stage_t prev[MAX_PREV];
+  int nprev = load_prev_stages(prev, MAX_PREV);   /* before the record is cleared */
   forget_live(1);   /* the previous theme's overlays are replaced below */
   stages_reused = 0;
   if(!theme_name_valid(name)) {
@@ -2054,12 +2233,19 @@ apply_theme(const char *name) {
   }
 
   snprintf(files_root, sizeof(files_root), "%s/%s/files", THEMES_DIR, name);
+  awaiting_clear();
   int unreadable = fs_is_dir(files_root) && collect_targets(files_root, "", targets, &count);
   ntargets = unreadable ? 0 : count;
   if(unreadable) {
     revert_keep_spares(prev, nprev);
-    set_result("Could not read %s, or it touches more than %d folders.", title, MAX_TARGETS);
-    notify("ps5-theme: could not read %s", title);
+    if(targets_overflow) {
+      set_result("%s changes files in more than %d folders, more than the plugin applies at once. "
+                 "Take some of its pictures out (or style fewer icons), then apply it again.", title, MAX_TARGETS);
+      notify("ps5-theme: '%s' changes too many folders to apply. See the manager.", title);
+    } else {
+      set_result("Could not read %s's files on the console.", title);
+      notify("ps5-theme: could not read %s", title);
+    }
     return -1;
   }
   char games[200] = "";
@@ -2130,6 +2316,7 @@ apply_theme(const char *name) {
     set_progress(stage_meter.hi, "%s", stage_meter.label);
   }
 
+  t_prepared = mono_ms();
   /* Swap: the previous theme comes down and this one goes up straight away,
      so the stock look shows only for a moment. The previous theme's folders
      are kept as spares; other old ones go (also after an earlier revert). */
@@ -2181,6 +2368,7 @@ apply_theme(const char *name) {
 #ifdef TEST_HOOKS
   test_hold("after");
 #endif
+  t_switched = mono_ms();
 
   /* Read back through each live mount: this is what ShellUI sees. */
   for(int i = 0; i < njobs; i++) {
@@ -2220,9 +2408,12 @@ apply_theme(const char *name) {
   } else {
     for(int k = 0; k < nstages; k++) plan_free(&stages[k].plan);
   }
+  long long t_end = mono_ms();
   log_msg("theme %s: %d overlay(s), %d in system views; %d of %d folder(s) reused; "
-          "%d check(s) remembered, %d file(s) compared by content",
-          name, mounted, views_mounted, stages_reused, nstages, asset_checks_remembered(), verified_by_content);
+          "%d check(s) remembered, %d file(s) compared by content; %.1f s (preparing %.1f, switching %.1f, checking %.1f)",
+          name, mounted, views_mounted, stages_reused, nstages, asset_checks_remembered(), verified_by_content,
+          (t_end - t_start) / 1000.0, (t_prepared - t_start) / 1000.0, (t_switched - t_prepared) / 1000.0,
+          (t_end - t_switched) / 1000.0);
   verified_by_content = 0;
 
   crumb(CRUMB_MAIN, "idle");
@@ -2281,11 +2472,17 @@ apply_theme(const char *name) {
     set_result("%s applied: %d %s checked on the console.%s%s%s", title, verified, verified == 1 ? "file" : "files",
                music, games, hints);
   }
+  if(atomic_load(&apply_quiet)) {   /* applied again by itself: what for, and rest mode, said once */
+    if(failed || skipped) notify("ps5-theme: '%s' applied partly (%d skipped). See Activity.", title, skipped + failed);
+    say_apply_note();
+    return 0;
+  }
   if(failed || skipped) {
     notify("ps5-theme: '%s' applied partly (%d skipped). See Activity.", title, skipped + failed);
   } else {
     notify("ps5-theme: '%s' applied", title);
   }
+  say_apply_note();
   if(icons) notify("ps5-theme: %s", ICONS_HINT);
   if(font_hint) notify("ps5-theme: %s", FONTS_HINT);
   if(artwork) notify("ps5-theme: %s", ARTWORK_HINT);
@@ -2402,13 +2599,22 @@ read_active(char *out, size_t size) {
 
 
 /* Apply again the theme that is chosen, if it is still `expect`: for the icon styler, which works for a while
-   after reading what was applied. It never writes the choice, so a theme chosen meanwhile is never undone; if one is
-   chosen between the check and the request, the request applies that one, as it was going to be anyway. */
+   after reading what was applied, and the page's own styling of new icons. It never writes the choice, so a theme
+   chosen meanwhile is never undone; if one is chosen between the check and the request, the request applies that
+   one, as it was going to be anyway, and the note, about this one, is dropped. Notes asked for before the apply
+   begins are said together. */
 int
-reapply_active(const char *expect) {
+reapply_quietly(const char *expect, const char *note) {
   char cur[128];
   read_active(cur, sizeof(cur));
   if(strcmp(cur, expect)) return -1;
+  pthread_mutex_lock(&state_lock);
+  size_t have = strlen(quiet_note);
+  if(strcmp(quiet_theme, expect)) have = 0;   /* (one left for a theme no longer chosen) */
+  snprintf(quiet_theme, sizeof(quiet_theme), "%s", expect);
+  if(!have) snprintf(quiet_note, sizeof(quiet_note), "%s", note);
+  else if(!strstr(quiet_note, note) && have + 1 + strlen(note) < sizeof(quiet_note)) snprintf(quiet_note + have, sizeof(quiet_note) - have, "\n%s", note);
+  pthread_mutex_unlock(&state_lock);
   atomic_store(&reapply_requested, 1);
   return 0;
 }
@@ -2419,8 +2625,22 @@ write_active(const char *name) {
   char line[128];
   int n = snprintf(line, sizeof(line), "%s\n", name);
   if(fs_write_file(ACTIVE_FILE, line, n)) return -1;
+  pthread_mutex_lock(&state_lock);
+  loud_wanted = 1;
+  pthread_mutex_unlock(&state_lock);
   atomic_store(&reapply_requested, 1);
   return 0;
+}
+
+/* Each line of the note taken for this apply, on the console. */
+static void
+say_apply_note(void) {
+  for(char *line = apply_note, *next; line && *line; line = next) {
+    next = strchr(line, '\n');
+    if(next) *next++ = 0;
+    notify("%s", line);
+  }
+  apply_note[0] = 0;
 }
 
 
@@ -2449,11 +2669,11 @@ write_active(const char *name) {
 
 static struct {
   char on[PATH_MAX];
-  time_t until;
+  long long until;   /* (forward-only clock) */
 } watch_refused[16];
 
 static int
-watch_waiting(const char *on, time_t now) {
+watch_waiting(const char *on, long long now) {
   for(size_t i = 0; i < sizeof(watch_refused) / sizeof(*watch_refused); i++) {
     if(watch_refused[i].until > now && !strcmp(watch_refused[i].on, on)) return 1;
   }
@@ -2509,10 +2729,12 @@ note_view(const char *on, time_t now) {
   apps_seen[k].at[0] = now;
   if(apps_seen[k].restarts < CRASH_SLOW_RESTARTS) apps_seen[k].restarts++;
   int r = apps_seen[k].restarts;
-  if(r >= CRASH_RESTARTS && now - apps_seen[k].at[CRASH_RESTARTS - 1] <= crash_fast_window) {
+  /* A gap below zero means the clock was set back meanwhile (the console sets it from the network): never within. */
+  time_t fast = now - apps_seen[k].at[CRASH_RESTARTS - 1], slow = now - apps_seen[k].at[CRASH_SLOW_RESTARTS - 1];
+  if(r >= CRASH_RESTARTS && fast >= 0 && fast <= crash_fast_window) {
     crash_count = CRASH_RESTARTS;
     crash_window = crash_fast_window;
-  } else if(r >= CRASH_SLOW_RESTARTS && now - apps_seen[k].at[CRASH_SLOW_RESTARTS - 1] <= crash_slow_window) {
+  } else if(r >= CRASH_SLOW_RESTARTS && slow >= 0 && slow <= crash_slow_window) {
     crash_count = CRASH_SLOW_RESTARTS;
     crash_window = crash_slow_window;
   } else {
@@ -2522,8 +2744,47 @@ note_view(const char *on, time_t now) {
   return 1;
 }
 
+/* 1 if what the watcher has to say about `on` was said already since the theme was applied: a view that stays
+   as it is gets looked at again every minute, but said once (on the console, a game's views left under another
+   mount wrote the same lines every minute, 5,800 a day, pushing what mattered out of the log). */
+static char watch_said_on[64][PATH_MAX];
+static int nwatch_said;
+
+static int
+watch_said(const char *on) {
+  for(int i = 0; i < nwatch_said; i++) if(!strcmp(watch_said_on[i], on)) return 1;
+  if(nwatch_said < (int)(sizeof(watch_said_on) / sizeof(*watch_said_on))) {
+    snprintf(watch_said_on[nwatch_said++], PATH_MAX, "%s", on);
+  }
+  return 0;
+}
+
+/* A view in an app's sandbox is covered only once it has been there VIEW_SETTLE_MS: the system builds a sandbox
+   view by view as the app starts, and an overlay put in while it does can keep the app from starting (1.67 with the
+   home screen's font; 1.79 with two apps that start with the home screen, and the console didn't wake). The home
+   screen's own views are the exception: they go in as soon as its process is watched, before it reads the home
+   row's icons, and its sandbox is whole by then (it starts after it). */
+#define VIEW_SETTLE_MS 2000
+static struct { char on[PATH_MAX]; long long first; } young[64];
+static int nyoung;
+
+static int
+view_settling(const char *on, long long now_ms) {
+  if(strncmp(on, "/mnt/sandbox/", 13)) return 0;
+  if(!strncmp(on, SHELLUI_SANDBOX, sizeof(SHELLUI_SANDBOX) - 1) && !strstr(on, "/sce_sbx/")) return 0;
+  int oldest = 0;
+  for(int i = 0; i < nyoung; i++) {
+    if(!strcmp(young[i].on, on)) return now_ms - young[i].first < VIEW_SETTLE_MS;
+    if(young[i].first < young[oldest].first) oldest = i;
+  }
+  int k = nyoung < (int)(sizeof(young) / sizeof(*young)) ? nyoung++ : oldest;
+  snprintf(young[k].on, PATH_MAX, "%s", on);
+  young[k].first = now_ms;
+  return 1;
+}
+
 static void
-watch_refuse(const char *on, time_t now) {
+watch_refuse(const char *on, long long now) {
   static size_t next;
   snprintf(watch_refused[next].on, PATH_MAX, "%s", on);
   watch_refused[next].until = now + WATCH_RETRY_SECONDS;
@@ -2536,22 +2797,26 @@ static int watch_force;   /* plan again now, though the mount table looks the sa
 static int
 watch_views(int reset) {
   static int last_count = -1;
-  static time_t last_full;
+  static long long last_full;
   static job_t jobs[MAX_JOBS];
-  time_t now = time(NULL);
+  time_t now = time(NULL);   /* app restarts: by the wall clock, so rest mode counts between them */
+  long long tick = mono_seconds();   /* waits */
 
   if(reset || !live_stages) {
     last_count = -1;
     napps_seen = 0;
+    nwatch_said = 0;
+    nyoung = 0;
     return 0;
   }
   int count = plat_mount_count();
-  if(count == last_count && now - last_full < WATCH_FULL_SECONDS && !watch_force) return 0;
+  if(count == last_count && tick - last_full < WATCH_FULL_SECONDS && !watch_force) return 0;
   watch_force = 0;
   last_count = count;
-  last_full = now;
+  last_full = tick;
 
-  int failed = 0, added = 0;
+  int failed = 0, added = 0, settling = 0;
+  long long now_ms = mono_ms();
   int njobs = plan_jobs(jobs, &failed, 1);
   looks++;
   /* Our overlays by the mount table, read once a look and only when needed: one of ours may be under another
@@ -2571,22 +2836,29 @@ watch_views(int reset) {
     for(int k = 0; k < live_stages && !st; k++) {
       if(!stages[k].state && !strcmp(stages[k].real, j->real)) st = &stages[k];
     }
-    if(!st || plat_is_our_mount(j->on, STAGE_DIR "/") || watch_waiting(j->on, now)) continue;
+    if(!st || plat_is_our_mount(j->on, STAGE_DIR "/") || watch_waiting(j->on, tick)) continue;
     if(nours == -2) nours = plat_our_mounts(STAGE_DIR "/", "/", ours, MAX_RECORDS);
     int stacked = 0;
     for(int k = 0; k < nours && !stacked; k++) stacked = !strcmp(ours[k], j->on);
     if(stacked) {
-      if(!watch_waiting(j->on, now)) log_msg("new view %s: an overlay of ours is already there, under another mount; left as it is", j->on);
-      watch_refuse(j->on, now);
+      if(!watch_said(j->on)) {
+        log_msg("new view %s: an overlay of ours is already there, under another mount; left as it is "
+                "(the theme shows there again after rest mode)", j->on);
+      }
+      watch_refuse(j->on, tick);
       continue;
     }
 
+    if(view_settling(j->on, now_ms)) {   /* (looked at again within a second) */
+      settling++;
+      continue;
+    }
     crumb(CRUMB_MAIN, "overlaying a new view %s", j->on);
     int r = mount_overlay(st->dir, j->on);
     if(r > 0) continue;
     if(r) {
-      log_err("new view %s: overlay refused (%s), trying again in %d s", j->on, strerror(errno), WATCH_RETRY_SECONDS);
-      watch_refuse(j->on, now);
+      if(!watch_said(j->on)) log_err("new view %s: overlay refused (%s), trying again every %d s", j->on, strerror(errno), WATCH_RETRY_SECONDS);
+      watch_refuse(j->on, tick);
       continue;
     }
     if(record_mount(j->on, st->dir, st->real)) log_err("could not record mount %s", j->on);
@@ -2594,13 +2866,14 @@ watch_views(int reset) {
     if(verify_plan(&st->plan, st->dir, j->on, "new view")) {
       log_err("new view %s: verification failed, removing overlay", j->on);
       if(plat_unmount(j->on)) log_err("unmount %s failed: %s", j->on, strerror(errno));
-      watch_refuse(j->on, now);
+      watch_refuse(j->on, tick);
       continue;
     }
     log_msg("overlaid %s, a view the system made after the theme was applied (%d file(s) verified)",
             j->on, st->plan.count);
     added++;
   }
+  if(settling) last_count = -1;   /* a view still being built: looked at again on the next round */
   if(added) {
     log_msg("theme %s: %d new view(s) covered", live_theme, added);
     dump_mount_table();
@@ -2691,6 +2964,10 @@ main(void) {
   }
   record_running();
   plat_set_name(TITLE_ID);   /* the name etaHEN knows a running plugin by */
+  /* Uploads cut off by the last copy's end (a crash, a power loss): none is being received now, as only the copy
+     holding the lock receives any. */
+  if(fs_is_dir(INCOMING_DIR) && fs_rm_rf_under(BASE_DIR, INCOMING_DIR)) log_err("could not clear %s", INCOMING_DIR);
+  snapshots_recover();
 
   /* ShellUI is watched from the start: overlays a previous copy left in
      its view must come out if it exits while this one starts up. */
@@ -2739,8 +3016,8 @@ main(void) {
   } else {
     /* After a reboot the overlays are gone; the last apply's stage folders
        stay, for the apply below to reuse if nothing changed. */
-    static prev_stage_t kept[64];
-    load_prev_stages(kept, 64);
+    static prev_stage_t kept[MAX_PREV];
+    load_prev_stages(kept, MAX_PREV);
     forget_live(0);
     revert_mounts(NULL, NULL, 0, NULL);
     nkept_stages = 0;
@@ -2779,7 +3056,7 @@ main(void) {
   }
   pthread_attr_destroy(&attr);
 
-  time_t tile_started = time(NULL);
+  long long tile_started = mono_seconds();
   int tile_warned = 0;
   char ip[32];
   lan_address(ip, sizeof(ip));
@@ -2791,7 +3068,7 @@ main(void) {
      ShellUI's view in the first apply. */
   for(int i = 0; i < 20 && !atomic_load(&guard_looked); i++) usleep(100 * 1000);
 
-  time_t last_update_check = 0;
+  long long last_update_check = -1000000;   /* (looked at once at start) */
   for(;;) {
     if(handoff_due()) {
       log_msg("handing over to the new copy; the theme stays as it is");
@@ -2804,8 +3081,8 @@ main(void) {
       notify("ps5-theme stopped. The theme stays; start ps5-theme again to open the manager.");
       _exit(0);
     }
-    if(time(NULL) - last_update_check >= UPDATE_CHECK_SECONDS) {
-      last_update_check = time(NULL);
+    if(mono_seconds() - last_update_check >= UPDATE_CHECK_SECONDS) {
+      last_update_check = mono_seconds();
       if(update_check()) {
         /* The newer copy asks to take over as soon as it is up. Wait for
            that instead of starting an apply (at boot, putting the theme
@@ -2815,7 +3092,7 @@ main(void) {
       }
     }
     /* Say so if the system is slow to register the tile; nothing else waits on it. */
-    if(!tile_warned && !atomic_load(&tile_done) && time(NULL) - tile_started > 45) {
+    if(!tile_warned && !atomic_load(&tile_done) && mono_seconds() - tile_started > 45) {
       tile_warned = 1;
       log_err("tile: registration has not finished after 45 s");
       if(ip[0]) notify("ps5-theme: the Themes tile is slow to register. The manager works now at http://%s:%d", ip, WEB_PORT);
@@ -2830,6 +3107,13 @@ main(void) {
       applied[0] = 0;
       snprintf(applying, sizeof(applying), "%s", theme ? active : "");
       progress_pct = -1;
+      /* A note asked for with this theme's apply is said once it is done; quietly, unless you asked for one too. */
+      int noted = theme && quiet_note[0] && !strcmp(quiet_theme, active);
+      if(quiet_note[0] && !noted) log_msg("not said, as '%s' is applied instead: %s", active, quiet_note);
+      snprintf(apply_note, sizeof(apply_note), "%s", noted ? quiet_note : "");
+      atomic_store(&apply_quiet, noted && !loud_wanted && current[0]);
+      quiet_note[0] = quiet_theme[0] = 0;
+      loud_wanted = 0;
       pthread_mutex_unlock(&state_lock);
       if(theme) set_progress(0, "Starting");
 
@@ -2840,7 +3124,7 @@ main(void) {
         snprintf(ini, sizeof(ini), "%s/%s/theme.ini", THEMES_DIR, active);
         if(read_ini_value(ini, "name", title, sizeof(title))) snprintf(title, sizeof(title), "%s", active);
         if(!current[0]) notify("ps5-theme: putting '%s' back...", title);
-        else notify("ps5-theme: applying '%s'...", title);
+        else if(!atomic_load(&apply_quiet)) notify("ps5-theme: applying '%s'...", title);
         themes_lock();
         int rc = apply_theme(active);
         if(!rc) applied_files_record(active);
@@ -2850,10 +3134,13 @@ main(void) {
         if(!rc) snprintf(applied, sizeof(applied), "%s", active);
         applying[0] = 0;
         pthread_mutex_unlock(&state_lock);
+        if(rc && apply_note[0]) log_msg("not said, as the apply didn't finish: %s", apply_note);
+        apply_note[0] = 0;
+        atomic_store(&apply_quiet, 0);
         set_progress(-1, "%s", "");
       } else {
-        static prev_stage_t prev[64];
-        int nprev = load_prev_stages(prev, 64);
+        static prev_stage_t prev[MAX_PREV];
+        int nprev = load_prev_stages(prev, MAX_PREV);
         forget_live(1);
         revert_keep_spares(prev, nprev);
         themes_lock();

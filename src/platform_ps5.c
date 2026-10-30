@@ -289,25 +289,6 @@ plat_find_named_thread(const char *name, int except) {
   return found;
 }
 
-/* (ki_runtime: the processor time of all its threads, kept by the kernel as they run, in microseconds) */
-typedef struct { const char *name; plat_proc_t *out; int max, n; } named_t;
-
-static void
-named_one(const struct kinfo_proc *p, const char *name, void *ctx) {
-  named_t *f = ctx;
-  if(f->n >= f->max || p->ki_stat == SZOMB || strcmp(name, f->name)) return;
-  plat_proc_t *o = &f->out[f->n++];
-  o->pid = p->ki_pid;
-  o->start = (unsigned long long)p->ki_start.tv_sec * 1000000ull + (unsigned long long)p->ki_start.tv_usec + 1;
-  o->cpu_us = (unsigned long long)p->ki_runtime;
-}
-
-int
-plat_processes_named(const char *name, plat_proc_t *out, int max) {
-  named_t f = {name, out, max, 0};
-  return each_process(named_one, &f) ? -1 : f.n;
-}
-
 unsigned long long
 plat_process_start(int pid) {
   int mib[4] = {CTL_KERN, KERN_PROC, KERN_PROC_PID, pid};

@@ -12,11 +12,11 @@ console, a phone or a computer. The system is never written: every theme is a
 read-only overlay held in memory, so the console is stock again the moment
 the plugin stops, and the plugin puts your theme back each time etaHEN starts.
 
-![A theme on the console: its own home background, and Snoopy icons for the Discover tile and two apps](docs/screenshots/console-home.jpg)
+![A theme on the console: Yakuza 0's home background and font, and the icon style on every tile of the home row, the console's own All Apps tile too](docs/screenshots/console-home.jpg)
 
 ![The theme library](docs/screenshots/library.png)
 
-Version 1.69. Developed and tested on a PS5 with firmware 13.42, both with
+Version 1.80. Developed and tested on a PS5 with firmware 13.42, both with
 etaHEN 2.5B (unified build) and on its own from PS5 Payload Manager.
 
 > **About the screenshots.** They were taken from the author's own console.
@@ -55,8 +55,11 @@ etaHEN 2.5B (unified build) and on its own from PS5 Payload Manager.
   browser's Back step between parts.
 - **Icon style.** Give every game's and app's icon one look: its own icon in
   a circle, rounded square, hexagon or other shape over a colour, the
-  theme's background or a picture of yours. Games installed later are styled
-  by the plugin itself once their install is over, never while you play (see
+  theme's background or a picture of yours, and the home screen's own tiles
+  (PlayStation Store, Game Library, Media Gallery and the rest) with them.
+  Games installed later are styled
+  by the plugin itself once their install is over, and a game installed again
+  gets the theme's pictures back by itself (see
   [Games and apps](docs/manager.md#games-and-apps)).
 - **Game and app icons.** Change the icon, background and logo of any
   installed game or app, homebrew and PlayStation Network artwork included.
@@ -104,9 +107,14 @@ etaHEN 2.5B (unified build) and on its own from PS5 Payload Manager.
   eat into it (see
   [When the console's storage is nearly full](docs/manager.md#when-the-consoles-storage-is-nearly-full)).
 - **Safe through rest mode.** Nothing of a theme goes into the home screen
-  while the console is starting it, and all of it comes out the moment the
-  home screen stops, the plugin crashing included (see
-  [A home screen that never came back](docs/challenges.md#a-home-screen-that-never-came-back)).
+  while the console is starting it, nor into any app's sandbox while the home
+  screen restarts, and all of it comes out the moment the home screen stops,
+  the plugin crashing included (see
+  [A home screen that never came back](docs/challenges.md#a-home-screen-that-never-came-back)
+  and [A console that didn't wake (again)](docs/challenges.md#a-console-that-didnt-wake-again)).
+  If the console ever doesn't wake, hold its power button until it beeps
+  twice and switches off, then start it: the theme comes back with the
+  plugin. Send the Activity log with what happened.
 - **Never writes the system.** Nothing under `/system` or `/system_ex` is
   opened for writing, only media files can be themed, and every file is
   checked against the system file it replaces (see
@@ -137,7 +145,7 @@ tile, and shows a notification with the address to open from a phone or
 computer.
 
 **Updating:** copy the new `.plugin` file over the old one in
-`/data/etaHEN/plugins/`. Within about 10 seconds the running plugin finds it,
+`/data/etaHEN/plugins/`. Within about 20 seconds the running plugin finds it,
 starts it through etaHEN's ELF loader and hands over to it. Your theme stays
 on the screen the whole time, and no Toolbox or restart is needed, which
 matters after rest mode, when etaHEN's Toolbox is often gone. An open manager
@@ -171,13 +179,19 @@ release has both files, which contain the same program:
 
 **With PS5 Payload Manager:**
 
-- **Start it:** put `ps5-theme.elf` in a folder under
+- **Install it from its repository** (from 1.73 on): in Payload Manager,
+  **Settings → Manage Sources**, add
+  `https://raw.githubusercontent.com/Blaze414/ps5-theme/main/pldmgr/repository.json`.
+  PS5 Themes then shows with its logo, version, author and description, and
+  each new release appears as an update (see
+  [Building](docs/building.md#ps5-payload-managers-repository)).
+- **Or start it by hand:** put `ps5-theme.elf` in a folder under
   `/data/pldmgr/payloads/` (or import it from USB) and launch it from the
   manager. It then does everything it does under etaHEN: the web manager,
   the Themes tile, and putting the selected theme back.
 - **Start it after every jailbreak:** add it to the manager's autoload list.
 - **Update it:** put the newer `ps5-theme.elf` in `/data/ps5-theme/update/`
-  (or replace the installed one). Within about 10 seconds the running copy
+  (or replace the installed one). Within about 20 seconds the running copy
   finds it, starts it through the ELF loader and hands over, keeping your
   theme on the screen. The new version then takes the place of the copy
   Payload Manager starts (`/data/pldmgr/payloads/local/ps5-theme/` on newer

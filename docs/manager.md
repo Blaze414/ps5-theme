@@ -34,7 +34,10 @@ The library is the home page.
 - **Card buttons:** **Apply** (or **Apply again**), **Edit**, **Duplicate**,
   **Export** and **Delete**. Delete asks for a second press ("Press again to
   delete", for 6 seconds). A button that can't be used says why: an empty
-  theme, another firmware, or (for Delete) the theme being applied.
+  theme, another firmware, or (for Delete) the theme being applied. A theme
+  holding folders nested deeper than any of the console's (put there by hand
+  over FTP, or a broken copy) isn't deleted at all, rather than in part: the
+  message says to delete it over FTP (since 1.77).
 - **No theme card:** **Remove the theme** removes every overlay and keeps the
   theme from coming back at the next start.
 - **Top bar:** shows the console's firmware and the theme applied ("Theme
@@ -49,7 +52,32 @@ The library is the home page.
 
 The page refreshes by itself every few seconds, and every second while a
 theme is being applied, so it stays correct even when you use it from two
-devices at once.
+devices at once. It follows the console's games too (since 1.72): a game or
+app installed or removed shows up without reloading, with a message naming
+it ("Installed on the console: Itemzflow."), and so does an icon the console
+styled by itself ("Styled by the console: …"). It waits while you are doing
+something (a change being sent, an upload, a picture being placed, a form
+open) and catches up once that is done.
+
+Only what changed is drawn again (since 1.77). While a theme is applied,
+the banner's text and percentage change in place and its bar slides to the
+new width; the cards, their pictures and whatever is under the pointer or
+has the focus stay as they are, and are drawn again only when the themes or
+what is applied change. Before, the whole library was rebuilt every second
+of an apply: the bar jumped, the pictures were fetched again, and a card
+could change under the pointer. A theme opened, or a form, while the
+console was answering is never drawn over by the library; a theme opened
+while another was still opening shows only itself, with its own files
+(before, the first could finish last and be drawn under the second's
+address, so a change went to the theme not shown); and Mix and match closed
+while it was still reading stops reading and says nothing. While the page is
+still writing into a theme (styling its icons, an upload, a save), another
+theme doesn't open: each step writes to the theme that is open as it goes,
+and the rest of the run would have gone into the other one. The library and
+Activity open meanwhile. When the
+console doesn't answer the status within 10 seconds (it went into rest mode
+as it answered), the page asks again at the next look instead of waiting
+for good.
 
 ### Mix and match
 
@@ -168,7 +196,9 @@ theme's parts on the left, the part you're changing on the right.
   (`/api/asset/picture`, read-only), the system tiles' icons, the search,
   settings and Control Center icons, and the SST font. Only the layout around
   them is approximate: the real look shows after you apply the theme and use
-  rest mode. **Refresh** draws it again after a change.
+  rest mode. **Refresh** draws it again after a change. Closed and opened
+  again quickly, it builds from the pieces it asked for itself, in its own
+  font (since 1.77: the first one's font could be left in its place).
 
 ![The Preview: the theme's background, Appearance artwork, font and icons drawn on a home screen](screenshots/preview.png)
 
@@ -416,7 +446,7 @@ Discover's own background.
 
 ### Games and apps
 
-![Icon style: the shapes drawn on the theme's background, the size of the icon, what is behind it, and the two options](screenshots/icon-style.png)
+![Icon style: the shapes drawn on the theme's background, the size of the icon, what is behind it, games and apps, and the console's own tiles, each drawn as it will look](screenshots/icon-style.png)
 
 **Icon style** (since 1.66) gives every game's and app's icon one look: the
 title's own icon cut to a shape (circle, rounded square, square, diamond,
@@ -432,23 +462,69 @@ one again.
 
 ![The picture behind the icons: the bright square is what shows, the rest dimmed, with the icon at home-screen and Game Library sizes](screenshots/picture-editor.png)
  Each shape is drawn on one of your games' real icons before you
-choose. **Style N icons** makes them all, each from the console's own icon,
+choose.
+
+What gets the style is in two groups (since 1.74). **Games and apps**: every
+installed one, with **Style ones installed later**. **System tiles**: the
+console's own tiles the home screen shows, in its groups, each a card drawn
+as it will look (the style on the ones chosen, as now on the others), all
+chosen at first:
+
+- **Games home:** Welcome, PlayStation Store, PlayStation Plus, Game Library
+  and Media Gallery;
+- **Media home:** Discover, Music Home, All Apps, Live TV and App Library;
+- **Discs, shown while one is in:** PS5 Disc, PS4 Disc, Compilation,
+  Unsupported Disc and Unreadable Disc.
+
+The developer kits' apps (marked with a star, such as Debug Settings) are
+left out: a home screen doesn't show them. A tile's icon is the console's
+symbol on its own dark backing, which stays readable in the shape over a
+busy picture. Choosing a tile off puts it back as it was, and one chosen
+again gets the style the next time you style the icons. The button says what
+it covers ("2 games and apps, 8 system tiles"), the Tiles part marks those
+styled **Icon style**, and a tile you change there by hand is yours again, as
+a game's icon is. Tiles are never styled by themselves: only games and apps
+are "installed later". **The theme's background** is always offered behind
+the icons; until the theme has one, it says to add one in **Background**. **Style N icons** makes them all, each from the console's own icon,
 so styling again never stacks, and written as a picture you change by hand
 is. An icon you changed by hand is styled too (since 1.67; untick **The N
 icons you changed by hand too** to leave them as they are): your picture
 goes in the shape, and is kept with the style first, so styling again starts
 from it, never from an icon already styled. The theme lists the titles its
 style made, and **Remove the style** puts those back: your own picture where
-you had changed one, the console's icon for the rest. Changing a styled icon
+you had changed one, the console's icon for the rest. A game not installed at
+that moment loses its styled icon too (the console's own when it is installed
+again), except one made from your picture: that one keeps the style, with
+your picture kept, until it is installed again, as your picture can only go
+back once there is the game's own icon file to match; press **Remove the
+style** again then (since 1.71). Changing a styled icon
 by hand makes it yours again. A long run shows its progress and can be
-stopped between two titles (**Stop**); those done stay styled. After you
+stopped between two titles (**Stop styling**, red as soon as it is pointed
+at or selected, since 1.75); those done stay styled. A style that would
+make the theme change files in more folders than the plugin applies at once
+(256) isn't made, and says what to do; a theme over the limit says so as it
+opens. After you
 change the shape, size or what is behind, the part says your icons have the
 earlier style until you style them again.
 
 When you open a theme whose style is on and games have been installed since,
-the page styles them by itself. If the theme is the one applied and you have
-no other unsaved changes, it then saves and applies the theme again, as the
-plugin's own styler does (since 1.67).
+the page styles them by itself, and so it does with the theme open as soon
+as the console has one installed (since 1.72). If the theme is the one
+applied and you have no other unsaved changes, it then saves and applies the
+theme again, as the plugin's own styler does (since 1.67), and the console
+says it once, by name, when it is done. A game still installing or updating
+is left until 2 minutes after its install finishes, as the plugin leaves
+it: the part says which, and when. **Style N icons** and **Remove the style**
+read the console's games and the style's list again first, so a page left
+open never works from an old list.
+
+An icon the style made that the page lost track of (as could happen before
+1.71 with **Remove the style** and a game not installed) counts as changed by
+hand, and with **The icons you changed by hand too** ticked, styling again
+would put the styled icon inside the shape a second time. Since 1.72 the page
+tells it apart: outside the shape it is the style's own backdrop, as the
+console keeps it. It goes back on the style's list, with a message, and is
+styled again from the game's own icon.
 
 A game or app you uninstall keeps its pictures in the theme for when it comes
 back; applying the theme leaves them out without counting it as a failure
@@ -456,21 +532,39 @@ back; applying the theme leaves them out without counting it as a failure
 
 **Style games and apps installed later** (on by default) carries the style on
 by itself. While the theme is applied, the plugin styles a newly installed
-game or app once its install has finished: when nothing in its folders has
-changed for 10 minutes, and no game or app is being played. A game you left
-on the home screen doesn't count: the console suspends it, and the plugin
-tells a suspended game from one being played by whether it is using the
-processor. It then applies the theme again, and the console says "styled
-the icon of 1 new game or app"; rest mode shows it on the home row. It works
+game or app once its install has finished: when nothing in its folders, its
+package or its download has changed for 2 minutes (10 before 1.73), as the plugin's own
+clock counts them, whatever dates its installer put on its files (since
+1.73). It then applies the theme
+again. The console says so twice (since 1.72), by the game's name: when it
+sees the install ("Itemzflow is installing. Its icon gets the theme's icon
+style 2 minutes after the install finishes."), and once the theme is
+applied again ("icon styled for Itemzflow. Rest mode shows it on the home
+row."). That apply says nothing else, no steps and no tips, since a game may
+be open. It does so with a game open too (since 1.70): the
+PS5 keeps a game left on the home screen running as busily as one being
+played, so waiting for none to be open could mean waiting for good, and a
+theme never touches a game's own folders. It works
 from a template kept with the theme each time you style the icons here (the
 backdrop with the shape's shadow, the shape, and the titles installed then,
 which it leaves to you). If the console's copy of the template isn't whole
 (an upload that stopped), opening the theme's Games and apps keeps it again. A title whose icons it can't make
-itself (a picture or texture of another kind) is styled the next time you
-open the theme here, and the part says how many the console styled on its
-own. Nothing is done while the console installs or downloads a game: a theme
-over a title's pictures keeps the console from writing them, which is also
-why an update for a styled game needs **No theme** first.
+itself (a picture or texture of another kind) is styled by the page, at once
+if it is open, else the next time you open the theme here; the console says
+so ("Itemzflow's icon can't be styled on the console. Open the theme in the
+manager to style it."). The part says how many the console styled on its
+own. Nothing is done while the console installs or downloads a game, by the
+plugin or the page: a theme over a title's pictures keeps the console from
+writing them, which is also why an update for a styled game needs **No
+theme** first.
+
+**A game installed again** (uninstalled, then installed later) gets the
+theme's pictures back by itself (since 1.70): once its install is over, the
+plugin applies the theme again, and the console says "the theme's pictures
+are back for Itemzflow" (and, while it installs, that they will be). If they
+were the style's,
+they are made again first with the style as it is then (from your picture,
+where you had changed it), so a game styled long ago matches the others.
 
 Every installed game and app, homebrew included, keeps its pictures in its
 metadata folder, `/user/appmeta/<title ID>/`, and most PS5 games also in
@@ -567,16 +661,36 @@ does):
 
 The top bar says **Applying…** until the console confirms the result. The
 same happens after a reboot, when the plugin puts your theme back. Applying
-can take up to a minute the first time on a firmware, and about 20 seconds
-when you change a theme or switch to one you haven't just used. Applying the
-same theme again, switching back to the previous one, or putting it back
-after a reboot, takes a second or two.
+can take up to a minute the first time on a firmware, and as long when you
+switch to a large theme you haven't just used, as its folders are copied
+again (on the test console, 21 folders of Snoopy took about a minute).
+Applying the same theme again, switching back to the previous one, or
+putting it back after a reboot, takes a second or two: 2.0 seconds for
+Yakuza 0's 217 overlays on 1.79, from 36 seconds on 1.77 (see
+[Challenges](challenges.md#applies-that-took-half-a-minute)). The first apply
+after the plugin is updated checks the theme's files again once, which adds
+a few seconds.
 
 The console shows its own notifications too, so you can follow along on the
 TV without the manager open: "Applying 'Name'…" (or "Putting 'Name' back…"
 after a reboot), then for a long apply the current step and percentage, at
 most every 8 seconds so they don't pile up, and finally "'Name' applied"
 (the number of files checked is in the manager's banner).
+
+Styling the icons in the manager is said on the console too (since 1.76), so
+whoever is at the TV knows what is going on: as it starts ("styling 37 icons
+in the manager...", or "styling the icon of Itemzflow, installed since the
+theme's icon style was used..."), at most every 8 seconds as it goes
+("styling icons: 12 of 37..."), and as it ends ("37 icons styled. Apply the
+theme to see them.", or "styling stopped: 12 of 37 icons styled"). The
+plugin makes the words from counts and title IDs; the page can't put its own
+text on the screen.
+
+An apply the console makes by itself, for icons styled after an install (by
+the plugin, or by the page on its own), says only what it was
+for, once it is done: "icon styled for Itemzflow. Rest mode shows it on the
+home row." (since 1.72; before, it said each step and every tip, with a game
+perhaps open).
 
 The page follows an apply for as long as the console reports progress, however
 long that takes, and says so only if the console stops answering for 3 minutes.
@@ -594,14 +708,29 @@ Lines worth knowing:
 
 - **"storage: 45094 MB free, 1024 MB of it kept for the console"**, as the
   plugin starts (see [below](#when-the-consoles-storage-is-nearly-full)).
+- **"theme yakuza-0: 217 overlay(s), 187 in system views; 67 of 67 folder(s)
+  reused; … 2.0 s (preparing 0.2, switching 1.7, checking 0.2)"**: an apply,
+  done (since 1.77). How many folders were reused rather than copied again,
+  and how long each step took: preparing the folders, switching (the moment
+  the home screen can show its own look), checking. Send this line with a
+  report of a slow apply.
+- **"unmount …: still in use; the new theme's overlay goes on top of it"**:
+  normal. The home screen keeps its font and interface folders open while it
+  runs, so the new theme goes on top of the old one there.
+- **"new view …: an overlay of ours is already there, under another mount;
+  left as it is (the theme shows there again after rest mode)"**: the system
+  put a view of a folder on top of the theme's, as after a game is installed
+  again. Said once; rest mode brings the theme back there.
 - **"watching ShellUI (pid 117, sandbox _003)"** and **"ShellUI exited: 19
   overlay(s) taken out of its sandbox NPXS40087_002 in 65 ms"**: the home
   screen starting and stopping, at rest mode. Nothing of the theme goes into
   a new home screen until the first line (see [How it
   works](how-it-works.md#reaching-the-home-screen-through-its-sandbox-views)).
-- **"icon style: PPSA01234 waits while a game is being played"** and
-  **"icon style: styled PPSA01234's icon in theme …"**: the plugin styling a
-  game installed later.
+- **"icon style: styled PPSA01234's icon in theme …"** and **"icon style:
+  ITEM00001 is installed again; theme … is applied again for its pictures"**:
+  the plugin styling a game installed later, or putting a reinstalled game's
+  pictures back. **"theme …: applied again for 2 icon(s) the manager
+  styled"**: the page's own styling of new games.
 - **"… was taken down: the console's interface kept restarting with it"**:
   the plugin took a theme off because the home screen kept crashing with it.
   Restart the console if the home screen doesn't come back, and send the

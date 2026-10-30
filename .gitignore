@@ -1,5 +1,6 @@
 build/
 build-host/
+build-meta/
 *.elf
 *.plugin
 .DS_Store

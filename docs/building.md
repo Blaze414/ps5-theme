@@ -13,6 +13,48 @@ on Ubuntu 24.04. The `.plugin` file is the ELF with etaHEN's plugin header:
 `etaHEN_PLUGIN`, the title ID `THEM00001` and the version
 (`tools/make_plugin.py`).
 
+The manager's page (`web/index.html`) and its ATRAC9 module are built into
+the plugin twice: as they are, and compressed with `gzip -9 -n` into
+`build-meta/` as the build runs (since 1.77), for browsers that take gzip.
+`build-meta/` is made by the build and never committed.
+
+## What the ELF says about itself
+
+Since 1.73 the ELF (and so the `.plugin`, which wraps it) carries its own
+description, for any loader or tool to read without running it: two
+sections the console never loads, so they take no memory.
+
+- `.ps5meta.json`: UTF-8 JSON, schema 1: `id` (`ps5-theme`), `name` (PS5
+  Themes), `version`, `title_id`, `author` (Blaze414), `description`,
+  `homepage`, `license` (GPL-3.0-or-later) and `icon` (the section below).
+- `.ps5meta.icon`: the logo, the Themes tile's 512 × 512 PNG.
+
+`tools/payload_meta.py` writes the JSON from the Makefile's version as the
+plugin builds (`src/meta.c` places both), and the build checks the finished
+ELF has both, unchanged and not loaded into memory, or fails. To read them:
+
+```bash
+llvm-objcopy -O binary --only-section=.ps5meta.json build/ps5-theme.elf meta.json
+```
+
+## PS5 Payload Manager's repository
+
+PS5 Payload Manager shows a payload's logo, name, version, author and
+description only for one installed from a repository; for one installed by
+hand it shows the file's name. `tools/payload_meta.py repo` writes the two
+files of a repository for a release: `repository.json` (the payload, its
+version, SHA-256 and the release's download address) and `icons.json` (the
+logo at 128 × 128, `assets/icon-128.png`):
+
+```bash
+python3 tools/payload_meta.py repo build/ps5-theme.elf THEM00001 1.80 pldmgr
+```
+
+They are made again for each release, from the very file attached to it
+(Payload Manager checks every download against the SHA-256). Added as a
+source in Payload Manager (**Settings → Manage Sources**), the repository
+offers each new release as an update.
+
 
 ## Continuous integration
 
@@ -37,6 +79,9 @@ emulated`, `./build.sh` and `python3 tools/check_repo.py`.
 | `src/main.c` | The theme engine: stock copies, staging, overlays, checks, progress, re-apply at start |
 | `src/web.c` | Web server and JSON API: uploads, settings, Save/Discard, previews, status |
 | `src/update.c` | One running copy at a time, finding a newer plugin file and handing over to it |
+| `src/running.c` | Finding the running copy, and asking it over its own web port (shared with the stop tool) |
+| `src/autostyle.c` | The icon styler: games installed later styled in the theme's icon style |
+| `src/meta.c` | The ELF's own description and logo, in sections the console never loads |
 | `src/fsguard.c` | The write guard and file helpers (atomic writes, linked copies) |
 | `src/policy.c` | What can be themed, and the checks for each kind of file |
 | `src/verify.c` | Image header parsing |
@@ -55,7 +100,8 @@ emulated`, `./build.sh` and `python3 tools/check_repo.py`.
 | `tools/klog/` | `ps5-klog.elf`: the kernel log on TCP port 3232, for finding out what the system does |
 | `tools/fonts/` | `ps5-fontscan.elf`: lists the font files each process has open or mapped, read-only, for the font test |
 | `tools/assetwatch/` | `ps5-assetwatch.elf`: for two minutes, logs the files the home screen and the web renderer map and unmap, read-only, to find where something on screen is loaded from |
-| `tools/docshots.mjs` | The manager's screenshots in `docs/screenshots/`, taken from a console's manager in a headless Chromium, read-only (every request that would change something is refused), with the console's own pictures and games' icons shown as stand-ins |
+| `tools/docshots.mjs` | The manager's screenshots in `docs/screenshots/`, taken from a console's manager in a headless Chromium, read-only (every request that would change something is refused), with the console's own pictures, games' icons and the system tiles' styled icons (made from the console's own) shown as stand-ins |
+| `tools/payload_meta.py` | The ELF's description, its check, and the PS5 Payload Manager repository files |
 | `tools/` | Table generator, icon generator, plugin packer, repository checks (`check_repo.py`) |
 | `.github/workflows/ci.yml` | The tests, the build and the repository checks on every push |
 | `tests/host/` | End-to-end tests and the fake console (`rco_fixture.py` builds resource files) |

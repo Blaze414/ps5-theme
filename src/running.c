@@ -3,10 +3,15 @@
    request) and for ps5-theme-stop, which links this file with only the
    platform code. */
 
+#include <arpa/inet.h>
+#include <errno.h>
+#include <netinet/in.h>
 #include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/socket.h>
+#include <sys/time.h>
 #include <unistd.h>
 
 #include "platform.h"
@@ -16,9 +21,17 @@
 
 
 /* The process recorded in PID_FILE when it took the instance lock, if it is
-   still that process (same start time: a reused pid is never taken for
-   it), or else the one whose main thread is named TITLE_ID. Other than
-   `self`; -1 if neither is found. Copies before 1.51 write no PID_FILE. */
+   still that process (its start time the same, give or take START_SLACK: a
+   reused pid is never taken for it), or else the one whose main thread is
+   named TITLE_ID. Other than `self`; -1 if neither is found. Copies before
+   1.51 write no PID_FILE.
+   The start time is the kernel's boot time plus how long after boot the
+   process started, and the boot time moves whenever the console sets its
+   clock: matched to the microsecond (before 1.73), the copy that had run
+   for 43 minutes wasn't recognised (2026-10-29), and 13.42 lists no thread
+   names to find it by. */
+#define START_SLACK_US (120ull * 1000000ull)
+
 int
 running_copy(int self) {
   int pid = 0;
@@ -31,9 +44,43 @@ running_copy(int self) {
     if(fscanf(f, "%d %llu", &pid, &start) != 2) pid = 0;
     fclose(f);
   }
-  if(pid > 0 && pid != self && start && plat_process_start(pid) == start) return pid;
+  unsigned long long now = pid > 0 && pid != self && start ? plat_process_start(pid) : 0;
+  if(now && (now > start ? now - start : start - now) <= START_SLACK_US) return pid;
   return plat_find_named_thread(TITLE_ID, self);
 }
+
+/* One request to the copy answering on this console's web port. The reply
+   (headers and body) goes to `out`. 0 on a 200 reply. */
+int
+local_request(const char *method, const char *path, char *out, size_t size) {
+  struct sockaddr_in addr = { .sin_family = AF_INET, .sin_port = htons(WEB_PORT) };
+  struct timeval tv = { .tv_sec = 3 };
+  char req[256];
+  size_t got = 0;
+
+  addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+  int fd = socket(AF_INET, SOCK_STREAM, 0);
+  if(fd < 0) return -1;
+  setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+  setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
+  plat_socket_nosigpipe(fd);
+  int n = snprintf(req, sizeof(req), "%s %s HTTP/1.1\r\nHost: 127.0.0.1\r\nX-PS5-Theme: 1\r\n"
+                   "Content-Length: 0\r\nConnection: close\r\n\r\n", method, path);
+  if(connect(fd, (struct sockaddr *)&addr, sizeof(addr)) || send(fd, req, n, 0) != n) {
+    close(fd);
+    return -1;
+  }
+  while(got + 1 < size) {
+    ssize_t r = recv(fd, out + got, size - 1 - got, 0);
+    if(r < 0 && errno == EINTR) continue;
+    if(r <= 0) break;
+    got += r;
+  }
+  close(fd);
+  out[got] = 0;
+  return strncmp(out, "HTTP/1.1 200", 12) ? -1 : 0;
+}
+
 
 
 /* A mount point that is overlaid only in the home screen's own views: inside

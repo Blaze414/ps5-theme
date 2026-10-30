@@ -36,6 +36,18 @@ The problems met while building this, and how each was solved. Part of the [PS5 
 - ["It forgot my theme after a reboot"](#it-forgot-my-theme-after-a-reboot)
 - [An import that lost the backgrounds](#an-import-that-lost-the-backgrounds)
 - [A home screen that never came back](#a-home-screen-that-never-came-back)
+- [An update copied in half](#an-update-copied-in-half)
+- [A stop tool that couldn't find the plugin](#a-stop-tool-that-couldnt-find-the-plugin)
+- [Ten minutes for a new game's icon](#ten-minutes-for-a-new-games-icon)
+- [A theme too big to apply](#a-theme-too-big-to-apply)
+- [Applies that took half a minute](#applies-that-took-half-a-minute)
+- [A log that filled with one line](#a-log-that-filled-with-one-line)
+- [A library that flickered](#a-library-that-flickered)
+- [Changes that went to the wrong theme](#changes-that-went-to-the-wrong-theme)
+- [A theme that crashed the status](#a-theme-that-crashed-the-status)
+- [Discard that could empty a theme](#discard-that-could-empty-a-theme)
+- [Timers that broke when the clock changed](#timers-that-broke-when-the-clock-changed)
+- [A console that didn't wake (again)](#a-console-that-didnt-wake-again)
 - [Small things that confused people](#small-things-that-confused-people)
 - [Testing without the console](#testing-without-the-console)
 
@@ -706,6 +718,200 @@ report (the plugin no longer spins waiting for it), and a mount of the
 system's over one of the plugin's (only what is exactly the plugin's comes
 off). See [How it works](how-it-works.md#reaching-the-home-screen-through-its-sandbox-views).
 
+## An update copied in half
+
+1.72 didn't take a new version put in the update folder, though the file was
+there and whole. The copy tool (ps5upload) makes a file at its full size
+first and fills it in afterwards; the plugin looked while it was still being
+filled, read no version in it, and remembered "not a plugin" for that size
+and time. **Solution (1.73):** a file changed in the last 5 seconds is never
+remembered; one written lately must look the same at two checks in a row;
+and a copy is started only if it is a whole program (its section table, last
+in the file, is there) with the version the plugin read in it. Uploading as
+`.part` and renaming it when done is the surest way, and the docs say so.
+Confirmed on the console: 1.72 took 1.73 at once.
+
+## A stop tool that couldn't find the plugin
+
+`ps5-theme-stop` said the plugin wasn't running when it was. It found the
+plugin by its process and start time, and on the console the recorded start
+time was an hour off (a time-zone difference between two clocks), while the
+list of threads it fell back to wasn't available. **Solution (1.73):** the
+tool first asks the plugin itself, over its own web port, from the console
+only (`/api/stop`); the process check is the fallback and allows for that
+hour. Confirmed on the console: it stopped the plugin over the web port, and
+the next copy carried on with the theme.
+
+## Ten minutes for a new game's icon
+
+A game installed with the icon style on got its styled icon 10 minutes after
+the install finished, which looked like nothing happening. Worse, PS5SX2's
+installer dated its files an hour ahead of the console's clock, so they never
+looked settled, and a download in progress (`/user/download/<title>`) wasn't
+watched at all. **Solution (1.73):** the styler waits 2 minutes after the
+last change, timed on the plugin's own clock: it notes when a title's files
+last looked different (their size and time, whatever the dates say), not how
+old the dates are; and it watches the download folder too. The console says
+when an install is found and when its icon is styled. Confirmed on the
+console: PS5SX2 styled 15 seconds after the update, one notification.
+
+## A theme too big to apply
+
+With the icon style on 22 games and the 15 system tiles, Yakuza 0 changed
+files in 66 folders, and the plugin applied at most 64: the apply was
+refused, and as it had already taken the previous overlays down, the console
+showed its own look. The message ("could not read Yakuza 0, or it touches
+more than 64 folders") didn't say which. **Solution (1.75):** up to 256
+folders; the limit is in the status, the manager checks a style against it
+before making it, and a refusal says plainly what to do. Confirmed on the
+console: 66 folders, 217 overlays, and rest mode fine.
+
+## Applies that took half a minute
+
+Applying the same theme again took 36 seconds. To see where, 1.77 added the
+time of each step to the apply's line in Activity, and the console's own log
+then showed three causes, each found from the line before:
+
+- **12 seconds waiting on overlays the home screen never lets go of.** It
+  keeps its font and interface folders open while it runs. Taking an overlay
+  down waited 3 seconds for it to be free, and four such waits came with
+  every apply, though the new theme goes straight on top of them anyway.
+  **Solution (1.77):** one try where the next theme goes on; the 3-second
+  wait only where nothing replaces it. They are no longer logged as errors.
+- **30 seconds reading every game's folder.** At each apply, the copy the
+  plugin keeps of a game's folder was compared with the folder, file by
+  file, both ways, to notice a game update. The plugin's overlays are only
+  in the home screen's view, never on the folders themselves, so this ran
+  for every game, every time: about 35 folders, every file read four times.
+  **Solution (1.78):** each file's identity, size and time are compared with
+  what they were when the copy was last found the same; the files are read
+  only when one of them changed. Kept beside the copy's mark rather than in
+  it, as changing the mark would have rebuilt every prepared folder once.
+- **3 seconds writing the list of overlays.** Each of 217 overlays rewrote the
+  whole list and waited for the disk before the next one. **Solution
+  (1.79):** one line added per overlay, without the wait: the list matters
+  only while the console runs, as the overlays go with a restart. A last line
+  cut short by a power loss is never read as one, and the list is written
+  whole again before the next line.
+
+Confirmed on the console: 36.3 s (1.77), 5.7 s (1.78), 2.0 s (1.79), of
+which 1.7 s is the switch itself, when the home screen briefly shows its own
+look.
+
+## A log that filled with one line
+
+After a game was installed again, the system put a view of its folder on top
+of the plugin's overlay. The plugin left it as it was, as it must, but said
+so again every minute: about 5,800 lines a day, which pushed what mattered
+out of the log. **Solution (1.77):** each view is said once per apply; it is
+still looked at every minute, quietly.
+
+## A library that flickered
+
+During an apply the status changes every second, and the library was rebuilt
+whole each time: every card, every picture, the progress bar. The bar jumped
+instead of sliding, pictures flashed, and as every response was sent with
+"never keep this", each rebuild fetched every picture from the console
+again, while it was busy applying. **Solution (1.77):** only what changed is
+drawn again: the banner's text and percentage in place, with the bar sliding
+to its new width; the cards only when the themes or what is applied change.
+Pictures and the page carry a version (an `ETag`), so the browser asks and
+gets "not modified" in a few bytes, and the page is sent compressed (518 KB
+to 151 KB). Checked in a browser against the test rig: through an apply, the
+same cards, pictures and bar, the bar moving 20 % to 80 %, and no picture
+fetched again.
+
+## Changes that went to the wrong theme
+
+Reading the page's code for this, a set of races came out, each needing an
+answer from the console to arrive at the wrong moment:
+
+- **Opening one theme, then another, quickly:** the first could finish
+  loading last and be drawn under the second's address, so a change went to
+  the theme not shown. Now each theme's files are kept only if it is still
+  the one open, and the editor is drawn only for it.
+- **Leaving the editor while a styling run went on:** each step wrote to the
+  theme open at that moment, so the rest of the run went into whichever
+  theme was opened next. Now another theme doesn't open while the page is
+  writing into one (the library and Activity do).
+- **Going back to the library as a theme opened:** the editor appeared over
+  it. **Closing Mix and match while it loaded:** an error. **Closing and
+  opening the Preview quickly:** it could keep the first one's font.
+- **A status request that never answered** (the console went into rest mode
+  as it answered) held every later one back, and the page stopped following
+  the console. It now gives up after 10 seconds.
+
+Each was then tried in a browser against the test rig, and behaves.
+
+## A theme that crashed the status
+
+A theme with folders nested 100 deep (put there by hand, or a broken copy)
+crashed the plugin every time the manager asked for the status, which it does
+every few seconds. Each level of a folder walk kept three full paths on the
+stack, and a web worker has 512 KB of it. The walks were limited to 32
+levels, which wasn't enough where a path can be 4 KB long; copying a theme
+for Duplicate wasn't limited at all. **Solution (1.77):** every walk keeps its
+paths on the heap and stops at a depth deeper than any of the console's
+folders; deleting such a theme deletes nothing and says to use FTP, rather
+than leaving half of it.
+
+## Discard that could empty a theme
+
+A test that runs everything the manager does at once, in an order fixed by a
+seed (see [Testing](testing.md)), found three failures under load in 1.77:
+"no such theme", "could not store the file", and a good picture refused as
+unreadable. Discard puts a theme back by moving its folder aside and the
+saved copy in its place, and for that moment there was no folder: a request
+arriving then found nothing, and an upload being received into the theme's
+folder went aside with it. **Solution (1.77):** uploads are received in a
+folder of their own and moved in under the themes lock once checked; the
+swap is done under a lock of its own, and whatever finds a theme missing
+waits for it and looks again.
+
+The same test, with more seeds, then found a worse one in 1.78: an upload
+made the folders for its file before it was received, outside the lock. Made
+while Discard had the theme aside, they took its place, so neither the saved
+copy nor the edited one could go back: the theme was left empty, its files
+aside. **Solution (1.78):** a theme's folders are made only under the lock,
+as the file is put in place, by the manager and the icon styler alike; and a
+Discard cut off between its two steps by a crash or a power loss is put
+right at the next start. The test then passed 10 times in a row, 12,000
+requests in all.
+
+## Timers that broke when the clock changed
+
+The console sets its own clock from the network after it starts. Waits timed
+on that clock (the update check, the watcher's regular look, a request's
+deadline, the notes during an apply) stalled or ended early when it jumped,
+and the check that takes a theme down when an app keeps crashing compared
+restart times by subtraction, so a jump back made old restarts look recent.
+**Solution (1.77):** waits are timed on a clock that only goes forward; the
+crash check keeps the console's clock, so rest mode counts between restarts,
+but never counts a gap below zero.
+
+## A console that didn't wake (again)
+
+With 1.79, the console went into rest mode and never woke; it had to be
+switched off at its power button. The plugin's log and ShadowMountPlus's
+(which records the console's power states) showed it: going into rest, the
+home screen exited and the plugin took its overlays out as it should; the
+system built the next home screen's sandbox, with nothing of the plugin's in
+it, but that home screen never started, and without it there was nothing to
+wake to. What was different from every rest before: two apps that start with
+the home screen (`NPXS40101` and `NPXS40102`) started twice instead of once.
+The plugin had covered their views the moment the system made them, as it
+always had, while the system was still building their sandboxes and the
+plugin was still taking the old home screen's overlays out. 1.68 had kept the
+plugin out of a home screen's sandbox until it runs; other apps' sandboxes
+had no such rule, and earlier rests had won the race by timing.
+**Solution (1.80):** from the moment the home screen exits until the next one
+runs, nothing goes into any app's sandbox; and a view in another app's
+sandbox is covered only once it has been there 2 seconds, when the system
+has finished making it. The home screen's own views still go in as soon as
+it runs, as it reads the game icons as it starts. Confirmed on the console:
+three rests in a row, the last a minute after the second, each woke, the two
+apps covered 2 to 3 seconds after they appeared.
+
 ## Small things that confused people
 
 Testing on the console turned up:
@@ -727,3 +933,12 @@ Only the console can run the plugin, and only its owner can test on it.
 The real code runs against a fake console tree, with read-only bind mounts
 standing in for nullfs, under AddressSanitizer and UBSan. The same fake
 console serves the manager for trying the page in a desktop browser.
+
+Single tests of single features don't find races: the Discard bugs above
+needed two requests to meet at the wrong moment. **Solution (1.77):** a test
+of every combination (six clients at once, drawing from everything the
+manager does, in an order fixed by a seed so a failure comes back the same),
+checked afterwards against what must always hold: the console showing exactly
+the applied theme, every overlay recorded, nothing left behind. It is run
+under ThreadSanitizer too, and repeated. How the bugs of 1.77 to 1.80 were
+hunted is in [Testing](testing.md#how-the-bugs-were-found).

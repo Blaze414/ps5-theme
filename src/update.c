@@ -39,6 +39,7 @@
 #define PLUGIN_MAX_BYTES (32u << 20)
 #define HEADER_BYTES     29          /* "etaHEN_PLUGIN\0" + 9-char title + "\0" + "x.xx\0" */
 #define RETRY_SECONDS    600         /* before starting the same file again */
+#define QUIET_SECONDS    10          /* unwritten this long: a copy that has finished coming in */
 #define PLDMGR_PAYLOADS  "/data/pldmgr/payloads"   /* PS5 Payload Manager's payloads */
 
 static atomic_int handoff, handoff_pid;
@@ -77,39 +78,6 @@ instance_lock(int wait_ms) {
     if(waited >= wait_ms) return -1;
     usleep(200 * 1000);
   }
-}
-
-
-/* One request to the copy answering on this console's web port. The reply
-   (headers and body) goes to `out`. 0 on a 200 reply. */
-static int
-local_request(const char *method, const char *path, char *out, size_t size) {
-  struct sockaddr_in addr = { .sin_family = AF_INET, .sin_port = htons(WEB_PORT) };
-  struct timeval tv = { .tv_sec = 3 };
-  char req[256];
-  size_t got = 0;
-
-  addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
-  int fd = socket(AF_INET, SOCK_STREAM, 0);
-  if(fd < 0) return -1;
-  setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
-  setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
-  plat_socket_nosigpipe(fd);
-  int n = snprintf(req, sizeof(req), "%s %s HTTP/1.1\r\nHost: 127.0.0.1\r\nX-PS5-Theme: 1\r\n"
-                   "Content-Length: 0\r\nConnection: close\r\n\r\n", method, path);
-  if(connect(fd, (struct sockaddr *)&addr, sizeof(addr)) || send(fd, req, n, 0) != n) {
-    close(fd);
-    return -1;
-  }
-  while(got + 1 < size) {
-    ssize_t r = recv(fd, out + got, size - 1 - got, 0);
-    if(r < 0 && errno == EINTR) continue;
-    if(r <= 0) break;
-    got += r;
-  }
-  close(fd);
-  out[got] = 0;
-  return strncmp(out, "HTTP/1.1 200", 12) ? -1 : 0;
 }
 
 
@@ -236,7 +204,11 @@ marker_version(const uint8_t *buf, size_t n) {
 
 
 /* The version in a plain .elf of ps5-theme (its marker), or -1. Files are
-   remembered by size and time, so each is read once. */
+   remembered by size and time, so each is read once, but not one changed in
+   the last few seconds: a copy still coming in (some tools make the file its
+   full size first and fill it in afterwards, all within the same second)
+   would be remembered as no ps5-theme at all, and never started (1.72). */
+#define FRESH_SECONDS 5
 static int
 elf_file_version(const char *path, const struct stat *st) {
   static struct { char path[PATH_MAX]; off_t size; time_t mtime; int version; } seen[64];
@@ -255,6 +227,8 @@ elf_file_version(const char *path, const struct stat *st) {
   }
   if(fd >= 0) close(fd);
   free(buf);
+  time_t now = time(NULL);
+  if(st->st_mtime > now - FRESH_SECONDS) return version;   /* (or dated ahead of the clock) */
   snprintf(seen[next].path, PATH_MAX, "%s", path);
   seen[next].size = st->st_size;
   seen[next].mtime = st->st_mtime;
@@ -264,10 +238,32 @@ elf_file_version(const char *path, const struct stat *st) {
 }
 
 
-/* Hand a program (the file from `offset` on: after a .plugin header, or a
-   whole .elf) to the ELF loader, which starts it as a new process. */
+/* Whether a program in memory is a whole ELF: its section table, which comes last in the file, there and naming
+   .text. A copy still being filled in (zeros where its end will be) isn't. */
 static int
-start_elf(const char *path, off_t offset, off_t size) {
+elf_whole(const uint8_t *b, size_t n) {
+  if(n < 64 || memcmp(b, "\x7f" "ELF", 4) || b[4] != 2 || b[5] != 1) return 0;
+  uint64_t shoff;
+  uint16_t shentsize, shnum, shstrndx;
+  memcpy(&shoff, b + 0x28, 8);
+  memcpy(&shentsize, b + 0x3a, 2);
+  memcpy(&shnum, b + 0x3c, 2);
+  memcpy(&shstrndx, b + 0x3e, 2);
+  if(shentsize < 64 || !shnum || shstrndx >= shnum || shoff > n || (uint64_t)shnum * shentsize > n - shoff) return 0;
+  uint64_t off, size;
+  memcpy(&off, b + shoff + (uint64_t)shstrndx * shentsize + 0x18, 8);
+  memcpy(&size, b + shoff + (uint64_t)shstrndx * shentsize + 0x20, 8);
+  if(!size || off > n || size > n - off) return 0;
+  return find_bytes(b + off, (size_t)size, ".text", 6) != NULL;   /* (with its terminating zero) */
+}
+
+
+/* Hand a program (the file from `offset` on: after a .plugin header, or a
+   whole .elf) to the ELF loader, which starts it as a new process, once it
+   is checked to be the whole of ps5-theme `version`: never a half-copied
+   file. */
+static int
+start_elf(const char *path, off_t offset, off_t size, int version) {
   struct sockaddr_in addr = { .sin_family = AF_INET, .sin_port = htons(ELF_LOADER_PORT) };
   struct timeval tv = { .tv_sec = 10 };
   uint8_t *buf = malloc(size);
@@ -277,6 +273,11 @@ start_elf(const char *path, off_t offset, off_t size) {
   int in = open(path, O_RDONLY);
   if(!buf || in < 0 || read(in, buf, size) != size) {
     log_err("update: could not read %s", path);
+    goto done;
+  }
+  if(marker_version(buf + offset, (size_t)(size - offset)) != version || !elf_whole(buf + offset, (size_t)(size - offset))) {
+    log_err("update: %s isn't a whole copy of ps5-theme %d.%02d (still being copied?); not started", path, version / 100, version % 100);
+    ret = -2;
     goto done;
   }
   int fd = socket(AF_INET, SOCK_STREAM, 0);
@@ -595,7 +596,8 @@ update_check(void) {
   }
   if(installed_current) tidy_update_dir();     /* its copy may still be what brings this version back after a restart */
   static char tried[PATH_MAX];
-  static time_t tried_at, tried_mtime;
+  static time_t tried_mtime;
+  static long long tried_at;   /* (forward-only clock) */
   candidate_t best = { .version = my_version() };
 
   for(size_t d = 0; d < sizeof(dirs) / sizeof(*dirs); d++) consider_dir(dirs[d], &best);
@@ -606,14 +608,28 @@ update_check(void) {
   time_t best_mtime = best.mtime;
   if(!best_path[0]) return 0;
 
+  /* Started at once if nothing has written to it for a while (at boot, before the theme is put back); one written
+     lately only once it has looked the same at two checks in a row: never a file still being copied in. */
   time_t now = time(NULL);
-  if(!strcmp(best_path, tried) && best_mtime == tried_mtime && now - tried_at < RETRY_SECONDS) return 0;
+  static char looked[PATH_MAX];
+  static off_t looked_size = -1;
+  static time_t looked_mtime;
+  int quiet = now - best_mtime >= QUIET_SECONDS;   /* (a file dated ahead of the clock isn't) */
+  if(!quiet && (strcmp(best_path, looked) || best_size != looked_size || best_mtime != looked_mtime)) {
+    snprintf(looked, sizeof(looked), "%s", best_path);
+    looked_size = best_size;
+    looked_mtime = best_mtime;
+    return 0;
+  }
+  if(!strcmp(best_path, tried) && best_mtime == tried_mtime && mono_seconds() - tried_at < RETRY_SECONDS) return 0;
   snprintf(tried, sizeof(tried), "%s", best_path);
   tried_mtime = best_mtime;
-  tried_at = now;
+  tried_at = mono_seconds();
 
   log_msg("update: found ps5-theme %d.%02d in %s, starting it", best_version / 100, best_version % 100, best_path);
-  if(start_elf(best_path, best_offset, best_size)) {
+  int started = start_elf(best_path, best_offset, best_size, best_version);
+  if(started == -2) return 0;   /* (said in the log; tried again once the file changes) */
+  if(started) {
     notify("ps5-theme: found version %d.%02d but could not start it. Restart the console to update.",
            best_version / 100, best_version % 100);
     return 0;

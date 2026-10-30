@@ -17,6 +17,7 @@
 #include <fcntl.h>
 #include <limits.h>
 #include <poll.h>
+#include <ctype.h>
 #include <pthread.h>
 #include <signal.h>
 #include <stdarg.h>
@@ -40,6 +41,7 @@
 
 
 #define MAX_HEADER   (16 * 1024)
+#define HEADER_SECONDS   10
 #define MAX_RESULTS      300
 #define MAX_RESULTS_ALL  5000
 #define IO_CHUNK     (64 * 1024)
@@ -64,11 +66,23 @@ __asm__(
   "web_icon:\n"
   ".incbin \"assets/icon0.png\"\n"
   "web_icon_end:\n"
+  /* The page and the encoder compressed when the plugin is built (gzip -9 -n): a third of the size to send. */
+  ".balign 16\n"
+  ".global web_index_gz, web_index_gz_end, web_atrac9_gz, web_atrac9_gz_end\n"
+  "web_index_gz:\n"
+  ".incbin \"build-meta/index.html.gz\"\n"
+  "web_index_gz_end:\n"
+  ".balign 16\n"
+  "web_atrac9_gz:\n"
+  ".incbin \"build-meta/atrac9.js.gz\"\n"
+  "web_atrac9_gz_end:\n"
   ".previous\n"
 );
 extern const char web_index[], web_index_end[];
 extern const char web_atrac9[], web_atrac9_end[];
 extern const char web_icon[], web_icon_end[];
+extern const char web_index_gz[], web_index_gz_end[];
+extern const char web_atrac9_gz[], web_atrac9_gz_end[];
 
 
 
@@ -81,6 +95,8 @@ typedef struct request {
   char query[2048];
   long content_length;
   int  has_token;
+  int  gzip_ok;        /* the browser takes gzip (Accept-Encoding) */
+  char if_none_match[96];   /* the version of a response it already has (If-None-Match) */
   char *body;          /* bytes of the body already read with the headers */
   size_t body_len;
 } request_t;
@@ -239,6 +255,59 @@ respond_icon(int fd, const char *ctype, const void *body, size_t len) {
 }
 
 
+/* Whether the browser already has the response this version names: If-None-Match is one version, a list of them,
+   or "*". */
+static int
+not_modified(const request_t *req, const char *etag) {
+  return req->if_none_match[0] && (strstr(req->if_none_match, etag) || !strcmp(req->if_none_match, "*"));
+}
+
+static void
+respond_not_modified(int fd, const char *etag) {
+  char head[256];
+  int n = snprintf(head, sizeof(head),
+                   "HTTP/1.1 304 Not Modified\r\nETag: %s\r\nCache-Control: no-cache\r\nVary: Accept-Encoding\r\n"
+                   "Connection: close\r\n\r\n", etag);
+  send_all(fd, head, n);
+}
+
+/* The page and its encoder: the same bytes until the plugin is updated. Asked again each time it is opened (no-cache),
+   so an updated plugin's page is never an old one, and answered "not modified" in a few bytes while it is the same;
+   sent compressed to a browser that takes it. The version is the plugin's and a checksum of the very bytes. */
+typedef struct { const char *data, *end, *gz, *gz_end; char etag[48]; } asset_t;
+static asset_t page_assets[3];
+static pthread_once_t page_assets_once = PTHREAD_ONCE_INIT;
+
+static void
+page_assets_init(void) {
+  page_assets[0] = (asset_t){ web_index, web_index_end, web_index_gz, web_index_gz_end, "" };
+  page_assets[1] = (asset_t){ web_atrac9, web_atrac9_end, web_atrac9_gz, web_atrac9_gz_end, "" };
+  page_assets[2] = (asset_t){ web_icon, web_icon_end, NULL, NULL, "" };   /* (a PNG: already compressed) */
+  for(int i = 0; i < 3; i++) {
+    asset_t *a = &page_assets[i];
+    snprintf(a->etag, sizeof(a->etag), "\"%s-%08x\"", PLUGIN_VERSION, crc32_update(0, a->data, a->end - a->data));
+  }
+}
+
+static void
+respond_page_asset(request_t *req, int which, const char *ctype) {
+  pthread_once(&page_assets_once, page_assets_init);
+  const asset_t *a = &page_assets[which];
+  if(not_modified(req, a->etag)) return respond_not_modified(req->fd, a->etag);
+  int gz = req->gzip_ok && a->gz && a->gz_end > a->gz;
+  const char *body = gz ? a->gz : a->data;
+  size_t len = gz ? (size_t)(a->gz_end - a->gz) : (size_t)(a->end - a->data);
+  char head[384];
+  int n = snprintf(head, sizeof(head),
+                   "HTTP/1.1 200 OK\r\nContent-Type: %s\r\nContent-Length: %zu\r\n%s"
+                   "Cache-Control: no-cache\r\nETag: %s\r\nVary: Accept-Encoding\r\n"
+                   "X-Content-Type-Options: nosniff\r\nConnection: close\r\n\r\n",
+                   ctype, len, gz ? "Content-Encoding: gzip\r\n" : "", a->etag);
+  if(send_all(req->fd, head, n)) return;
+  send_all(req->fd, body, len);
+}
+
+
 static void
 respond_ok(int fd) {
   static const char ok[] = "{\"ok\":true}";
@@ -260,11 +329,17 @@ content_type(const char *path) {
 }
 
 
+static void swap_wait(void);
+
 static void
 respond_file(request_t *req, const char *path) {
   struct stat st;
   int fd = req->fd;
   int in = open(path, O_RDONLY);
+  if(in < 0 && errno == ENOENT) {   /* (a theme's folder mid-Discard: see swap_lock) */
+    swap_wait();
+    in = open(path, O_RDONLY);
+  }
 
   if(in < 0 || fstat(in, &st) || !S_ISREG(st.st_mode)) {
     if(in >= 0) close(in);
@@ -272,12 +347,22 @@ respond_file(request_t *req, const char *path) {
     return;
   }
 
-  char head[256];
+  /* A file is only ever replaced (a new one renamed over it), never changed in place: its identity, size and time
+     name this version of it. The browser asks again each time it shows it, and an unchanged one is "not modified":
+     a page redrawing its pictures costs a few bytes each, not the pictures. */
+  char etag[80];
+  snprintf(etag, sizeof(etag), "\"%llx-%llx-%llx.%lx\"", (unsigned long long)st.st_ino, (unsigned long long)st.st_size,
+           (unsigned long long)st.st_mtim.tv_sec, (unsigned long)st.st_mtim.tv_nsec);
+  if(not_modified(req, etag)) {
+    close(in);
+    return respond_not_modified(fd, etag);
+  }
+  char head[384];
   int n = snprintf(head, sizeof(head),
                    "HTTP/1.1 200 OK\r\nContent-Type: %s\r\nContent-Length: %lld\r\n"
-                   "Cache-Control: no-store\r\nX-Content-Type-Options: nosniff\r\n"
+                   "Cache-Control: no-cache\r\nETag: %s\r\nX-Content-Type-Options: nosniff\r\n"
                    "Connection: close\r\n\r\n",
-                   content_type(path), (long long)st.st_size);
+                   content_type(path), (long long)st.st_size, etag);
   if(!send_all(fd, head, n)) {
     for(;;) {
       ssize_t r = read(in, req->io, IO_CHUNK);
@@ -345,30 +430,73 @@ asset_path_valid(const char *path) {
 }
 
 
+/* Discard puts a theme back by moving its folder aside and the saved one in its place: for that moment there is no
+   folder. It does that holding this lock to write; whatever finds a theme's folder missing waits for it and looks
+   again (theme_exists, respond_file), and the status lists the themes holding it to read, so no request ever sees a
+   theme gone, or the library a card missing for a moment. Taken after themes_lock where both are. */
+static pthread_rwlock_t swap_lock = PTHREAD_RWLOCK_INITIALIZER;
+static _Thread_local int swap_reading;   /* this thread holds it to read: no swap can be under way, and never again */
+
+static void
+swap_wait(void) {
+  if(swap_reading) return;
+  pthread_rwlock_rdlock(&swap_lock);
+  pthread_rwlock_unlock(&swap_lock);
+}
+
+static void
+swap_read_begin(void) {
+  pthread_rwlock_rdlock(&swap_lock);
+  swap_reading = 1;
+}
+
+static void
+swap_read_end(void) {
+  swap_reading = 0;
+  pthread_rwlock_unlock(&swap_lock);
+}
+
+/* A short read of a theme's contents (its files, choices, icon style, sources): the whole of it before or after a
+   Discard, never half of each. Only routes that answer a little JSON: a large file sent to a slow client would hold
+   a Discard up (respond_file looks again instead). None of them takes themes_lock, so the order holds. */
+static void
+read_theme_route(request_t *req, void (*fn)(request_t *)) {
+  swap_read_begin();
+  fn(req);
+  swap_read_end();
+}
+
 static int
 theme_exists(const char *id) {
   char dir[PATH_MAX];
   if(!theme_name_valid(id)) return 0;
   snprintf(dir, sizeof(dir), "%s/%s", THEMES_DIR, id);
+  if(fs_is_dir(dir)) return 1;
+  swap_wait();
   return fs_is_dir(dir);
 }
 
 
+/* The paths a folder walk builds at each level, taken from the heap: a web worker has 512 KB of stack, and three
+   paths a level on it, 32 levels down, came near that (and past it where a path may be 4 KB long). */
+typedef struct { char dir[PATH_MAX], child_rel[PATH_MAX], child[PATH_MAX], kept[PATH_MAX]; } walk_paths_t;
+
 static void
 list_files(strbuf_t *sb, const char *root, const char *rel, int *first, int *count, int depth) {
-  char dir[PATH_MAX];
   if(depth > 32) return;
-  snprintf(dir, sizeof(dir), "%s%s", root, rel);
+  walk_paths_t *w = malloc(sizeof(*w));
+  if(!w) return;
+  char *dir = w->dir, *child_rel = w->child_rel, *child = w->child;
+  snprintf(dir, PATH_MAX, "%s%s", root, rel);
 
   DIR *d = opendir(dir);
-  if(!d) return;
+  if(!d) { free(w); return; }
   struct dirent *e;
   while((e = readdir(d))) {
     if(!strcmp(e->d_name, ".") || !strcmp(e->d_name, "..")) continue;
-    char child_rel[PATH_MAX], child[PATH_MAX];
     struct stat st;
-    if(snprintf(child_rel, sizeof(child_rel), "%s/%s", rel, e->d_name) >= (int)sizeof(child_rel)) continue;
-    snprintf(child, sizeof(child), "%s%s", root, child_rel);
+    if(snprintf(child_rel, PATH_MAX, "%s/%s", rel, e->d_name) >= PATH_MAX) continue;
+    snprintf(child, PATH_MAX, "%s%s", root, child_rel);
     if(lstat(child, &st)) continue;
     if(S_ISDIR(st.st_mode)) {
       list_files(sb, root, child_rel, first, count, depth + 1);
@@ -386,25 +514,27 @@ list_files(strbuf_t *sb, const char *root, const char *rel, int *first, int *cou
     }
   }
   closedir(d);
+  free(w);
 }
 
 
 /* Up to `max` image paths from a theme, for the library card preview. */
 static void
 preview_images(strbuf_t *sb, const char *root, const char *rel, int *n, int max, int depth) {
-  char dir[PATH_MAX];
   if(depth > 32) return;
-  snprintf(dir, sizeof(dir), "%s%s", root, rel);
+  walk_paths_t *w = malloc(sizeof(*w));
+  if(!w) return;
+  char *dir = w->dir, *child_rel = w->child_rel, *child = w->child;
+  snprintf(dir, PATH_MAX, "%s%s", root, rel);
 
   DIR *d = opendir(dir);
-  if(!d) return;
+  if(!d) { free(w); return; }
   struct dirent *e;
   while(*n < max && (e = readdir(d))) {
     if(!strcmp(e->d_name, ".") || !strcmp(e->d_name, "..")) continue;
-    char child_rel[PATH_MAX], child[PATH_MAX];
     struct stat st;
-    if(snprintf(child_rel, sizeof(child_rel), "%s/%s", rel, e->d_name) >= (int)sizeof(child_rel)) continue;
-    snprintf(child, sizeof(child), "%s%s", root, child_rel);
+    if(snprintf(child_rel, PATH_MAX, "%s/%s", rel, e->d_name) >= PATH_MAX) continue;
+    snprintf(child, PATH_MAX, "%s%s", root, child_rel);
     if(lstat(child, &st)) continue;
     if(S_ISDIR(st.st_mode)) {
       preview_images(sb, root, child_rel, n, max, depth + 1);
@@ -415,6 +545,7 @@ preview_images(strbuf_t *sb, const char *root, const char *rel, int *n, int max,
     }
   }
   closedir(d);
+  free(w);
 }
 
 
@@ -537,12 +668,20 @@ api_status(request_t *req) {
   }
   SB_LIT(&sb, ",\"result\":");
   sb_json_str(&sb, result);
+  /* Changes when a game or app is installed or removed, or the icon styler did something: an open page reads its
+     titles and the theme again. */
+  char stamp[48];
+  titles_stamp(stamp, sizeof(stamp));
+  SB_LIT(&sb, ",\"titles\":");
+  sb_json_str(&sb, stamp);
+  sb_printf(&sb, ",\"maxFolders\":%d", max_theme_folders());
   /* How much a theme can still take, keeping the console's share free: the page checks a file against it before
      sending it (a refusal after the start of a large upload can reach the browser as a dropped connection). */
   uint64_t avail = plat_free_bytes(BASE_DIR);
   if(avail != UINT64_MAX) sb_printf(&sb, ",\"room\":%llu", (unsigned long long)(avail > FS_RESERVE ? avail - FS_RESERVE : 0));
   SB_LIT(&sb, ",\"themes\":[");
 
+  swap_read_begin();   /* (never a theme mid-Discard: see swap_lock) */
   DIR *d = opendir(THEMES_DIR);
   int first = 1;
   if(d) {
@@ -601,6 +740,7 @@ api_status(request_t *req) {
     }
     closedir(d);
   }
+  swap_read_end();
   SB_LIT(&sb, "]}");
   respond_json(req->fd, 200, &sb);
 }
@@ -886,6 +1026,10 @@ api_delete_theme(request_t *req) {
   if(!rc) drop_snapshot(id);
   themes_unlock();
 
+  if(rc && errno == ELOOP) {
+    return respond_error(req->fd, 500, "it holds folders nested deeper than any of the console's, which the plugin "
+                                       "doesn't go into: delete it over FTP");
+  }
   if(rc) return respond_error(req->fd, 500, "delete failed");
   log_msg("deleted theme %s", id);
   respond_ok(req->fd);
@@ -1024,12 +1168,32 @@ api_procs(request_t *req) {
 }
 
 
+static int style_title_ok(const char *t);
+
 static void
 api_apply(request_t *req) {
-  char id[128];
+  char id[128], list[400];
 
   get_param(req->query, "id", id, sizeof(id));
   if(strcmp(id, "none") && !theme_exists(id)) return respond_error(req->fd, 404, "no such theme");
+  /* The page styled new games' icons by itself and applies the theme again for them: said once on the console when
+     it is done, by their names, as the plugin's own styling is (a game may be open). */
+  if(strcmp(id, "none") && !get_param(req->query, "styled", list, sizeof(list)) && list[0]) {
+    char titles[32][16];
+    int n = 0;
+    for(char *t = list, *next; t && *t; t = next) {
+      next = strchr(t, ',');
+      if(next) *next++ = 0;
+      if(!style_title_ok(t) || n >= 32) return respond_error(req->fd, 400, "styled: up to 32 title IDs, such as PPSA01234,CUSA09999");
+      snprintf(titles[n++], sizeof(titles[0]), "%s", t);
+    }
+    char note[1024];
+    autostyle_note(note, sizeof(note), (const char (*)[16])titles, n, NULL, 0);
+    if(!reapply_quietly(id, note)) {
+      log_msg("theme %s: applied again for %d icon(s) the manager styled", id, n);
+      return respond_ok(req->fd);
+    }
+  }
   if(write_active(id)) return respond_error(req->fd, 500, "could not save the selection");
   log_msg("selection changed to %s", id);
   respond_ok(req->fd);
@@ -1048,7 +1212,11 @@ static atomic_uint upload_seq;
 
 static void
 part_name(char *out, size_t size, const char *dst) {
-  snprintf(out, size, "%s.%u.part", dst, atomic_fetch_add(&upload_seq, 1));
+  /* Received in a folder of its own, outside every theme: a theme's folder can be moved aside meanwhile (Discard),
+     copied (Duplicate, the snapshot Discard goes back to) or deleted, and an upload under way must neither go with
+     it nor fail for it. Moved into the theme, under its lock, once it has passed its checks (place_upload). */
+  const char *base = strrchr(dst, '/');
+  snprintf(out, size, "%s/%u-%s.part", INCOMING_DIR, atomic_fetch_add(&upload_seq, 1), base ? base + 1 : dst);
 }
 
 
@@ -1062,7 +1230,7 @@ receive_upload(request_t *req, const char *part, uint32_t *crc_out, char crc_hex
     respond_error(req->fd, 507, STORAGE_FULL);
     return -1;
   }
-  int out = fs_open_write(part);
+  int out = fs_mkdirs(INCOMING_DIR) ? -1 : fs_open_write(part);
   if(out < 0) {
     respond_error(req->fd, 500, "could not open file");
     return -1;
@@ -1155,8 +1323,14 @@ static int
 place_upload(request_t *req, const char *id, const char *part, const char *dst, uint32_t crc,
              uint64_t *size, int keep, uint64_t length) {
   uint32_t stored = 0;
+  /* The destination's folders are made only here, under the themes lock: a folder of a theme made outside it could
+     be made while Discard has moved the theme aside, and Discard couldn't then put either copy back (1.77's test of
+     every combination found it, with the theme's files left aside and the theme empty). */
+  char dir[PATH_MAX];
+  snprintf(dir, sizeof(dir), "%s", dst);
+  if(strrchr(dir, '/')) *strrchr(dir, '/') = 0;
   themes_lock();
-  int moved = theme_exists(id) && (!keep || !keep_snapshot(id)) && !fs_rename(part, dst);
+  int moved = theme_exists(id) && (!keep || !keep_snapshot(id)) && !fs_mkdirs(dir) && !fs_rename(part, dst);
   int placed = moved && !fs_crc32_file(dst, &stored, size) && stored == crc && *size == length;
   if(moved && !placed) fs_unlink(dst);   /* it didn't read back as sent: never leave it in the theme */
   themes_unlock();
@@ -1172,7 +1346,7 @@ place_upload(request_t *req, const char *id, const char *part, const char *dst, 
 /* Receive, verify, then atomically place one replacement file. */
 static void
 api_put_file(request_t *req) {
-  char id[128], asset[512], dst[PATH_MAX], part[PATH_MAX + 24], dir[PATH_MAX], msg[256], crc_hex[9];
+  char id[128], asset[512], dst[PATH_MAX], part[PATH_MAX + 24], msg[256], crc_hex[9];
   uint32_t crc;
   uint64_t size = 0;
 
@@ -1190,10 +1364,7 @@ api_put_file(request_t *req) {
   }
   if(theme_file_path(id, asset, dst, sizeof(dst))) return respond_error(req->fd, 400, "path too long");
 
-  snprintf(dir, sizeof(dir), "%s", dst);
-  *strrchr(dir, '/') = 0;
-  part_name(part, sizeof(part), dst);
-  if(fs_mkdirs(dir)) return respond_error(req->fd, 500, "could not create folder");
+  part_name(part, sizeof(part), dst);   /* (its folder is made as it is placed: see place_upload) */
   if(receive_upload(req, part, &crc, crc_hex)) return;
 
   /* Verification 2: the asset policy against the stock file (images: same
@@ -1504,21 +1675,35 @@ api_put_choices(request_t *req) {
 
 
 /* The shown picture, or the one named by `kind`. */
+/* Whether the request comes from a process on the console itself. */
+static int
+from_console(request_t *req) {
+  struct sockaddr_in peer = {0};
+  socklen_t len = sizeof(peer);
+  return !getpeername(req->fd, (struct sockaddr *)&peer, &len) && peer.sin_family == AF_INET &&
+         ntohl(peer.sin_addr.s_addr) == INADDR_LOOPBACK;
+}
+
 /* A newer copy of the plugin asks this one to step aside. Only a process on
    the console itself may ask. */
 static void
 api_handoff(request_t *req) {
-  struct sockaddr_in peer;
-  socklen_t len = sizeof(peer);
-  if(getpeername(req->fd, (struct sockaddr *)&peer, &len) || peer.sin_family != AF_INET ||
-     ntohl(peer.sin_addr.s_addr) != INADDR_LOOPBACK) {
-    return respond_error(req->fd, 403, "only the console itself can ask for this");
-  }
+  if(!from_console(req)) return respond_error(req->fd, 403, "only the console itself can ask for this");
   char pid[16] = "";
   get_param(req->query, "pid", pid, sizeof(pid));
   log_msg("a newer copy of the plugin asked to take over");
   respond_ok(req->fd);
   request_handoff(atoi(pid));
+}
+
+/* ps5-theme-stop asks this copy to stop and leave the theme, as its signal (SIGUSR2) does, here: no looking for the
+   process, which the console doesn't always allow (since 1.73). Only a process on the console itself may ask. */
+static void
+api_stop(request_t *req) {
+  if(!from_console(req)) return respond_error(req->fd, 403, "only the console itself can ask for this");
+  log_msg("ps5-theme-stop asked this copy to stop");
+  respond_ok(req->fd);
+  request_stop();
 }
 
 
@@ -1706,7 +1891,10 @@ api_get_preview(request_t *req) {
    styler reads them, and lists the titles it styled in made.txt, which the page reads back.
 
    own/<title>.png: for an icon you changed by hand and then styled, your picture as it was, so styling again puts
-   it in the shape again (never a styled icon inside another), and removing the style puts it back. */
+   it in the shape again (never a styled icon inside another), and removing the style puts it back.
+
+   styled.txt: the titles the page's style made (installed or not): one installed again later gets the style as it
+   is then, by the plugin (autostyle.c). */
 #define STYLE_TEMPLATE_MAX (8u << 20)
 #define STYLE_KNOWN_MAX    (128u << 10)
 #define STYLE_OWN_MAX      4096   /* pictures listed */
@@ -1726,26 +1914,24 @@ style_path(const char *id, const char *file, char *out, size_t size) {
 
 static void
 api_put_icon_style(request_t *req) {
-  char id[128], part_kind[16], title[16], dir[PATH_MAX], dst[PATH_MAX], part[PATH_MAX + 24], crc_hex[9];
+  char id[128], part_kind[16], title[16], dst[PATH_MAX], part[PATH_MAX + 24], crc_hex[9];
   uint32_t crc;
   uint64_t size = 0;
   get_param(req->query, "id", id, sizeof(id));
   get_param(req->query, "part", part_kind, sizeof(part_kind));
   get_param(req->query, "title", title, sizeof(title));
   if(!theme_exists(id)) return respond_error(req->fd, 404, "no such theme");
-  int known = !strcmp(part_kind, "known"), own = !strcmp(part_kind, "own");
+  int known = !strcmp(part_kind, "known") || !strcmp(part_kind, "styled"), own = !strcmp(part_kind, "own");
   int picture = !strcmp(part_kind, "base") || !strcmp(part_kind, "mask");
-  if(!known && !picture && !own) return respond_error(req->fd, 400, "part: base, mask, known or own");
+  if(!known && !picture && !own) return respond_error(req->fd, 400, "part: base, mask, known, styled or own");
   if(own && !style_title_ok(title)) return respond_error(req->fd, 400, "title must be a title ID such as PPSA01234");
   if(req->content_length <= 0) return respond_error(req->fd, 400, "empty upload");
   if((uint64_t)req->content_length > (known ? STYLE_KNOWN_MAX : STYLE_TEMPLATE_MAX)) return respond_error(req->fd, 413, "too large");
-  style_path(id, own ? "own" : "", dir, sizeof(dir));
   char name[32];
   if(own) snprintf(name, sizeof(name), "own/%s.png", title);
   else snprintf(name, sizeof(name), "%s.%s", part_kind, known ? "txt" : "png");
   style_path(id, name, dst, sizeof(dst));
-  if(fs_mkdirs(dir)) return respond_error(req->fd, 500, "could not create folder");
-  part_name(part, sizeof(part), dst);
+  part_name(part, sizeof(part), dst);   /* (its folder is made as it is placed: see place_upload) */
   if(receive_upload(req, part, &crc, crc_hex)) return;
   size_t len = 0;
   uint8_t *b = NULL;
@@ -1785,12 +1971,62 @@ api_put_icon_style(request_t *req) {
   respond_json(req->fd, 200, &sb);
 }
 
+/* A styling run in the manager, said on the console as an apply is (since 1.75), so whoever is at the TV knows what
+   is going on: as it starts, as it goes (at most once every STYLE_NOTE_SECONDS: notifications queue up and each
+   stays a few seconds) and as it ends. The words are made here from counts and title IDs, never taken from the
+   request. A run for games installed since (`auto`) ends with the apply that follows, which says it. */
+#define STYLE_NOTE_SECONDS 8
+static atomic_llong style_noted;   /* when the last of a run's notes was said */
+
+static void
+style_note(request_t *req, const char *note) {
+  char v[16], title[16] = "", name[96] = "";
+  int n = 0, total = 0, failed = 0, is_auto = 0;
+  if(!get_param(req->query, "n", v, sizeof(v))) n = atoi(v);
+  if(!get_param(req->query, "total", v, sizeof(v))) total = atoi(v);
+  if(!get_param(req->query, "failed", v, sizeof(v))) failed = atoi(v);
+  if(!get_param(req->query, "auto", v, sizeof(v))) is_auto = !strcmp(v, "1");
+  if(!get_param(req->query, "title", title, sizeof(title)) && title[0] && !style_title_ok(title)) {
+    return respond_error(req->fd, 400, "title must be a title ID such as PPSA01234");
+  }
+  if(total < 1 || total > 100000 || n < 0 || n > total || failed < 0 || failed > total) {
+    return respond_error(req->fd, 400, "n, total and failed: counts, n and failed at most total");
+  }
+  if(title[0]) title_name(title, name, sizeof(name));
+  long long now = mono_seconds();
+  if(!strcmp(note, "start")) {
+    atomic_store(&style_noted, now);
+    if(is_auto && total == 1 && name[0]) notify("ps5-theme: styling the icon of %s, installed since the theme's icon style was used...", name);
+    else if(is_auto) notify("ps5-theme: styling the icons of %d games and apps installed since the theme's icon style was used...", total);
+    else notify("ps5-theme: styling %d icon%s in the manager...", total, total == 1 ? "" : "s");
+  } else if(!strcmp(note, "step")) {
+    long long last = atomic_load(&style_noted);
+    if(now - last < STYLE_NOTE_SECONDS || !atomic_compare_exchange_strong(&style_noted, &last, now)) return respond_ok(req->fd);
+    notify("ps5-theme: styling icons: %d of %d...", n, total);
+  } else if(!strcmp(note, "done")) {
+    atomic_store(&style_noted, 0);
+    int made = n - failed;
+    if(is_auto && !failed && made) return respond_ok(req->fd);   /* (the apply that follows says it, by name) */
+    if(!made) notify("ps5-theme: no icon could be styled. See the manager.");
+    else notify("ps5-theme: %d icon%s styled%s%s.%s", made, made == 1 ? "" : "s", failed ? ", " : "",
+                failed ? (failed == 1 ? "1 could not be" : "some could not be") : "",
+                is_auto ? "" : " Apply the theme to see them.");
+  } else if(!strcmp(note, "stopped")) {
+    atomic_store(&style_noted, 0);
+    notify("ps5-theme: styling stopped: %d of %d icons styled; those keep the style.", n - failed, total);
+  } else {
+    return respond_error(req->fd, 400, "note: start, step, done or stopped");
+  }
+  respond_ok(req->fd);
+}
+
 static void
 api_post_icon_style(request_t *req) {
-  char id[128], dir[PATH_MAX], path[PATH_MAX], line[64], forget[16];
+  char id[128], dir[PATH_MAX], path[PATH_MAX], line[64], forget[16], note[16];
   int on, has_on, scale, has_scale, clear, has_clear;
   get_param(req->query, "id", id, sizeof(id));
   if(!theme_exists(id)) return respond_error(req->fd, 404, "no such theme");
+  if(!get_param(req->query, "note", note, sizeof(note)) && note[0]) return style_note(req, note);
   if(!get_param(req->query, "forget", forget, sizeof(forget)) && forget[0]) {   /* one title's kept picture: you changed its icon */
     if(!style_title_ok(forget)) return respond_error(req->fd, 400, "forget must be a title ID such as PPSA01234");
     char name[32];
@@ -1814,11 +2050,31 @@ api_post_icon_style(request_t *req) {
   if(!has_scale) scale = !read_ini_value(path, "scale", cur, sizeof(cur)) ? atoi(cur) : 72;
   int n = snprintf(line, sizeof(line), "auto=%d\nscale=%d\n", on, scale);
   int rc = fs_mkdirs(dir) || fs_write_file(path, line, (size_t)n);
-  if(!rc && has_clear && clear) {   /* the list of titles styled, and your pictures kept for them (back in the theme now) */
+  if(!rc && has_clear && clear) {
+    /* The lists of titles styled, and your pictures kept for them: back in the theme now, except for a title the
+       theme still has an icon for (one not installed when the style was removed, whose picture can only go back
+       once it is): its picture stays until then. */
     style_path(id, "made.txt", path, sizeof(path));
     if(!access(path, F_OK)) rc = fs_unlink(path);
+    style_path(id, "styled.txt", path, sizeof(path));
+    if(!rc && !access(path, F_OK)) rc = fs_unlink(path);
     style_path(id, "own", path, sizeof(path));
-    if(!rc && fs_is_dir(path)) rc = fs_rm_rf_under(dir, path);
+    DIR *d = !rc ? opendir(path) : NULL;
+    struct dirent *e;
+    int left = 0;
+    while(d && (e = readdir(d))) {
+      char t[10], icon[PATH_MAX], pic[PATH_MAX];
+      size_t n = strlen(e->d_name);
+      if(n != 13 || strcmp(e->d_name + 9, ".png")) { left += e->d_name[0] != '.'; continue; }
+      memcpy(t, e->d_name, 9);
+      t[9] = 0;
+      snprintf(icon, sizeof(icon), "%s/%s/files" APPMETA_DIR "/%s/icon0.png", THEMES_DIR, id, t);
+      snprintf(pic, sizeof(pic), "%s/%s", path, e->d_name);
+      if(style_title_ok(t) && !access(icon, F_OK)) { left++; continue; }
+      if(fs_unlink(pic)) rc = -1;
+    }
+    if(d) closedir(d);
+    if(!rc && !left && fs_is_dir(path)) rc = fs_rmdir(path);
   }
   themes_unlock();
   if(rc) return respond_error(req->fd, 500, "could not keep the icon style");
@@ -1838,16 +2094,25 @@ api_get_icon_style(request_t *req) {
     style_path(id, name, path, sizeof(path));
     return respond_file(req, path);
   }
+  if(!get_param(req->query, "part", title, sizeof(title)) && title[0]) {   /* the template as kept: the page tells a styled icon by it */
+    if(strcmp(title, "base") && strcmp(title, "mask")) return respond_error(req->fd, 400, "part: base or mask");
+    char name[16];
+    snprintf(name, sizeof(name), "%s.png", title);
+    style_path(id, name, path, sizeof(path));
+    return respond_file(req, path);
+  }
   style_path(id, "style.ini", path, sizeof(path));
   int on = !read_ini_value(path, "auto", cur, sizeof(cur)) && !strcmp(cur, "1");
   int scale = !read_ini_value(path, "scale", cur, sizeof(cur)) ? atoi(cur) : 0;
-  char base[PATH_MAX], mask[PATH_MAX], known[PATH_MAX];
+  char base[PATH_MAX], mask[PATH_MAX], known[PATH_MAX], styled[PATH_MAX];
   style_path(id, "base.png", base, sizeof(base));
   style_path(id, "mask.png", mask, sizeof(mask));
   style_path(id, "known.txt", known, sizeof(known));
+  style_path(id, "styled.txt", styled, sizeof(styled));
   strbuf_t sb = {0};   /* the template is whole with all three: the styler uses none of them without the others */
-  sb_printf(&sb, "{\"auto\":%s,\"scale\":%d,\"template\":%s,\"made\":[", on ? "true" : "false", scale,
-            !access(base, F_OK) && !access(mask, F_OK) && !access(known, F_OK) ? "true" : "false");
+  sb_printf(&sb, "{\"auto\":%s,\"scale\":%d,\"template\":%s,\"styledList\":%s,\"made\":[", on ? "true" : "false", scale,
+            !access(base, F_OK) && !access(mask, F_OK) && !access(known, F_OK) ? "true" : "false",
+            !access(styled, F_OK) ? "true" : "false");
   style_path(id, "made.txt", path, sizeof(path));
   FILE *f = fopen(path, "r");
   for(int first = 1, k = 0; f && k < 4096 && fgets(line, sizeof(line), f); k++) {
@@ -1875,7 +2140,21 @@ api_get_icon_style(request_t *req) {
     sb_json_str(&sb, t);
   }
   if(d) closedir(d);
-  SB_LIT(&sb, "]}");
+  /* Titles still installing (something in their folders changed lately): seconds until they count as installed.
+     The page styles none of them, as the plugin doesn't, until then. */
+  sb_printf(&sb, "],\"settle\":%d,\"waiting\":{", autostyle_settle());
+  d = opendir(APPMETA_DIR);
+  for(int first = 1, k = 0; d && k < STYLE_OWN_MAX && (e = readdir(d)); ) {
+    int left = autostyle_wait(e->d_name);
+    if(left <= 0) continue;
+    sb_printf(&sb, "%s", first ? "" : ",");
+    first = 0;
+    k++;
+    sb_json_str(&sb, e->d_name);
+    sb_printf(&sb, ":%d", left);
+  }
+  if(d) closedir(d);
+  SB_LIT(&sb, "}}");
   respond_json(req->fd, 200, &sb);
 }
 
@@ -2020,12 +2299,14 @@ api_discard_theme(request_t *req) {
   snapshot_path(id, snap, sizeof(snap));
   snprintf(dir, sizeof(dir), "%s/%s", THEMES_DIR, id);
   snprintf(trash, sizeof(trash), "%s.trash", snap);
-  fs_rm_rf_under(SNAP_DIR, trash);
+  fs_rm_rf_under(SNAP_DIR, trash);   /* (one left by a Discard that finished: the theme's folder is there) */
+  pthread_rwlock_wrlock(&swap_lock);
   int rc = fs_rename(dir, trash);
   if(!rc && fs_rename(snap, dir)) {
-    fs_rename(trash, dir);   /* put the edited theme back rather than lose it */
     rc = -1;
+    if(fs_rename(trash, dir)) log_err("theme %s: discarding failed and its files are in %s; they go back at the next start", id, trash);
   }
+  pthread_rwlock_unlock(&swap_lock);
   if(!rc) fs_rm_rf_under(SNAP_DIR, trash);
   /* The console needs the theme again only if the files put back aren't the ones it shows:
      not after a change to choices, music settings or pictures it doesn't use, or one never applied. */
@@ -2040,6 +2321,32 @@ api_discard_theme(request_t *req) {
   strbuf_t sb = {0};
   sb_printf(&sb, "{\"ok\":true,\"reapplied\":%s}", again ? "true" : "false");
   respond_json(req->fd, 200, &sb);
+}
+
+
+/* At start: a Discard cut off between its two steps (a crash or a power loss) left the theme's own files aside as
+   <snapshot>.trash and no folder in its place. They go back, so the theme is never lost; a .trash beside a theme that
+   is there is a Discard's leftover, and goes. Main thread, before the web server starts. */
+void
+snapshots_recover(void) {
+  DIR *d = opendir(SNAP_DIR);
+  if(!d) return;
+  struct dirent *e;
+  while((e = readdir(d))) {
+    size_t n = strlen(e->d_name);
+    if(n <= 6 || strcmp(e->d_name + n - 6, ".trash")) continue;
+    char id[128], trash[PATH_MAX], dir[PATH_MAX];
+    if(n - 6 >= sizeof(id)) continue;
+    memcpy(id, e->d_name, n - 6);
+    id[n - 6] = 0;
+    if(!theme_name_valid(id)) continue;
+    snprintf(trash, sizeof(trash), "%s/%s", SNAP_DIR, e->d_name);
+    snprintf(dir, sizeof(dir), "%s/%s", THEMES_DIR, id);
+    if(fs_is_dir(dir)) fs_rm_rf_under(SNAP_DIR, trash);
+    else if(!fs_rename(trash, dir)) log_msg("theme %s: put back as it was before a Discard that was cut off", id);
+    else log_err("theme %s: could not put back %s", id, trash);
+  }
+  closedir(d);
 }
 
 
@@ -2058,10 +2365,12 @@ api_duplicate_theme(request_t *req) {
   snprintf(dst, sizeof(dst), "%s/%s", THEMES_DIR, new_id);
   themes_lock();
   int rc = fs_is_dir(dst) ? 1 : fs_link_tree(src, dst);
+  int full = rc < 0 && errno == ENOSPC;
   if(!rc && name[0]) rc = write_theme_ini(new_id, name, NULL, NULL);
   if(rc < 0) fs_rm_rf_under(THEMES_DIR, dst);
   themes_unlock();
   if(rc > 0) return respond_error(req->fd, 409, "a theme with that id exists");
+  if(full) return respond_error(req->fd, 507, STORAGE_FULL);
   if(rc) return respond_error(req->fd, 500, "could not duplicate the theme");
   log_msg("duplicated theme %s as %s", id, new_id);
   respond_ok(req->fd);
@@ -2186,10 +2495,7 @@ api_put_source(request_t *req) {
   if(req->content_length <= 0) return respond_error(req->fd, 400, "empty upload");
   if((uint64_t)req->content_length > SOURCE_MAX_BYTES) return respond_error(req->fd, 413, "the picture is larger than 32 MB");
   if(source_path(id, asset, dst, sizeof(dst))) return respond_error(req->fd, 400, "path too long");
-  snprintf(dir, sizeof(dir), "%s", dst);
-  *strrchr(dir, '/') = 0;
-  part_name(part, sizeof(part), dst);
-  if(fs_mkdirs(dir)) return respond_error(req->fd, 500, "could not create folder");
+  part_name(part, sizeof(part), dst);   /* (its folder is made as it is placed: see place_upload) */
   if(receive_upload(req, part, &crc, crc_hex)) return;
   if(image_probe(part, &info) || !info.width || !info.height || info.width > SOURCE_MAX_SIDE || info.height > SOURCE_MAX_SIDE) {
     fs_unlink(part);
@@ -2222,28 +2528,30 @@ api_get_source(request_t *req) {
 /* The theme's files (paths as the page lists them) whose original picture is kept. */
 static void
 sources_in(strbuf_t *sb, const char *id, const char *root, const char *rel, int *first, int depth) {
-  char dir[PATH_MAX];
   if(depth > 32) return;
-  snprintf(dir, sizeof(dir), "%s%s", root, rel);
+  walk_paths_t *w = malloc(sizeof(*w));
+  if(!w) return;
+  char *dir = w->dir, *child_rel = w->child_rel, *child = w->child, *kept = w->kept;
+  snprintf(dir, PATH_MAX, "%s%s", root, rel);
   DIR *d = opendir(dir);
-  if(!d) return;
+  if(!d) { free(w); return; }
   struct dirent *e;
   while((e = readdir(d))) {
     if(!strcmp(e->d_name, ".") || !strcmp(e->d_name, "..")) continue;
-    char child_rel[PATH_MAX], child[PATH_MAX], kept[PATH_MAX];
     struct stat st;
-    if(snprintf(child_rel, sizeof(child_rel), "%s/%s", rel, e->d_name) >= (int)sizeof(child_rel)) continue;
-    snprintf(child, sizeof(child), "%s%s", root, child_rel);
+    if(snprintf(child_rel, PATH_MAX, "%s/%s", rel, e->d_name) >= PATH_MAX) continue;
+    snprintf(child, PATH_MAX, "%s%s", root, child_rel);
     if(lstat(child, &st)) continue;
     if(S_ISDIR(st.st_mode)) sources_in(sb, id, root, child_rel, first, depth + 1);
     else if(S_ISREG(st.st_mode) && asset_path_valid(child_rel) && source_kind_ok(child_rel) &&
-            !source_path(id, child_rel, kept, sizeof(kept)) && !access(kept, F_OK)) {
+            !source_path(id, child_rel, kept, PATH_MAX) && !access(kept, F_OK)) {
       if(!*first) SB_LIT(sb, ",");
       *first = 0;
       sb_json_str(sb, child_rel);
     }
   }
   closedir(d);
+  free(w);
 }
 
 
@@ -2707,36 +3015,36 @@ route(request_t *req) {
   int put = !strcmp(m, "PUT"), del = !strcmp(m, "DELETE");
 
   if(get && (!strcmp(p, "/") || !strcmp(p, "/index.html"))) {
-    respond(req->fd, 200, "text/html; charset=utf-8", web_index, web_index_end - web_index);
+    respond_page_asset(req, 0, "text/html; charset=utf-8");
     return;
   }
   if(get && !strcmp(p, "/atrac9.js")) {
-    respond(req->fd, 200, "text/javascript; charset=utf-8", web_atrac9, web_atrac9_end - web_atrac9);
+    respond_page_asset(req, 1, "text/javascript; charset=utf-8");
     return;
   }
   if(get && !strcmp(p, "/icon.png")) {
-    respond(req->fd, 200, "image/png", web_icon, web_icon_end - web_icon);
+    respond_page_asset(req, 2, "image/png");
     return;
   }
   if(get && !strcmp(p, "/api/status"))      return api_status(req);
   if(get && !strcmp(p, "/api/assets"))      return api_assets(req);
   if(get && !strcmp(p, "/api/asset"))       return api_get_asset(req);
   if(get && !strcmp(p, "/api/ui-icon"))     return api_ui_icon(req);
-  if(get && !strcmp(p, "/api/theme/icon-style")) return api_get_icon_style(req);
+  if(get && !strcmp(p, "/api/theme/icon-style")) return read_theme_route(req, api_get_icon_style);
   if(get && !strcmp(p, "/api/asset/picture")) return api_texture_picture(req);
   if(get && !strcmp(p, "/api/asset/texture")) return api_texture(req);
   if(get && !strcmp(p, "/api/asset/audio"))  return api_audio(req);
-  if(get && !strcmp(p, "/api/theme/files")) return api_theme_files(req);
+  if(get && !strcmp(p, "/api/theme/files")) return read_theme_route(req, api_theme_files);
   if(get && !strcmp(p, "/api/theme/file"))  return api_get_file(req);
-  if(get && !strcmp(p, "/api/theme/check")) return api_check_file(req);
+  if(get && !strcmp(p, "/api/theme/check")) return read_theme_route(req, api_check_file);
   if(get && !strcmp(p, "/api/theme/source")) return api_get_source(req);
-  if(get && !strcmp(p, "/api/theme/sources")) return api_sources(req);
+  if(get && !strcmp(p, "/api/theme/sources")) return read_theme_route(req, api_sources);
   if(get && !strcmp(p, "/api/log"))         return api_log(req);
   if(get && !strcmp(p, "/api/crashes"))     return api_crashes(req);
   if(get && !strcmp(p, "/api/crash"))       return api_crash(req);
   if(get && !strcmp(p, "/api/theme/music")) return api_get_music(req);
   if(get && !strcmp(p, "/api/theme/preview")) return api_get_preview(req);
-  if(get && !strcmp(p, "/api/theme/choices")) return api_get_choices(req);
+  if(get && !strcmp(p, "/api/theme/choices")) return read_theme_route(req, api_get_choices);
   if(get && !strcmp(p, "/api/mounts"))      return api_mounts(req);
   if(get && !strcmp(p, "/api/title/where")) return api_title_where(req);
   if(get && !strcmp(p, "/api/diag/watch")) return api_watch(req);
@@ -2764,6 +3072,7 @@ route(request_t *req) {
   if(post && !strcmp(p, "/api/themes/mix")) return api_mix_themes(req);
   if(post && !strcmp(p, "/api/theme/save")) return api_save_theme(req);
   if(post && !strcmp(p, "/api/handoff"))     return api_handoff(req);
+  if(post && !strcmp(p, "/api/stop"))        return api_stop(req);
   if(post && !strcmp(p, "/api/theme/discard")) return api_discard_theme(req);
 #ifdef TEST_HOOKS
   if(post && !strcmp(p, "/api/debug/break-listener")) {
@@ -2808,6 +3117,25 @@ typedef struct worker {
 } worker_t;
 
 
+/* "gzip" among the encodings, and not turned off with q=0. Only the line's own text is read. */
+static int
+accepts_gzip(const char *v) {
+  const char *e = strstr(v, "\r\n");
+  size_t n = e ? (size_t)(e - v) : strlen(v);
+  char line[256];
+  if(n >= sizeof(line)) n = sizeof(line) - 1;
+  memcpy(line, v, n);
+  line[n] = 0;
+  for(char *c = line; *c; c++) *c = (char)tolower((unsigned char)*c);
+  char *g = strstr(line, "gzip");
+  if(!g) return 0;
+  const char *q = strstr(g, "q=");
+  const char *comma = strchr(g, ',');
+  if(q && (!comma || q < comma)) return strtod(q + 2, NULL) > 0;
+  return 1;
+}
+
+
 static void
 handle(worker_t *w, int fd) {
   char *buf = w->header;
@@ -2820,12 +3148,16 @@ handle(worker_t *w, int fd) {
   req.slot = w->slot;
   req.io = w->io;
 
+  /* Each read may wait 5 s, and the whole request line and headers get 10 s: a client sending a byte now and then
+     can't hold one of the few workers for long (a browser sends them at once). */
+  long long started = mono_seconds();
   while(len < MAX_HEADER) {
     ssize_t n = read(fd, buf + len, MAX_HEADER - len);
     if(n < 0 && errno == EINTR) continue;
     if(n <= 0) return;
     len += n;
     if((end = header_end(buf, len))) break;
+    if(mono_seconds() - started > HEADER_SECONDS) return;
   }
   if(!end) return respond_error(fd, 400, "headers too large or incomplete");
   if(memchr(buf, 0, end - buf)) return respond_error(fd, 400, "malformed request");
@@ -2852,6 +3184,13 @@ handle(worker_t *w, int fd) {
     line += 2;
     if(!strncasecmp(line, "Content-Length:", 15)) req.content_length = atol(line + 15);
     else if(!strncasecmp(line, "X-PS5-Theme:", 12)) req.has_token = 1;
+    else if(!strncasecmp(line, "Accept-Encoding:", 16)) req.gzip_ok = accepts_gzip(line + 16);
+    else if(!strncasecmp(line, "If-None-Match:", 14)) {
+      const char *v = line + 14, *e = strstr(v, "\r\n");
+      while(*v == ' ' || *v == '\t') v++;
+      size_t n = e ? (size_t)(e - v) : strlen(v);
+      if(n < sizeof(req.if_none_match)) { memcpy(req.if_none_match, v, n); req.if_none_match[n] = 0; }
+    }
   }
 
   /* Headers get a short deadline; a body may take longer. */
@@ -2991,7 +3330,7 @@ web_server_thread(void *arg) {
   log_msg("web: listening on port %d with %d workers", WEB_PORT, WEB_WORKERS);
   crumb(CRUMB_LISTEN, "accepting");
 
-  time_t checked = time(NULL), reported = 0;
+  long long checked = mono_seconds(), reported = -1000000;   /* (the first is always said) */
   for(;;) {
 #ifdef TEST_HOOKS
     if(atomic_load(&deaf)) {
@@ -3006,10 +3345,10 @@ web_server_thread(void *arg) {
     if(ready > 0 && (pf.revents & (POLLERR | POLLHUP | POLLNVAL))) {
       broken = 1;
       if(getsockopt(srv, SOL_SOCKET, SO_ERROR, &err, &len) || !err) err = EPIPE;
-    } else if(ready > 0 || time(NULL) - checked >= LISTEN_CHECK_SECONDS) {
+    } else if(ready > 0 || mono_seconds() - checked >= LISTEN_CHECK_SECONDS) {
       /* Also when nothing seems to arrive: a socket broken by rest mode
          may not say so to poll(). */
-      checked = time(NULL);
+      checked = mono_seconds();
       fd = accept(srv, NULL, NULL);
       if(fd < 0 && errno != EAGAIN && errno != EWOULDBLOCK && errno != EINTR && errno != ECONNABORTED) {
         broken = 1;
@@ -3017,7 +3356,7 @@ web_server_thread(void *arg) {
       }
     }
     if(broken) {
-      if(time(NULL) - reported >= 60) {
+      if(mono_seconds() - reported >= 60) {
         log_msg("web: the listening socket stopped working (%s, errno %d), as rest mode can do; listening again",
                 strerror(err), err);
       }
@@ -3026,8 +3365,8 @@ web_server_thread(void *arg) {
       crumb(CRUMB_LISTEN, "listening again");
       srv = web_listen(0);
       atomic_store(&listen_fd, srv);
-      if(time(NULL) - reported >= 60) log_msg("web: listening on port %d again", WEB_PORT);
-      reported = time(NULL);
+      if(mono_seconds() - reported >= 60) log_msg("web: listening on port %d again", WEB_PORT);
+      reported = mono_seconds();
       crumb(CRUMB_LISTEN, "accepting");
       continue;
     }

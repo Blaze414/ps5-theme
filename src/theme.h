@@ -5,7 +5,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#define PLUGIN_VERSION "1.69"
+#define PLUGIN_VERSION "1.80"
 #define TITLE_ID       "THEM00001"
 #define WEB_PORT       8095
 
@@ -17,6 +17,7 @@
 #define SNAP_DIR     BASE_DIR "/snapshots"
 #define UPDATE_DIR   BASE_DIR "/update"     /* drop a newer ps5-theme.elf or .plugin here */
 #define LOG_DIR      BASE_DIR "/logs"
+#define INCOMING_DIR BASE_DIR "/incoming"   /* uploads being received (web.c part_name) */
 #define LOG_FILE     LOG_DIR "/log.txt"
 #define ACTIVE_FILE  BASE_DIR "/active"
 #define MOUNTS_FILE  BASE_DIR "/mounts"
@@ -26,6 +27,10 @@
 
 /* log.c */
 void log_init(void);
+/* Seconds on a clock that only goes forward, for waits and intervals: the console sets its own clock from the
+   network after it starts, and a wall-clock interval measured across that jump stalls or ends early. */
+long long mono_seconds(void);
+void snapshots_recover(void);   /* (web.c) a Discard cut off between its two steps put right */
 void log_msg(const char *fmt, ...) __attribute__((format(printf, 1, 2)));
 void log_err(const char *fmt, ...) __attribute__((format(printf, 1, 2)));
 void notify(const char *fmt, ...) __attribute__((format(printf, 1, 2)));
@@ -57,6 +62,7 @@ int  fs_copy_file(const char *existing, const char *path);
 int  fs_rm_rf_under(const char *root, const char *path);
 int  fs_write_file(const char *path, const void *data, size_t len);
 int  fs_is_dir(const char *path);
+int  fs_append_file(const char *path, const void *data, size_t len);
 uint32_t crc32_update(uint32_t crc, const void *buf, size_t len);
 int  fs_crc32_file(const char *path, uint32_t *crc, uint64_t *size);
 int  fs_copy_tree(const char *src, const char *dst);
@@ -137,6 +143,7 @@ int         font_check_mem(const uint8_t *buf, size_t n, char *why, size_t len);
 #define APPMETA_DIR     "/user/appmeta"
 #define APP_DIR         "/user/app"
 #define PATCH_DIR       "/user/patch"
+#define DOWNLOAD_DIR    "/user/download"   /* the console's downloads, one folder per title, written as they come */
 /* The pictures the console downloads from PlayStation Network: a title's
    (one folder per title) and its game's (one folder per concept, which a
    game's editions share). The app database points some games' tiles at
@@ -244,7 +251,13 @@ int  fw_matches(const char *list, const char *fw);
 void asset_listing_path(char *out, size_t size);
 void read_active(char *out, size_t size);
 int  write_active(const char *name);
-int  reapply_active(const char *expect);   /* apply the chosen theme again if it is still `expect` */
+/* Apply the chosen theme again if it is still `expect`, said on the console once it is done with `note` (a line, or
+   several), not step by step: for icons styled by themselves while a game may be open. -1 if another is chosen. */
+int  reapply_quietly(const char *expect, const char *note);
+/* The folders a theme may change files in, at most (the manager checks a theme against it). */
+int  max_theme_folders(void);
+/* Titles the applied theme has pictures for that weren't installed when it was applied: how many, up to max. */
+int  titles_awaiting_install(char (*out)[16], int max);
 int  applied_theme(char *out, size_t size);
 int  applying_theme(char *out, size_t size);
 int  apply_progress(char *text, size_t size);   /* percent, or -1 when idle */
@@ -269,6 +282,12 @@ void stock_path(const char *asset, char *out, size_t size);
 int  asset_path_valid(const char *path);
 /* autostyle.c: the icon style for games and apps installed later, run in the background. */
 void *autostyle_thread(void *arg);
+int  autostyle_settle(void);                 /* seconds nothing in a title's folders may change before it counts as installed */
+int  autostyle_wait(const char *title);      /* seconds until it does (0: installed), -1: no such title or no icon yet */
+void titles_stamp(char *out, size_t size);   /* changes when the installed titles do, or the styler did something */
+void title_name(const char *title, char *out, size_t size);   /* the name the console shows, else the ID */
+/* What the console says once the theme is applied again for icons styled and titles whose pictures went back. */
+void autostyle_note(char *out, size_t size, const char (*styled)[16], int nstyled, const char (*back)[16], int nback);
 int  write_theme_ini(const char *id, const char *name, const char *fw, const music_settings_t *music);
 
 
@@ -289,6 +308,8 @@ void  record_running(void);                /* PID_FILE, once this copy holds the
 #define INSTANCE_LOCK   BASE_DIR "/instance.lock"
 #define PID_FILE        BASE_DIR "/pid"      /* "<pid> <start>" of the copy holding the lock */
 int   running_copy(int self);
+/* One request to the copy answering on this console's web port (`out`: its reply); 0 on a 200 reply. */
+int   local_request(const char *method, const char *path, char *out, size_t size);
 int   title_mount_point(const char *on);
 int   release_overlays(const char *under, int (*match)(const char *on), char (*recorded)[1024], int nrecorded, int *stuck);
 int   update_check(void);                  /* 1 if a newer copy was started */
