@@ -32,7 +32,7 @@ def anchors(path):
 def check_links():
     problems = []
     docs = os.path.join(ROOT, "docs")
-    files = [os.path.join(ROOT, "README.md")] + sorted(os.path.join(docs, f) for f in os.listdir(docs) if f.endswith(".md"))
+    files = [os.path.join(ROOT, "README.md"), os.path.join(ROOT, "CONTRIBUTING.md")] + sorted(os.path.join(docs, f) for f in os.listdir(docs) if f.endswith(".md"))
     for path in files:
         with open(path, encoding="utf-8") as f:
             text = re.sub(r"```.*?```", "", f.read(), flags=re.S)       # code blocks are not links

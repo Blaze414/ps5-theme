@@ -1,0 +1,43 @@
+name: Bug report
+description: Something the plugin or the manager did wrong
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting. If the console doesn't wake from rest mode or the home screen doesn't come back, hold the
+        power button until it beeps twice; the theme comes back with the plugin. A security problem goes to the
+        Security tab instead (Report a vulnerability), not here.
+  - type: input
+    id: release
+    attributes:
+      label: Release
+      description: The plugin's version (the manager's Activity page shows it as it starts).
+      placeholder: "1.80"
+    validations:
+      required: true
+  - type: input
+    id: console
+    attributes:
+      label: Console and firmware
+      placeholder: "PS5 slim, 13.42"
+    validations:
+      required: true
+  - type: input
+    id: jailbreak
+    attributes:
+      label: Jailbreak and loader
+      placeholder: "etaHEN 2.5B, or PS5 Payload Manager 0.x"
+  - type: textarea
+    id: what
+    attributes:
+      label: What you did, and what happened
+      description: Step by step, and what you expected instead.
+    validations:
+      required: true
+  - type: textarea
+    id: log
+    attributes:
+      label: Activity log
+      description: The manager's Activity page, copied. It holds paths, title IDs and your console's local address, nothing else.
+      render: text

@@ -1,0 +1,64 @@
+name: Hardware test report
+description: How a release went on your console (see docs/hardware-testing.md)
+labels: [hardware test]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you for testing. The steps and what to expect are in docs/hardware-testing.md. A failure with its log is
+        worth more than a pass without one.
+  - type: input
+    id: release
+    attributes:
+      label: Release
+      placeholder: "1.80"
+    validations:
+      required: true
+  - type: dropdown
+    id: checksums
+    attributes:
+      label: Did the files' checksums match the release notes?
+      options: ["Yes", "No", "Didn't check", "Built it myself (tools/verify-release.sh)"]
+    validations:
+      required: true
+  - type: input
+    id: console
+    attributes:
+      label: Console model and firmware
+      placeholder: "launch disc edition, 13.42"
+    validations:
+      required: true
+  - type: input
+    id: jailbreak
+    attributes:
+      label: Jailbreak and loader
+      placeholder: "etaHEN 2.5B unified, loaded with ..."
+    validations:
+      required: true
+  - type: input
+    id: homebrew
+    attributes:
+      label: Other homebrew running
+      placeholder: "ShadowMountPlus, Itemzflow, ..."
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps 1 to 9
+      description: For each, "as expected", or what you saw instead.
+      value: |
+        1. Start:
+        2. A theme:
+        3. Apply again:
+        4. Icon style:
+        5. Rest mode, three times:
+        6. A game installed:
+        7. No theme:
+        8. Restart:
+        9. Update:
+    validations:
+      required: true
+  - type: textarea
+    id: log
+    attributes:
+      label: Activity log
+      render: text

@@ -4,11 +4,20 @@ Who can reach the plugin, what protects the system, and the fuzzing results. Par
 
 **On this page:**
 
+- [Reporting a security problem](#reporting-a-security-problem)
 - [Who can reach the plugin](#who-can-reach-the-plugin)
 - [What protects the system](#what-protects-the-system)
 - [Fuzzing results](#fuzzing-results)
 - [Bugs found, and proof they're fixed](#bugs-found-and-proof-theyre-fixed)
 - [What isn't covered](#what-isnt-covered)
+
+## Reporting a security problem
+
+If you find a way to make the plugin write where it shouldn't, run something it shouldn't, or be reached by someone
+it shouldn't, report it privately: on GitHub, the repository's **Security** tab, then **Report a vulnerability**.
+Please don't open a public issue or post it elsewhere until a fixed version is released. Say what you did, on which
+firmware, and what happened; the Activity log helps. Reports are answered there, and the fix credited to you if you
+want.
 
 ## Who can reach the plugin
 

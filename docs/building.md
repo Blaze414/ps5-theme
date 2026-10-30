@@ -62,15 +62,46 @@ GitHub Actions (`.github/workflows/ci.yml`) runs on every push to main and
 every pull request:
 
 - the [end-to-end tests](testing.md), in a privileged container with real
-  mounts and again with mounts emulated;
+  mounts, again with mounts emulated, and again under ThreadSanitizer, which
+  stops at the first data race between threads;
+- the codec cross-checks: the ATRAC9 encoder, decoder and validator against
+  LibAtrac9 and FFmpeg, and the zstd decoder against the reference `zstd`;
+- every parser fuzzed for 30 seconds (libFuzzer, AddressSanitizer, UBSan),
+  any finding attached to the run;
 - the PS5 build, its three files and their SHA-256 sums attached to the run;
+- two more builds from nothing, which must be byte for byte the same (see
+  [Reproducible builds](#reproducible-builds));
 - `tools/check_repo.py`: every local link and heading link in the README and
   the docs resolves, and the version is the same in the Makefile, the
   plugin, the README and the tests.
 
-The same checks run by hand: `tests/host/run.sh`, `tests/host/run.sh
-emulated`, `./build.sh` and `python3 tools/check_repo.py`.
+The same checks run by hand: `tests/host/run.sh` (and `emulated`, `tsan`),
+`tests/atrac9/run.sh`, `tests/fuzz/run.sh`, `./build.sh` and
+`python3 tools/check_repo.py`.
 
+## Reproducible builds
+
+The same source gives the same files, byte for byte, on any machine with
+Docker, today or later, so anyone can check that a release is exactly what
+its source builds. Everything that decides the output is pinned in the
+`Dockerfile`: the Ubuntu image by its digest, the compiler, linker and `make`
+by their exact versions (Ubuntu 24.04's own, which stay in its archive), and
+the PS5 Payload SDK by its checksum, so a changed download stops the build.
+The pins came after 1.80 was released; built with them, 1.80's source gives
+its published files exactly. Nothing in the build reads the time: the
+compressed page is made with `gzip -n`, and the ELF's description holds only
+the version.
+
+To check a release:
+
+```bash
+tools/verify-release.sh v1.80
+```
+
+It checks out the tag in a separate worktree, builds it from nothing, downloads
+the release's three files and compares them. For 1.80 every file is the same
+(the plugin `91b8143a…`, the ELF `e27473f0…`, the stop tool `90a1ee92…`), and
+the CI builds every push twice from nothing and fails if the builds differ.
 
 ## Project layout
 
@@ -102,8 +133,11 @@ emulated`, `./build.sh` and `python3 tools/check_repo.py`.
 | `tools/assetwatch/` | `ps5-assetwatch.elf`: for two minutes, logs the files the home screen and the web renderer map and unmap, read-only, to find where something on screen is loaded from |
 | `tools/docshots.mjs` | The manager's screenshots in `docs/screenshots/`, taken from a console's manager in a headless Chromium, read-only (every request that would change something is refused), with the console's own pictures, games' icons and the system tiles' styled icons (made from the console's own) shown as stand-ins |
 | `tools/payload_meta.py` | The ELF's description, its check, and the PS5 Payload Manager repository files |
+| `tools/verify-release.sh` | Rebuilds a release from its tag and compares it with the published files (see [Reproducible builds](#reproducible-builds)) |
 | `tools/` | Table generator, icon generator, plugin packer, repository checks (`check_repo.py`) |
-| `.github/workflows/ci.yml` | The tests, the build and the repository checks on every push |
+| `.github/workflows/ci.yml` | The tests, the codec checks, the fuzzing, the build, the reproducible build and the repository checks on every push |
+| `.github/ISSUE_TEMPLATE/`, `.github/pull_request_template.md` | The forms for bug reports and hardware test reports, and the checklist for a pull request |
+| `CONTRIBUTING.md`, `docs/architecture.md`, `docs/decisions.md` | For contributors: the rules, the map of the code, and the reasons behind it |
 | `tests/host/` | End-to-end tests and the fake console (`rco_fixture.py` builds resource files) |
 | `tests/atrac9/`, `tests/zstd/` | Codec cross-checks |
 | `tests/fuzz/` | Fuzzing the parsers |

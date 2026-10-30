@@ -246,9 +246,13 @@ else stays stock.
 | [How it works, and why](docs/how-it-works.md) | Overlays instead of writing the system, sandbox views, checks, staging, updating and stopping |
 | [Theme format](docs/theme-format.md) | What a theme folder and its export contain |
 | [Challenges and how they were solved](docs/challenges.md) | The problems met on the console and their solutions, including [changing game and app icons safely](docs/challenges.md#changing-game-and-app-icons-safely) and [finding the Appearance artwork](docs/challenges.md#the-appearance-themes-artwork) |
-| [Testing](docs/testing.md) | The automated tests and the [tests on the console](docs/testing.md#tests-on-the-console) |
-| [Building from source](docs/building.md) | Building the plugin and the tools, and the project layout |
-| [Security](docs/security.md) | Who can reach the plugin, what protects the system, fuzzing |
+| [Testing](docs/testing.md) | The automated tests, the [tests on the console](docs/testing.md#tests-on-the-console), and [each problem found on the console with the test that keeps it fixed](docs/testing.md#problems-found-on-the-console-and-the-tests-that-keep-them-fixed) |
+| [Testing on your own console](docs/hardware-testing.md) | Trying a release on your PS5: the steps, what you should see, how to get back if something goes wrong, and how to report it |
+| [Building from source](docs/building.md) | Building the plugin and the tools, [checking that a release is exactly what its source builds](docs/building.md#reproducible-builds), and the project layout |
+| [Security](docs/security.md) | Who can reach the plugin, what protects the system, fuzzing, [reporting a security problem](docs/security.md#reporting-a-security-problem) |
+| [Architecture](docs/architecture.md) | For contributors: the parts, threads and locks, what the plugin keeps on the console, applying a theme step by step, and what happens when something fails |
+| [Design decisions](docs/decisions.md) | The hard choices, each with what forced it, what else was considered and what it costs |
+| [Contributing](CONTRIBUTING.md) | The rules no change may break, how to make and test a change, and how to report bugs |
 
 Links to this page's old sections (from earlier release notes) land here;
 the table says where each one is now.

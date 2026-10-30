@@ -8,8 +8,13 @@ tests/host/run.sh
 
 Builds the real plugin sources for Linux with AddressSanitizer and UBSan and
 runs 72 end-to-end tests against a fake console tree in a privileged
-container (GitHub Actions runs them on every push: see
-[Building](building.md#continuous-integration)). They cover:
+container. GitHub Actions runs them on every push and pull request, with
+mounts emulated and under ThreadSanitizer too, along with the codec checks
+and the fuzzing below (see [Building](building.md#continuous-integration)).
+Every problem found on a console has a test here that would have caught it:
+see [the list](#problems-found-on-the-console-and-the-tests-that-keep-them-fixed).
+To try a release on a console of your own, see
+[Testing on your own console](hardware-testing.md). They cover:
 
 - upload checks and the media policy, including files crafted to hang or
   exhaust the checks;
@@ -209,7 +214,8 @@ its four workers, the tile installer and the icon styler). It builds for the
 machine's own architecture (ThreadSanitizer can't run under the x86-64
 emulation Docker uses on an Apple Silicon Mac; the plugin's code is
 portable). On 29 October 2026 every test passed under it, natively on ARM64,
-with no race reported, the test of writes from many threads included.
+with no race reported, the test of writes from many threads included; the
+CI runs it on every push.
 
 ```bash
 tests/host/run.sh serve
@@ -242,8 +248,8 @@ tests/fuzz/run.sh
 Fuzzes the plugin's parsers (zstd, DDS textures, ATRAC9, WAV, image headers,
 JSON, SVG, PNG pictures with the plugin's inflate, interface resource files)
 with libFuzzer, AddressSanitizer and UBSan, 60 seconds each by default
-(`FUZZ_SECONDS` changes it). Inputs that crash or hang are saved in
-`tests/fuzz/out/`.
+(`FUZZ_SECONDS` changes it; the CI gives each 30 on every push). Inputs
+that crash or hang are saved in `tests/fuzz/out/`.
 
 ## How the bugs were found
 
@@ -394,3 +400,35 @@ After any failure the console was restarted before the next test.
 | 1.76 to 1.78 | Updates, applies, Apply again; rest mode on 1.77 | **Works**: rest mode on 1.77 (108 overlays out in 0.47 s, the next home screen covered in 3 s); Apply again 36.3 s on 1.77 (31.9 of it reading every game's folder), 5.7 s on 1.78 |
 | 1.79 | Apply again; then rest mode | Apply again **2.0 s**, but **the console didn't wake**: going into rest, two apps that start with the home screen had their views covered as the system made them, started again, and the next home screen never started; the console had to be switched off at its power button. Fixed in 1.80: nothing goes into any sandbox while the home screen restarts, and an app's new view waits 2 seconds |
 | 1.80 | The update from 1.79 (after the console was switched off at its power button); three rests in a row | **Works**: each woke; the home screen's overlays out in under a second and the next one covered at once; the two apps that start with it covered 2 to 3 seconds after they appeared |
+
+## Problems found on the console, and the tests that keep them fixed
+
+Each problem the console showed, from the tables above, and the test on the fake console that fails if it comes back.
+A fix for something seen on a console gets a test here before it is released (see
+[Contributing](../CONTRIBUTING.md#making-a-change)). Problems the tests found first, such as the Discard races and the
+theme nested 100 folders deep, are in [How the bugs were found](#how-the-bugs-were-found).
+
+| Seen on the console | Version | Test |
+|---|---|---|
+| The crash guard counted the home screen's old sandboxes as restarts and took the theme down | 1.34 | `t_crash_loop_takes_theme_down` |
+| Overlays on games' real folders, or in other apps' views, stopped apps from starting | 1.38 to 1.44 | `t_title_pictures` |
+| An overlay forced off while in use broke the views stacked on it | 1.39 | `t_busy_overlay_is_never_forced` |
+| An overlay left in the home screen's sandbox when it exited stopped every app from starting | 1.44 to 1.46 | `t_shellui_exit_releases_sandbox`, `t_crash_takes_overlays_out_of_shellui` |
+| After rest mode the manager stopped answering | 1.49 | `t_web_comes_back_after_rest_mode`, `t_takeover_when_web_is_down` |
+| The stop tool and the hand-over couldn't find the plugin (the console lists no thread names) | 1.50 | `t_stop_tool_keeps_the_theme` |
+| A Discard brought back a cut-off upload, and every apply after it was "applied partly" | 1.59 | `t_cut_off_uploads_are_not_theme_files` |
+| Interface sounds played late, after a quiet stretch before their hit | 1.62 | `t_interface_pictures` (the page's sound encoder) |
+| The same theme applied again over a folder in use was refused ("Resource deadlock avoided") | 1.63 | `t_busy_overlay_is_never_forced` |
+| The icon style's template stored only in part, the setting never saved | 1.66 | `t_icon_style_for_titles_installed_later` |
+| The console didn't wake: the new home screen's font covered while the system was building its sandbox | 1.67 | `t_shellui_exit_releases_sandbox` |
+| An app installed again wasn't styled; a game left open counted as one being played | 1.69 | `t_icon_style_for_titles_installed_later` |
+| An installer dated its files an hour ahead of the console's clock, and the styling waited for that hour | 1.72 | `t_icon_style_for_titles_installed_later` |
+| An update read while it was still being copied in, and never looked at again | 1.72 | `t_update_from_plain_elf` |
+| The stop tool missed the running copy: its start time moved by an hour when the clock was set | 1.72 | `t_stop_tool_keeps_the_theme` |
+| A theme of 66 folders refused (the limit was 64), without saying what to do | 1.74 | `t_themes_of_many_folders` |
+| Apply again took 36 seconds, reading every game's folder | 1.77 | `t_title_pictures` (a game's copy checked by its fingerprint) |
+| The console didn't wake: two apps' views covered as the system made them while the home screen restarted | 1.79 | `t_shellui_exit_releases_sandbox` |
+
+Every test runs after every change, in the CI and with `tests/host/run.sh`, so none of these can come back unnoticed
+on the fake console. What only a console can show (whether it wakes, whether the home screen reads a file) is still
+tried on one before each release.

@@ -1,6 +1,8 @@
 # Every push to main and every pull request: the end-to-end tests (with real
-# mounts, and with mounts emulated), the PS5 build with its files attached to
-# the run, and the repository checks (docs links, the version everywhere).
+# mounts, with mounts emulated, and under ThreadSanitizer), the codec
+# cross-checks, a short fuzz of every parser, the PS5 build with its files
+# attached to the run, a second build from nothing that must match it byte for
+# byte, and the repository checks (docs links, the version everywhere).
 name: CI
 
 on:
@@ -34,6 +36,62 @@ jobs:
           else
             tests/host/run.sh emulated      # inside a build step: mounts emulated
           fi
+
+  tsan:
+    name: End-to-end tests (ThreadSanitizer)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      # The runner's kernel randomises addresses over more bits than ThreadSanitizer's memory layout allows (it stops
+      # at start with "unexpected memory mapping"); fewer bits, for this throwaway machine only.
+      - name: Fewer random address bits, which ThreadSanitizer needs
+        run: sudo sysctl -w vm.mmap_rnd_bits=28
+      - name: The whole suite, stopping at the first data race between threads
+        run: tests/host/run.sh tsan
+
+  codecs:
+    name: Codec cross-checks (ATRAC9, zstd)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: ATRAC9 encoder, decoder and validator against LibAtrac9 and FFmpeg
+        run: tests/atrac9/run.sh
+      - name: The plugin's zstd decoder against the reference zstd
+        run: |
+          docker build --platform linux/amd64 -f tests/host/Dockerfile --target full -t ps5-theme-host-test .
+          docker run --rm --platform linux/amd64 -v "$PWD:/w:ro" ps5-theme-host-test \
+            sh -c 'cp -r /w /tmp/w && cd /tmp/w && tests/zstd/run.sh'
+
+  fuzz:
+    name: Fuzzing (30 s per parser)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Every parser under libFuzzer, AddressSanitizer and UBSan
+        run: FUZZ_SECONDS=30 tests/fuzz/run.sh
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: fuzz-findings-${{ github.sha }}
+          path: tests/fuzz/out/
+
+  reproducible:
+    name: Reproducible build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Two builds from nothing, byte for byte the same
+        run: |
+          for n in 1 2; do
+            docker build --platform linux/amd64 --no-cache --target artifact --output type=local,dest=out$n .
+          done
+          (cd out1 && sha256sum ps5-theme.plugin ps5-theme.elf ps5-theme-stop.elf) | tee first.txt
+          (cd out2 && sha256sum ps5-theme.plugin ps5-theme.elf ps5-theme-stop.elf) > second.txt
+          diff first.txt second.txt
 
   build:
     name: PS5 build
