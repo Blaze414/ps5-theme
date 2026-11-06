@@ -303,6 +303,14 @@ try {
       await shoot("preview.png", await boxOf("#pv-overlay .pv-dialog", 16));
       await run(`(() => { previewClose(); return 1; })()`);
     }
+    if (want("preview-control-center.png")) {   /* the console's icons are left out (ui-icon refused): the row draws without them */
+      await go("#/edit/yakuza-0/theme", partReady("theme"), "Name and picture");
+      await run(`(async () => { await openPreview(); pvState.view = "cc"; await previewRender(state.editId); return 1; })()`);
+      await waitFor(`!!document.querySelector("#pv-stage canvas.cc")`, "the Control Center preview", 300000);
+      await sleep(3000); await tidy();
+      await shoot("preview-control-center.png", await boxOf("#pv-overlay .pv-dialog", 16));
+      await run(`(() => { previewClose(); return 1; })()`);
+    }
     if (want("save-bar.png")) {
       await go("#/edit/yakuza-0/theme", partReady("theme"), "Name and picture");
       await run(`(() => { const b = document.querySelector("#savebar"); b.hidden = false; return 1; })()`);
@@ -311,9 +319,9 @@ try {
     }
     if (want("activity.png")) {
       await go("#/settings/log", `!!document.querySelector("#log") && document.querySelector("#log").textContent.length > 200`, "the log");
-      /* only the plugin's own lines: none naming a game or app of the console's library */
+      /* only the plugin's own lines: none naming a game or app of the console's library, or an address on the network */
       await run(`(() => { const l = document.querySelector("#log");
-        l.textContent = l.textContent.split("\\n").filter(x => !/\\/user\\/|appmeta|[A-Z]{4}\\d{5}/.test(x)).join("\\n"); return 1; })()`);
+        l.textContent = l.textContent.split("\\n").filter(x => !/\\/user\\/|appmeta|[A-Z]{4}\\d{5}|\\d+\\.\\d+\\.\\d+\\.\\d+/.test(x)).join("\\n"); return 1; })()`);
       await tidy();
       await run("scrollTo(0, 0); 1");
       await shoot("activity.png", { x: 0, y: 0, w: 1600, h: 1125 });

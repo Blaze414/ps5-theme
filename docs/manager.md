@@ -248,6 +248,11 @@ theme's parts on the left, the part you're changing on the right.
 
 ![The Preview: the theme's background, Appearance artwork, font and icons drawn on a home screen](screenshots/preview.png)
 
+![The Preview's Control Center: the PlayStation 2 look's top-right piece and bottom panel over the darker home screen, with a Recently created card holding a screenshot of it](screenshots/preview-control-center.png)
+
+The console's own icons are left out of these two pictures (they are
+Sony's); on your console the preview draws them.
+
 ![Name and picture: name, firmware, the three ways a picture of another shape can go, each drawn on your own picture, and Keep original pictures with what the originals take](screenshots/manager-originals.png)
 
 A **?** beside a setting, a section or a file says what it changes: point at
