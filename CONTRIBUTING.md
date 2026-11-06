@@ -8,9 +8,11 @@ privileges, so the bar is set by what it could break.
 These are not style preferences. A change that breaks one is not merged, however useful it is.
 
 1. **Never write the system.** Nothing under `/system` or `/system_ex` (or any other system folder) is opened for
-   writing. Themes are read-only overlays. Every write goes through the write guard (`src/fsguard.c`).
+   writing. Themes are read-only overlays. Every write goes through the write guard (`src/fsguard.c`), which makes
+   it in the folder it checked; never check a path and then write, read or mount by it separately.
 2. **Only media, checked.** A new kind of themable file needs a check against the system file it replaces, with tests
-   for files that must be refused, and fuzzing for its parser.
+   for files that must be refused, and fuzzing for its parser. Checks accept a known subset and refuse the rest by
+   name (as `src/svg.c` does); a list of things to refuse is not a check.
 3. **No code in other processes.** No hooking, injecting or patching the home screen or any other process.
 4. **Nothing in a sandbox while the system builds it.** Nothing goes into the home screen's sandbox before its process
    is watched, nothing into any sandbox while it restarts. See
@@ -19,7 +21,9 @@ These are not style preferences. A change that breaks one is not merged, however
 5. **No one else's files.** Sony's system files, icons, artwork, fonts, sounds and libraries, and games' pictures, are
    never added to the repository, a release or the manager's page. The docs' screenshots use stand-ins
    (`tools/docshots.mjs`).
-6. **Read-only on someone else's console.** Investigating on a console means reading: its logs, its mount table, its
+6. **Only who is allowed.** Every request passes `access_gate` (`src/access.c`) first. A new route is open to a device
+   not yet allowed only if it shows nothing of the console's and changes nothing.
+7. **Read-only on someone else's console.** Investigating on a console means reading: its logs, its mount table, its
    files over FTP. Nothing is changed on a console except by its owner, on purpose.
 
 ## Setting up
@@ -44,13 +48,21 @@ the map of the code.
 - **Everything the CI runs must pass:** the end-to-end tests with real mounts, with mounts emulated and under
   ThreadSanitizer, the codec cross-checks, the fuzzing, the PS5 build, the reproducible build and the docs checks.
   Run at least `tests/host/run.sh` and `python3 tools/check_repo.py` before pushing.
+- **Modules:** a new C file is a module: its `.c`, a header declaring what it offers (and nothing it keeps to
+  itself), and a line in `sources.mk`. Each file includes the headers it uses names from, and only those
+  (`tools/check_includes.py` checks; `--fix` rewrites the list). A new script for the page goes in `web/js/`, listed in
+  `web/index.html` before the scripts that use it; code with no page in it goes in `web/js/lib/`, so the tests can run
+  it.
+- **System calls:** some of the SDK's libc functions return a failure as if it were the result. Use them as usual;
+  if the PS5 build stops at `tools/check_syscalls.py`, add the one it names to the end of `src/platform.h` (see
+  [Building](docs/building.md#system-calls-the-sdk-gets-wrong)).
 - **Threads:** shared state is either main-thread only, an atomic, or under one of the locks in
   [Architecture](docs/architecture.md#locks-and-the-order-they-are-taken-in), taken in its order. Say which in a
   comment.
 - **Docs in the same change.** What a user sees goes in the guides and [the manager's tour](docs/manager.md); a
   problem worth knowing about goes in [Challenges](docs/challenges.md); a choice that rules something out goes in
   [Design decisions](docs/decisions.md). Screenshots come from `tools/docshots.mjs`.
-- **The version** goes up when the plugin's files change, in the `Makefile`, `src/theme.h`, the README and the tests
+- **The version** goes up when the plugin's files change, in the `Makefile`, `src/config.h`, the README and the tests
   together (`tools/check_repo.py` checks they agree). The update folder only takes a newer version.
 
 ## Writing for people
@@ -78,8 +90,8 @@ your own.
 
 ## Reporting
 
-- **A bug:** open an issue with the bug form: what you did, what happened, the firmware, and the Activity log (the
-  manager's Activity page; its text can be selected and copied).
+- **A bug:** open an issue with the bug form: what you did, what happened, the firmware, and the log (in the
+  manager, the gear at the top right, then **Log**; its text can be selected and copied).
 - **A security problem:** report it privately, as in
   [Security](docs/security.md#reporting-a-security-problem); don't open a public issue for it.
 

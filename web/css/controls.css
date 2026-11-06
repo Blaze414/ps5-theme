@@ -1,0 +1,134 @@
+/* Checkboxes and number boxes in the console's style, as the other fields */
+/* An on/off choice is a switch, as in the console's Settings: every checkbox here turns one thing on or off. */
+input[type=checkbox] {
+  -webkit-appearance: none; appearance: none; flex: none; width: 40px; height: 24px; margin: 0 10px 0 0; border-radius: 999px;
+  vertical-align: middle; cursor: pointer; background: radial-gradient(circle at 12px 50%, var(--muted) 0 8px, transparent 8.5px), var(--surface-strong);
+}
+input[type=checkbox]:checked { background: radial-gradient(circle at 28px 50%, #fff 0 8px, transparent 8.5px), var(--blue); }
+label.check { display: flex; align-items: center; margin-top: 8px; }
+input[type=number] {
+  min-height: 36px; padding: 0 12px; border: 0; border-radius: 10px; background: var(--surface-strong); color: var(--text);
+  font-variant-numeric: tabular-nums; transition: box-shadow .15s;
+}
+input[type=number]:focus-visible { box-shadow: 0 0 0 2px #fff; }
+.sub-head { margin: 16px 0 0; font-size: 1.0625rem; font-weight: 500; }
+.sub-head:first-child { margin-top: 0; }
+.sub-head + .note { margin: 4px 0 12px; }
+/* Folded groups: a part's long list in categories, each a row that opens */
+.folds { display: grid; gap: 8px; }
+.fold { border-radius: var(--radius); background: rgba(255, 255, 255, .03); }
+.fold > summary { display: flex; align-items: center; gap: 10px; padding: 12px 14px; list-style: none; border-radius: var(--radius);
+  font-weight: 500; transition: background .15s; }
+.fold > summary::-webkit-details-marker { display: none; }
+.fold > summary::before { content: "›"; font-size: 1.25rem; line-height: 1; color: var(--muted); transition: transform .18s var(--ease); }
+.fold[open] > summary::before { transform: rotate(90deg); }
+.fold > summary:hover { background: var(--surface-hover); }
+.fold > summary:focus-visible { outline: none; background: #fff; color: #000; }
+.fold > summary:focus-visible::before, .fold > summary:focus-visible .fold-count { color: rgba(0, 0, 0, .62); }
+.fold-title { flex: 1; min-width: 0; }
+.fold-count { font-size: .8125rem; font-weight: 400; color: var(--muted); white-space: nowrap; }
+.fold > .rows { padding: 0 8px 8px; }
+.stack { display: grid; gap: 12px; }
+/* Options drawn as they'll look: each a choice you can see before you pick it */
+.fit-field { grid-column: 1 / -1; }
+.icon-style { display: grid; gap: 14px; }
+/* The picture behind the icons, placed as a profile picture is */
+/* laid out as the Preview is: its bar and its picture straight on the backdrop, the controls in a standard panel */
+.bge-dialog { width: min(1100px, 94vw); max-height: 92vh; overflow: auto; display: flex; flex-direction: column; gap: 14px; }
+.bge-body { display: grid; gap: 20px; grid-template-columns: auto minmax(260px, 1fr); align-items: start; }
+@media (max-width: 760px) { .bge-body { grid-template-columns: minmax(0, 1fr); } }
+#bge-canvas { max-width: 100%; height: auto; border-radius: var(--radius-lg); box-shadow: 0 30px 80px rgba(0, 0, 0, .6); cursor: grab; touch-action: none; }
+#bge-canvas:active { cursor: grabbing; }
+#bge-canvas:focus-visible { outline: 2px solid #fff; outline-offset: 3px; }
+.bge-side { display: grid; gap: 14px; align-content: start; }
+.bge-side.panel { background: rgba(28, 34, 48, .97); }   /* solid, as the messages are: nothing of the page shows through */
+@media (max-width: 600px) { #bge.pv-overlay { padding: 12px; place-items: start center; } .bge-dialog { max-height: calc(100vh - 24px); } }
+.bge-side .field > span { color: var(--muted); font-size: .875rem; }
+.bge-zoom { display: flex; align-items: center; gap: 10px; }
+.bge-zoom input[type=range] { flex: 1; max-width: none; }
+.bge-zoom .btn { min-width: 36px; padding: 0; font-size: 1.125rem; }
+.bge-sources { display: flex; gap: 8px; flex-wrap: wrap; }
+.bge-previews { display: flex; gap: 16px; align-items: flex-end; flex-wrap: wrap; }
+.bge-previews figure { margin: 0; display: grid; gap: 6px; justify-items: center; }
+.bge-previews canvas { border-radius: 10px; box-shadow: 0 6px 18px rgba(0, 0, 0, .45); }
+.bge-previews figcaption { font-size: .75rem; color: var(--muted); }
+.icon-style .opts { grid-template-columns: repeat(auto-fill, minmax(104px, 1fr)); }
+.icon-style .opt canvas { border-radius: 14px; transition: opacity .2s; }
+.icon-style .opts[aria-busy="true"] canvas { opacity: .45; }
+.istyle-busy:empty { display: none; }
+.istyle-row { display: grid; gap: 14px; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); align-items: start; }
+.istyle-groups { display: grid; gap: 12px; }   /* stacked: the tiles' cards get the whole width */
+.istyle-group { border: 0; margin: 0; min-width: 0; padding: 12px 14px 14px; border-radius: var(--radius); background: rgba(255, 255, 255, .04); display: grid; gap: 10px; }
+.istyle-group legend { float: left; width: 100%; padding: 0; font-size: .875rem; font-weight: 600; color: var(--text); }
+.istyle-group legend .count { margin-left: 6px; font-weight: 400; color: var(--faint); }
+.istyle-group .note { margin: 0; }
+.istyle-cat { display: grid; gap: 6px; }
+.istyle-cat > span { font-size: .75rem; color: var(--muted); }
+.icon-style .opts.istyle-tiles { grid-template-columns: repeat(auto-fill, minmax(96px, 112px)); gap: 8px; }
+.istyle-tiles .opt { padding: 6px; }
+.istyle-tiles .opt b { font-size: .75rem; line-height: 1.25; }
+.istyle-tiles .opt[aria-pressed="true"]::after { top: 10px; right: 10px; width: 20px; height: 20px; background-size: 12px; }
+.istyle-tiles .opt[aria-pressed="false"] canvas { opacity: .7; }
+input[type=color] { width: 56px; height: 36px; border: 0; border-radius: 10px; background: var(--surface-strong); padding: 4px; cursor: pointer; margin-top: 8px; }
+input[type=color]:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
+.opts { display: grid; gap: 10px; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); }
+.opts.place { grid-column: 1 / -1; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); margin-top: 4px; }
+.opt { position: relative; display: grid; gap: 2px; justify-items: start; text-align: left; padding: 8px; border: 0; border-radius: var(--radius); cursor: pointer;
+  background: rgba(255, 255, 255, .04); color: var(--text); font: inherit; transition: background .15s, box-shadow .15s, transform .18s var(--ease); }
+.opt canvas { width: 100%; height: auto; border-radius: 8px; margin-bottom: 6px; background: #000; }
+.opt b { font-size: .875rem; font-weight: 600; }
+.opt small { font-size: .75rem; color: var(--muted); }
+.opt:hover { background: var(--surface-hover); }
+.opt:focus-visible { outline: none; background: #fff; color: #000; transform: scale(1.03); }
+.opt:focus-visible small { color: rgba(0, 0, 0, .62); }
+/* The chosen one: a blue ring and a tick on its picture, both kept when it is focused (white), so a choice shows the
+   moment it is made, wherever the focus is. */
+.opt[aria-checked="true"], .opt[aria-pressed="true"] { background: rgba(31, 124, 240, .16); box-shadow: inset 0 0 0 3px var(--blue); }
+.opt[aria-checked="true"]:focus-visible, .opt[aria-pressed="true"]:focus-visible { background: #fff; box-shadow: inset 0 0 0 3px var(--blue); }
+.opt[aria-checked="true"]::after, .opt[aria-pressed="true"]::after {
+  content: ""; position: absolute; top: 14px; right: 14px; width: 24px; height: 24px; border-radius: 50%;
+  background: var(--blue) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M3.5 8.5l3 3 6-6.5' fill='none' stroke='%23fff' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") center / 14px no-repeat;
+  box-shadow: 0 0 0 2px rgba(0, 0, 0, .35), 0 2px 8px rgba(0, 0, 0, .45);
+}
+.acts select[data-place] { width: 240px; }
+#rco-shapes label { font-size: .9375rem; }
+
+/* Help marks: a "?" beside a control or a piece; what it changes shows on hover, keyboard focus or a tap */
+.help {
+  display: inline-flex; align-items: center; justify-content: center; flex: none; width: 18px; height: 18px;
+  margin: 0 0 0 6px; padding: 0; border: 0; border-radius: 50%; background: var(--surface-strong); color: var(--muted);
+  font-family: inherit; font-size: .75rem; font-weight: 600; line-height: 1; cursor: help; vertical-align: middle;
+  transition: background .15s, color .15s, transform .15s var(--ease);
+}
+.help:hover, .help:focus-visible, .help.open { background: #fff; color: #000; }
+.tip {
+  position: fixed; z-index: 90; max-width: min(340px, calc(100vw - 24px)); padding: 10px 12px; border-radius: 10px;
+  background: rgba(28, 34, 48, .98); color: var(--text); font-size: .875rem; font-weight: 400; line-height: 1.45;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, .5); pointer-events: none; animation: in .15s var(--ease); white-space: pre-line;
+}
+
+/* Motion: small and quick, and none when the system asks for less */
+.btn:active:not([disabled]) { transform: scale(.96); }
+.toast.leaving { animation: out .2s var(--ease) forwards; }
+@keyframes out { to { opacity: 0; transform: translateY(-6px); } }
+.appear { animation: in .22s var(--ease); }
+details > summary { cursor: pointer; }
+details[open] > :not(summary) { animation: in .2s var(--ease); }
+.apply-shown .toast[data-apply] { display: none; }
+.toast .row, .banner .row { display: flex; gap: 12px; align-items: baseline; }
+.toast .row .label, .banner .row .label { flex: 1; min-width: 0; }
+.toast .pct, .banner .pct { font-variant-numeric: tabular-nums; color: var(--muted); font-size: .8125rem; }
+
+/* Loading markers: where something being read from the console will show, with how far it has got */
+.loading { margin: 8px 0 12px; padding: 14px 16px; border-radius: var(--radius); background: var(--surface); font-size: .9375rem; animation: in .2s var(--ease); }
+.loading .row { display: flex; gap: 12px; align-items: baseline; }
+.loading .row .label { flex: 1; min-width: 0; }
+.loading .pct { font-variant-numeric: tabular-nums; color: var(--muted); font-size: .8125rem; }
+.loading .note { margin-top: 6px; }
+.loading.unknown .progress i, .waiting .progress i { width: 35%; animation: sweep 1.2s var(--ease) infinite; }
+@keyframes sweep { from { transform: translateX(-100%); } to { transform: translateX(290%); } }
+.stale { opacity: .45; pointer-events: none; user-select: none; }
+
+/* Focus that shows on everything a controller or keyboard can reach, not only buttons and fields */
+input[type=checkbox]:focus-visible, input[type=range]:focus-visible, summary:focus-visible, audio:focus-visible,
+a:not(.btn):focus-visible, .aspect-head h2 a:focus-visible { outline: 2px solid #fff; outline-offset: 3px; border-radius: 6px; }

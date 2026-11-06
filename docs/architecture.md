@@ -23,7 +23,7 @@ happens when something fails. For contributors; the reasons behind each choice a
 ```
  browser (phone, computer, the console's own)            the console
  ┌───────────────────────────────┐                        ┌───────────────────────────────────────────────┐
- │ web/index.html                │   HTTP, port 8095      │ ps5-theme (one process, plain C, no libraries)│
+ │ web/ (one page)               │   HTTP, port 8095      │ ps5-theme (one process, plain C, no libraries)│
  │  the manager: library, editor │ ─────────────────────► │  web server ──► /data/ps5-theme (themes, ...) │
  │  encoders: BC7, ATRAC9, zstd, │   JSON API, uploads    │  theme engine ─► stock copies ─► stage folders │
  │  PNG; resource-file editing   │ ◄───────────────────── │       │                                       │
@@ -33,11 +33,25 @@ happens when something fails. For contributors; the reasons behind each choice a
                                                           └───────────────────────────────────────────────┘
 ```
 
-- **The manager** (`web/index.html`, `web/atrac9.js`) runs in the browser and does all the media work: fitting
-  pictures, encoding BC7 textures, zstd frames, PNG, ATRAC9 audio, and editing interface resource files. It sends
-  finished files, each with its checksum.
+- **The manager** (`web/`) runs in the browser and does all the media work: fitting pictures, encoding BC7
+  textures, zstd frames, PNG, ATRAC9 audio, and editing interface resource files. It sends finished files, each with
+  its checksum. It is written as style sheets (`web/css/`) and scripts by area (`web/js/core`, `library`, `editor`,
+  `convert`, `preview`, `music`, `settings`), joined into one page by the build (`tools/bundle_page.py`).
+  `web/js/lib/` holds the parts with no page in them (file formats, encoders), which the tests run on their own.
 - **The plugin** (`src/`) stores those files, checks each against the system file it replaces, and shows them with
-  read-only overlays. It never writes the system, and never runs code in another process.
+  read-only overlays. It never writes the system, and never runs code in another process. Each module is a `.c` file
+  and a header declaring what it offers; a module keeps its state to itself and others reach it through those
+  functions only.
+  - The engine, on the main thread: `main.c` starts the threads and runs the main loop; `apply.c` applies a theme
+    and takes it down; `watch.c` covers the views the system makes after an apply; `status.c` keeps what the engine
+    is doing for the page; `theme.c` says what a theme is and which system folders it may change; `shellui.c`
+    follows the home screen's lifecycle (its process, its sandbox); `mounts.c` keeps the record of the overlays;
+    `diag.c` writes down what the plugin found, for finding out why.
+  - The manager's side: `http.c` is the web server; `routes.c` lists every route and who may ask for it;
+    `access.c` decides who may ask anything; `api_*.c` answer, one file per area; `store.c` keeps themes' folders
+    and the copy Discard puts back; `upload.c` receives files.
+  - Everywhere: `fsguard.c` makes every write; `prefs.c` keeps the settings that aren't a theme's; `policy.c`,
+    `svg.c`, `rco.c`, `texture.c`, `atrac9.c`, `font.c` and `png.c` check what arrives.
 - **The stop tool** (`tools/stop/`) asks a running copy to stop and leave its theme, over the web port, or by a
   signal when that doesn't answer.
 
@@ -48,9 +62,9 @@ Which file does what is in [Building](building.md#project-layout).
 | Thread | Started in | Does |
 |---|---|---|
 | main (theme engine) | `main()` | applies themes, covers new sandbox views (the watcher), takes a theme down if an app keeps crashing with it, looks for updates, hands over, stops |
-| web listener | `web_server_thread` | accepts connections, queues them (32), answers `503 busy` when full; listens again if rest mode breaks the socket |
+| web listener | `web_server_thread` (`http.c`) | accepts connections, queues them (32), answers `503 busy` when full; listens again if rest mode breaks the socket |
 | web workers (4) | `start_workers` | read a request, route it, answer; uploads, settings, Save/Discard, the status |
-| ShellUI guard | `shellui_guard` | finds the home screen's process, watches it exit, takes the theme's overlays out of its sandbox at once |
+| ShellUI guard | `shellui_guard` (`shellui.c`) | finds the home screen's process, watches it exit, takes the theme's overlays out of its sandbox at once |
 | icon styler | `autostyle_thread` | notices games installed later, styles their icons once the install settles, asks for a quiet re-apply |
 | tile installer | `tile_thread` | registers the Themes tile once, then ends |
 
@@ -78,10 +92,15 @@ them.
 | `logs/` | `log.txt` (rotated at 512 KB), crash reports | any thread (its own lock) |
 | `dump/` | the mount table and asset listings, for diagnosing | main, web workers |
 | `instance.lock`, `pid` | one running copy at a time, and how another program finds it | main |
+| `access` | who may open the manager (`mode=paired`, `network` or `console`) | web workers |
+| `devices` | the devices allowed: each key's SHA-256, when it was allowed and last used, its address, its kind | web workers (the access lock) |
+| `settings` | which notifications the console shows (`starts`, `tips`, `progress`) | web workers (its own lock) |
+| `icon.png` | the plugin's logo, beside its notifications | main, at start |
 
-Files are written whole: a temporary name of its own, synced, renamed over the old one (`fs_write_file`). Theme,
+Files are written whole: a temporary name of its own, synced, renamed over the old one (`fs_write_file`), both in the
+folder the guard opened and checked, so nothing renamed or linked meanwhile can send the write elsewhere. Theme,
 stock and stage files are only ever replaced, never changed in place, which is what lets a file's identity (inode,
-size, time) stand for its content.
+size, time) stand for its content; a theme's file is staged only if it is the very file its check passed.
 
 ## Starting, running, handing over, stopping
 
@@ -100,7 +119,7 @@ and carries on with them. **Stop** is the same, but the home screen's games' and
 
 ## Applying a theme
 
-`apply_theme()` in `src/main.c`, on the main thread:
+`apply_theme()` in `src/apply.c`, on the main thread:
 
 1. **Targets:** every folder the theme changes files in (`collect_targets`), at most 256.
 2. **Jobs:** each target, and every view of it the system has made, as a mount point (`plan_jobs`). A game's folder is
@@ -140,6 +159,7 @@ See [How it works](how-it-works.md#reaching-the-home-screen-through-its-sandbox-
 | `themes_mutex` (`themes_lock()`) | mutex | a theme's files and folders: every write, an apply, Save, Discard, Duplicate, the styler's placing |
 | `swap_lock` | rwlock | a theme's folder being moved aside and back (Discard writes it); the status and short reads of a theme read it |
 | `state_lock` | mutex | the applying/applied/progress fields of the status, the quiet-apply note |
+| `access_lock` | mutex | who may open the manager, the allowed devices, the code being shown (`access.c`); `devices` is written while it is held, and nothing is taken inside it but the log's own lock |
 | `walks_lock`, `checked_lock`, `queue_lock`, `log_lock`, `seen_lock`, `awaiting_lock`, `dead_lock` | mutex | one cache or queue each, held briefly, nothing taken inside |
 
 The order: `themes_lock` before `swap_lock`. No request that only reads takes `themes_lock` (checked by walking the
@@ -152,12 +172,15 @@ atomics. ThreadSanitizer runs the whole suite on every push.
 
 1. The listener accepts, sets per-read timeouts (5 s receiving, 15 s sending), queues it.
 2. A worker reads the request line and headers: 16 KB at most, 10 seconds in all.
-3. Routing (`route()`): `GET`s read; anything that changes something needs the `X-PS5-Theme` header (a page from
+3. Who is asking (`access_gate`, before anything else): an address in the private ranges, a name for the console
+   that isn't an internet name, and, by default, the key of a device allowed with a code (the console itself
+   always). The page itself and asking for a code are open to a device not allowed yet; nothing else is.
+4. Routing (`route()`): `GET`s read; anything that changes something needs the `X-PS5-Theme` header (a page from
    another site can't send it), and `/api/handoff` and `/api/stop` must come from the console itself.
-4. **Uploads:** received into `incoming/` with a running CRC32, checked against the browser's checksum, then against
+5. **Uploads:** received into `incoming/` with a running CRC32, checked against the browser's checksum, then against
    the system file (format, size, structure), then moved into the theme under the themes lock, its folders made
    there.
-5. Every answer closes the connection. The page and pictures carry an `ETag` and are answered "not modified" when
+6. Every answer closes the connection. The page and pictures carry an `ETag` and are answered "not modified" when
    unchanged; the page is sent compressed to a browser that takes it.
 
 ## When something fails
@@ -179,7 +202,8 @@ atomics. ThreadSanitizer runs the whole suite on every push.
 
 The tests check these after every combination of actions ([Testing](testing.md)):
 
-- Every overlay is read-only; nothing under `/system` or `/system_ex` is ever opened for writing.
+- Every overlay is read-only; nothing under `/system` or `/system_ex` is ever opened for writing, nor anything
+  outside the plugin's folders, whatever is renamed or linked meanwhile.
 - Every overlay is recorded, and every record is mounted.
 - The console shows exactly the applied theme's file, or its own.
 - Nothing of a theme is in a home screen's sandbox that isn't being watched, or in any sandbox while the home screen

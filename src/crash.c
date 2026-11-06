@@ -17,13 +17,21 @@
 #include <time.h>
 #include <unistd.h>
 
+#include "crash.h"
+#include "config.h"
+#include "fsguard.h"
+#include "log.h"
 #include "platform.h"
-#include "theme.h"
+#include "update.h"
 
 
 #define ALTSTACK_SIZE (64 * 1024)
 #define CRUMB_SIZE    256
 #define LAST_CRASH    LOG_DIR "/last-crash"
+
+/* LOG_DIR, opened through the write guard once it exists (crash_ready): the handler can only open files in it
+   (openat), and so never writes anywhere a link or a swapped folder would send it. */
+static int crash_dir = -1;
 
 static char crumbs[CRUMB_COUNT][CRUMB_SIZE];
 static pthread_t threads[CRUMB_COUNT];
@@ -124,7 +132,7 @@ fatal_handler(int sig, siginfo_t *info, void *ucontext) {
   in_crash = 1;
 
   /* First, before the report (whose stack walk may fault again): what must not be left behind with no copy
-     running, the overlays in the home screen's sandbox (main.c). */
+     running, the overlays in the home screen's sandbox (crash_release). */
   int released = 0;
   if(on_fatal) { on_fatal(); released = 1; }
 
@@ -141,7 +149,7 @@ fatal_handler(int sig, siginfo_t *info, void *ucontext) {
   strcat(path, num + i);
   strcat(path, ".txt");
 
-  out_t o = { open(path, O_WRONLY | O_CREAT | O_TRUNC | O_NOFOLLOW, 0644) };
+  out_t o = { crash_dir < 0 ? -1 : openat(crash_dir, strrchr(path, '/') + 1, O_WRONLY | O_CREAT | O_TRUNC | O_NOFOLLOW, 0644) };
   if(o.fd < 0) o.fd = 2;
 
   uint64_t rip = 0, rsp = 0, rbp = 0;
@@ -190,7 +198,7 @@ fatal_handler(int sig, siginfo_t *info, void *ucontext) {
   if(o.fd != 2) close(o.fd);
 
   /* Tell the next start which report to announce. */
-  int m = open(LAST_CRASH, O_WRONLY | O_CREAT | O_TRUNC | O_NOFOLLOW, 0644);
+  int m = crash_dir < 0 ? -1 : openat(crash_dir, "last-crash", O_WRONLY | O_CREAT | O_TRUNC | O_NOFOLLOW, 0644);
   if(m >= 0) {
     out_t mo = { m };
     put(&mo, path);
@@ -217,7 +225,7 @@ stop_handler(int sig) {
 
 
 /* SIGUSR1: a newer copy whose request over the web API went unanswered
-   asks this one to step aside (see take_over in main.c). */
+   asks this one to step aside (see take_over in update.c). */
 static void
 handoff_signal(int sig, siginfo_t *info, void *uc) {
   (void)sig;
@@ -310,11 +318,18 @@ crash_install(void) {
 }
 
 
+/* Once LOG_DIR is made: the folder the handler writes its report in. */
+void
+crash_ready(void) {
+  if(crash_dir < 0) crash_dir = fs_open_dir(LOG_DIR);
+}
+
+
 /* Announce a crash from the previous run, once. */
 void
 crash_report_previous(void) {
   char path[256] = {0};
-  int fd = open(LAST_CRASH, O_RDONLY);
+  int fd = fs_open_read(LAST_CRASH, LOG_DIR);
 
   if(fd < 0) return;
   ssize_t n = read(fd, path, sizeof(path) - 1);
@@ -324,5 +339,5 @@ crash_report_previous(void) {
 
   const char *name = strrchr(path, '/');
   log_err("previous run crashed, report: %s", path);
-  notify("ps5-theme recovered from a crash. Report saved as %s (see Activity).", name ? name + 1 : path);
+  notify("ps5-theme recovered from a crash. Report saved as %s (see the log in the manager's Settings).", name ? name + 1 : path);
 }

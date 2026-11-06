@@ -13,6 +13,7 @@ documentation.
 - [The steps](#the-steps)
 - [Reporting](#reporting)
 - [Consoles tested](#consoles-tested)
+- [Wanted](#wanted)
 
 ## Before you start
 
@@ -32,33 +33,42 @@ is a test of new software on your console; don't start it right before you need 
   it and leaves the theme.
 - **The console doesn't wake from rest mode, or the home screen doesn't come back:** hold the console's power button
   until it beeps twice and switches off, then start it again. The theme comes back with the plugin; choose **No
-  theme** if you'd rather it didn't. Then report it, with the Activity log: this is the most useful report there is.
+  theme** if you'd rather it didn't. Then report it, with the log: this is the most useful report there is.
 - **To remove everything:** see [Removing](../README.md#removing).
 
 ## The steps
 
-Do them in order; each says what you should see. The Activity page (in the manager) is the plugin's log: the lines to
-look for are quoted.
+Do them in order; each says what you should see. The log is in the manager: the gear at the top right, then **Log**
+(**Activity** before 1.88). The lines to look for are quoted.
 
-1. **Start.** Install the release as the README says and start it. *Expected:* a notification with the manager's
-   address; the **Themes** tile on the home screen; in Activity, "ps5-theme 1.xx starting" and "web: listening on
-   port 8095".
-2. **A theme.** Create a theme with a background picture (Home: Game Library) and apply it. *Expected:* the banner
+1. **Start.** Install the release as the README says and start it. *Expected:* a notification "PS5 Themes is ready"
+   with the plugin's icon and the manager's address (1.88 on); the **Themes** tile on the home screen; in the log,
+   "ps5-theme 1.xx starting" and "web: listening on port 8095".
+2. **Allow your phone or computer.** Open `http://<console-ip>:8095` on it. *Expected:* **Allow this device**;
+   **Show a code on the console** puts six digits in a notification on the console; typed in, the manager opens. In
+   the log, "access: a code was shown on the console for the device at …" and "access: allowed …". A wrong code
+   says so. (Since 1.88; on an earlier release, skip it.)
+3. **A theme.** Create a theme with a background picture (Home: Game Library) and apply it. *Expected:* the banner
    says it was applied and how many files were checked, and what needs rest mode to show; the background on the
-   console as it says; in Activity, a line ending in "s (preparing …, switching …, checking …)".
-3. **Apply again.** Apply the same theme again. *Expected:* a second or two; "… of … folder(s) reused".
-4. **Icon style.** In **Games and apps**, choose a shape and the theme's background, style the icons, save and apply,
+   console as it says; in the log, a line ending in "s (preparing …, switching …, checking …)".
+4. **Apply again.** Apply the same theme again. *Expected:* a second or two; "… of … folder(s) reused".
+5. **Icon style.** In **Games and apps**, choose a shape and the theme's background, style the icons, save and apply,
    then use rest mode once. *Expected:* after waking, the home row's icons in the shape, the console's own tiles
    too.
-5. **Rest mode, three times.** Put the console in rest mode and wake it, three times, the last one a minute after
-   the second. *Expected:* it wakes every time, with the theme; in Activity, for each, "ShellUI exited: … taken out
-   of its sandbox" then "watching ShellUI (pid …, sandbox _…)" within about a second.
-6. **A game installed.** With **Style games and apps installed later** on, install any game or homebrew app.
+6. **Rest mode, three times.** Put the console in rest mode and wake it, three times, the last one a minute after
+   the second. *Expected:* it wakes every time, with the theme; in the log, for each, "ShellUI exited: … taken out
+   of its sandbox … and of NPXS40101_…, NPXS40102_… (closing with it) …, as its exit began; up … s", "ShellUI gone …
+   ms after its exit began, … ms after ours were out", then "watching ShellUI (pid …, sandbox _…)" within about a
+   second, and "5 s after the home screen exited, the system had taken down the sandboxes that closed with it". If it
+   doesn't wake, hold the power button until it beeps twice, start it, and report it with the log: the log says
+   what held the home screen up (see
+   [Challenges](challenges.md#empty-folders-the-system-removed-at-rest-mode)).
+7. **A game installed.** With **Style ones installed later** (under **Games and apps**) on, install any game or homebrew app.
    *Expected:* the console says it is installing, and about 2 minutes after it finishes, that its icon was styled.
-7. **No theme.** Choose **No theme**. *Expected:* the console's own look; in Activity, "reverted … mount(s)".
-8. **Restart.** Apply the theme again, then restart the console and start the plugin as you do. *Expected:* the theme
+8. **No theme.** Choose **No theme**. *Expected:* the console's own look; in the log, "reverted … mount(s)".
+9. **Restart.** Apply the theme again, then restart the console and start the plugin as you do. *Expected:* the theme
    comes back by itself ("putting '…' back").
-9. **Update.** Put the same release's `ps5-theme.elf` in `/data/ps5-theme/update/` (upload as `.part`, then rename).
+10. **Update.** Put the same release's `ps5-theme.elf` in `/data/ps5-theme/update/` (upload as `.part`, then rename).
    *Expected:* nothing happens: "not newer than this copy". With a newer release it hands over and keeps the theme.
 
 ## Reporting
@@ -66,12 +76,12 @@ look for are quoted.
 Open an issue with the **Hardware test report** form, or copy this into one:
 
 ```
-Release:            (e.g. 1.80; checksums matched: yes/no)
+Release:            (e.g. 1.88; checksums matched: yes/no)
 Console:            (model: launch disc / digital / slim / pro; firmware)
 Jailbreak:          (etaHEN version, or Payload Manager version, and how it was loaded)
 Other homebrew:     (anything else running: ShadowMountPlus, Itemzflow, ...)
-Steps 1 to 9:       (for each: as expected / not, and what you saw)
-Activity log:       (the manager's Activity page, copied)
+Steps 1 to 10:      (for each: as expected / not, and what you saw)
+Log:                (the manager's Settings › Log, copied)
 ```
 
 A failure with its log is worth more than a pass without one. Nothing in the report should be personal: the log
@@ -87,3 +97,16 @@ holds paths, title IDs and your console's network address on your own network, n
 
 **Independent results** (from anyone else): none yet. Yours would be the first; it is the most useful thing a
 non-programmer can give this project.
+
+## Wanted
+
+Every release so far was tried on one console: a PS5 on 13.42 with etaHEN 2.5B and PS5 Payload Manager. Any of these
+would be the first result of its kind:
+
+| What | Why it matters |
+|---|---|
+| Firmware 13.00, 13.20 or 13.60 | The plugin is built for up to 13.60; the interface's folders and its sandboxes may differ |
+| Firmware 12.xx or 11.xx | The overlays, the home screen's sandbox and the tile's registration are found on the console, but not tried there |
+| A PS5 Pro, a Slim, or a Digital Edition | Same software, different hardware: rest mode and storage may behave differently |
+| Another loader (nexHEN, a different etaHEN build, an ELF loader) | How the plugin is started and updated depends on it |
+| Other homebrew running alongside (ShadowMountPlus, Itemzflow, a game mounter) | Mounts of theirs share the table with the plugin's |

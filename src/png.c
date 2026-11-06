@@ -14,7 +14,8 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "theme.h"
+#include "fsguard.h"
+#include "media.h"
 
 
 #define PNG_RAW_MAX  (64u << 20)

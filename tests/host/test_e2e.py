@@ -193,11 +193,12 @@ def sfo(title):
             + struct.pack("<HHIII", 0, 0x0204, len(data), len(padded), 0) + keys + padded)
 SVG_ICON = (b'<svg width="128px" height="128px" viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">'
             b'<path d="M8 8h48v48H8z" fill="#fff"/></svg>')
-WEB_PAGE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "../../web/index.html")
+# The page's code that runs without a browser (web/js/lib), for the scripts below: lib("rco", "vag") is the files' text.
+WEB_LIB = os.path.join(os.path.dirname(os.path.abspath(__file__)), "../../web/js/lib")
 RCO_JS = """
 const fs = require("fs"), zlib = require("zlib");
-const html = fs.readFileSync(process.argv[2], "utf8");
-const block = html.slice(html.indexOf("/* rco:begin */"), html.indexOf("/* rco:end */"));
+const lib = (...n) => n.map(x => fs.readFileSync(require("path").join(process.argv[2], x + ".js"), "utf8")).join("\\n");
+const block = lib("rco");
 const R = new Function("esc", block + ";return { rcoParse, rcoPictures, rcoRebuild, numberSvg, numberPicture, rcoData };")(s => String(s));
 (async () => {
   const stock = new Uint8Array(fs.readFileSync(process.argv[3]));
@@ -222,8 +223,8 @@ const R = new Function("esc", block + ";return { rcoParse, rcoPictures, rcoRebui
 
 SHAPES_JS = """
 const fs = require("fs");
-const html = fs.readFileSync(process.argv[2], "utf8");
-const block = html.slice(html.indexOf("/* rco:begin */"), html.indexOf("/* rco:end */"));
+const lib = (...n) => n.map(x => fs.readFileSync(require("path").join(process.argv[2], x + ".js"), "utf8")).join("\\n");
+const block = lib("rco");
 const R = new Function("esc", block + ";return { rcoParse, rcoRebuild, rcoShapes, shapesText };")(s => String(s));
 const r = R.rcoParse(new Uint8Array(fs.readFileSync(process.argv[3]))), sh = R.rcoShapes(r);
 if (R.shapesText(sh.text, sh.values) !== sh.text) throw new Error("unchanged numbers changed the text");
@@ -235,8 +236,8 @@ console.log(JSON.stringify({ names: sh.values.map(v => v[0]) }));
 
 COLORS_JS = """
 const fs = require("fs");
-const html = fs.readFileSync(process.argv[2], "utf8");
-const block = html.slice(html.indexOf("/* rco:begin */"), html.indexOf("/* rco:end */"));
+const lib = (...n) => n.map(x => fs.readFileSync(require("path").join(process.argv[2], x + ".js"), "utf8")).join("\\n");
+const block = lib("rco");
 const R = new Function("esc", block + ";return { rcoParse, rcoRebuild, rcoColors, colorsText, colorTestValues, colorPanelValues, colorEditValues };")(s => String(s));
 const r = R.rcoParse(new Uint8Array(fs.readFileSync(process.argv[3]))), pals = R.rcoColors(r);
 for (const p of pals) if (R.colorsText(p.text, p.values) !== p.text) throw new Error("unchanged colours changed the text");
@@ -251,9 +252,8 @@ console.log(JSON.stringify({ palettes: pals.map(p => p.id) }));
 
 SOUNDS_JS = """
 const fs = require("fs");
-const html = fs.readFileSync(process.argv[2], "utf8");
-const grab = n => html.slice(html.indexOf(`/* ${n}:begin */`), html.indexOf(`/* ${n}:end */`));
-const R = new Function("esc", grab("rco") + grab("vag") + ";return { rcoParse, rcoRebuild, rcoData, vagInfo, vagSamples, vagDecode, vagEncode, vagMaxSamples, vagLayoutProblem, uiSoundPrepare, uiSoundHit };")(s => String(s));
+const lib = (...n) => n.map(x => fs.readFileSync(require("path").join(process.argv[2], x + ".js"), "utf8")).join("\\n");
+const R = new Function("esc", lib("rco", "vag") + ";return { rcoParse, rcoRebuild, rcoData, vagInfo, vagSamples, vagDecode, vagEncode, vagMaxSamples, vagLayoutProblem, uiSoundPrepare, uiSoundHit };")(s => String(s));
 const r = R.rcoParse(new Uint8Array(fs.readFileSync(process.argv[3])));
 const entry = id => r.files.find(f => f.id === id && f.type === "sound/vag");
 const out = {};
@@ -286,9 +286,8 @@ console.log(JSON.stringify(out));
 
 MIX_JS = """
 const fs = require("fs");
-const html = fs.readFileSync(process.argv[2], "utf8");
-const grab = n => html.slice(html.indexOf(`/* ${n}:begin */`), html.indexOf(`/* ${n}:end */`));
-const R = new Function("esc", grab("rco") + grab("mix") + ";return { rcoParse, rcoRebuild, rcoData, rcoEntryKind, rcoMixEntries };")(s => String(s));
+const lib = (...n) => n.map(x => fs.readFileSync(require("path").join(process.argv[2], x + ".js"), "utf8")).join("\\n");
+const R = new Function("esc", lib("rco", "rco-mix") + ";return { rcoParse, rcoRebuild, rcoData, rcoEntryKind, rcoMixEntries };")(s => String(s));
 const stock = R.rcoParse(new Uint8Array(fs.readFileSync(process.argv[3])));
 const keyOf = f => f.el + "\\t" + f.attr;
 const changesOf = p => {
@@ -311,8 +310,8 @@ console.log(JSON.stringify({ taken: Object.fromEntries([...merged.keys()].map(k 
 
 PICTURE_JS = """
 const fs = require("fs"), zlib = require("zlib");
-const html = fs.readFileSync(process.argv[2], "utf8");
-const block = html.slice(html.indexOf("/* rco:begin */"), html.indexOf("/* rco:end */"));
+const lib = (...n) => n.map(x => fs.readFileSync(require("path").join(process.argv[2], x + ".js"), "utf8")).join("\\n");
+const block = lib("rco");
 const R = new Function("esc", block + ";return { rcoParse, rcoPictures, rcoRebuild, rcoData, svgWithImage, numberPicture, tileTitle };")(s => String(s));
 (async () => {
   const stock = new Uint8Array(fs.readFileSync(process.argv[3]));
@@ -604,7 +603,7 @@ S = {}  # shared state between ordered tests
 
 def t_startup():
     s = status()
-    assert s["fw"] == "13.42" and s["version"] == "1.80" and s["themes"] == [], s
+    assert s["fw"] == "13.42" and s["version"] == "1.91" and s["themes"] == [], s
     listing = open(f"{BASE}/dump/assets-v2-13.42.txt").read()
     assert f"{VSH}/bg_hub_default.dds.zst" in listing
     assert f"{HOME}/bg.png" in listing and "/mnt/rnps/apps/NPXS40099/a.png" in listing
@@ -614,7 +613,9 @@ def t_startup():
     assert open("/tmp/tile-registered").read().strip() == "THEM00001"
     assert "starting" in log_text()
     notes = open("/tmp/notifications.txt").read()
-    assert "ps5-theme 1.80 starting" in notes and "ps5-theme ready" in notes, notes
+    # One notification as it starts, as etaHEN's own: its icon (written beside the plugin's files), a line, a second.
+    assert "PS5 Themes is ready: Open the Themes tile, or " in notes and "[no icon]" not in notes and "starting" not in notes, notes
+    assert open(f"{BASE}/icon.png", "rb").read() == open("assets/icon0.png", "rb").read()
 
 
 def get_full(path, headers=None):
@@ -636,7 +637,7 @@ def t_ui_and_icon_served():
     assert code == 200 and js == open("web/atrac9.js", "rb").read()
     # The page and the encoder: compressed for a browser that takes it, the very same bytes once inflated; asked again
     # each time (no-cache) and "not modified" in a few bytes while the plugin is the same.
-    for path, src in (("/", "web/index.html"), ("/atrac9.js", "web/atrac9.js")):
+    for path, src in (("/", "build-meta/index.html"), ("/atrac9.js", "web/atrac9.js")):
         want = open(src, "rb").read()
         code, h, body = get_full(path, {"Accept-Encoding": "gzip, deflate, br"})
         assert code == 200 and h.get("content-encoding") == "gzip" and gzip.decompress(body) == want, (path, h)
@@ -1383,13 +1384,17 @@ def t_update_hands_over():
         assert dup.returncode == 0 and "is already running; this copy exits" in log_text()
         assert S["plugin"].alive() and status()["applied"] == "night"
 
-        # Only the console itself may ask for a hand-over: not over the network.
+        # Only the console itself may ask for a hand-over: not over the network, where a device not allowed is refused
+        # before anything (401), and even with any device on the network allowed, the hand-over is refused (403).
         ip = socket.gethostbyname(socket.gethostname())
         if not ip.startswith("127."):
-            conn = http.client.HTTPConnection(ip, PORT, timeout=10)
-            conn.request("POST", "/api/handoff", headers={"X-PS5-Theme": "1", "Content-Length": "0"})
-            assert conn.getresponse().status == 403
-            conn.close()
+            for mode, want in (("paired", 401), ("network", 403)):
+                assert call("POST", "/api/access", {"mode": mode})[0] == 200
+                conn = http.client.HTTPConnection(ip, PORT, timeout=10)
+                conn.request("POST", "/api/handoff", headers={"X-PS5-Theme": "1", "Content-Length": "0"})
+                assert conn.getresponse().status == want, mode
+                conn.close()
+            assert call("POST", "/api/access", {"mode": "paired"})[0] == 200
         assert S["plugin"].alive()
 
         # A copy that asked to take over but has gone since is not handed
@@ -1543,12 +1548,14 @@ def t_stop_tool_keeps_the_theme():
 
         # Asked over its web port: nothing to look for (on 13.42 the process could not be found, 2026-10-29).
         old = S["plugin"]
+        at = len(open("/tmp/notifications.txt").read())
         run = run_tool()
         assert run.returncode == 0, (run.stdout, run.stderr)
         old.proc.wait(10)
         assert old.proc.returncode == 0
-        notes = open("/tmp/notifications.txt").read()
-        assert "ps5-theme stopped. The theme stays; start ps5-theme again to open the manager." in notes, notes[-500:]
+        notes = open("/tmp/notifications.txt").read()[at:]
+        assert "PS5 Themes stopped: Your theme stays on. Start PS5 Themes again to change it." in notes, notes[-500:]
+        assert notes.count("stopped") == 1, notes[-500:]   # said once, by the tool that asked
         assert "stopping on request: the theme stays" in log_text()
         assert "ps5-theme-stop asked this copy to stop" in log_text()
         assert crc_file(f"{HOME}/bg.png") == zlib.crc32(S["bg"])        # the theme stays
@@ -1581,7 +1588,7 @@ def t_stop_tool_keeps_the_theme():
         wait_icon(zlib.crc32(mine))
         run = run_tool()
         assert run.returncode == 0, (run.stdout, run.stderr)
-        assert "ps5-theme isn't running. Start it to open the manager." in open("/tmp/notifications.txt").read()
+        assert "PS5 Themes isn't running: Start it to open the manager." in open("/tmp/notifications.txt").read()
         wait_icon(stock)
         assert not pictures(), recorded_mounts()
         assert crc_file(f"{HOME}/bg.png") == zlib.crc32(S["bg"])
@@ -1880,6 +1887,30 @@ def t_deep_folders_are_not_walked():
     shutil.rmtree(root, ignore_errors=True)
 
 
+def t_nothing_deleted_under_a_mount():
+    """A theme folder with something mounted inside it, which isn't the plugin's, is never deleted, nor what is
+    mounted there: the mount table says so (on the console, a folder just made has another device number than the one
+    it is in, so device numbers can't). Once it is taken off, the theme goes."""
+    if EMULATED:
+        print("      (skipped: needs real mounts)", flush=True)
+        return
+    assert call("POST", "/api/themes", {"id": "mounted", "name": "Mounted"})[0] == 200
+    target, inside = "/tmp/someone-elses", f"{BASE}/themes/mounted/files/elsewhere"
+    write(f"{target}/keep.bin", b"keep")
+    os.makedirs(inside, exist_ok=True)
+    subprocess.run(["mount", "--bind", target, inside], check=True)
+    try:
+        code, r = call("DELETE", "/api/themes", {"id": "mounted"})
+        assert code == 409 and "mounted inside" in r["error"], (code, r)
+        assert open(f"{target}/keep.bin", "rb").read() == b"keep" and os.path.isdir(f"{BASE}/themes/mounted")
+        assert "refused delete" in log_text() and "something is mounted inside it" in log_text()
+    finally:
+        subprocess.run(["umount", inside], check=True)
+    assert call("DELETE", "/api/themes", {"id": "mounted"})[0] == 200
+    assert not os.path.exists(f"{BASE}/themes/mounted") and open(f"{target}/keep.bin", "rb").read() == b"keep"
+    shutil.rmtree(target)
+
+
 def t_pictures_are_revalidated():
     """A theme's pictures are asked for again each time the page shows them, and an unchanged one is "not modified":
     a page redrawing its cards costs a few bytes each, not the pictures; a changed one is always the new one."""
@@ -1932,8 +1963,8 @@ def t_media_policy():
         ("anim/spinner.json", b'{"w":100,"h":100,', 422, "valid JSON"),
         ("anim/spinner.json", b'{"w":100,"h":100,"x":' + b"[" * 100 + b"]" * 100 + b"}", 422, "valid JSON"),
         ("icons/star.svg", b'<svg xmlns="http://www.w3.org/2000/svg"><circle r="3"/></svg>', 200, None),
-        ("icons/star.svg", b'<svg><script>alert(1)</script></svg>', 422, "<script"),
-        ("icons/star.svg", b'<svg><image href="http://evil/x.png"/></svg>', 422, "href"),
+        ("icons/star.svg", b'<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>', 422, "<script>"),
+        ("icons/star.svg", b'<svg xmlns="http://www.w3.org/2000/svg"><image href="http://evil/x.png"/></svg>', 422, "links to"),
         ("video/loop.mp4", b"\x00\x00\x00\x18ftypmp42" + b"\1" * 40, 200, None),
         ("video/loop.mp4", b"\x1a\x45\xdf\xa3" + b"\0" * 40, 422, "same format"),
     ]
@@ -1948,6 +1979,292 @@ def t_media_policy():
     assert "5 files checked" in s["result"], s["result"]
     assert open(f"{MEDIA}/fonts/ui.ttf", "rb").read() == font_fixture.font("tt", glyphs=130)
     assert open(f"{MEDIA}/bundle.js", "rb").read() == b"console.log(1)"
+    assert S["plugin"].alive()
+
+
+SVG_NS, XLINK_NS = 'xmlns="http://www.w3.org/2000/svg"', 'xmlns:xlink="http://www.w3.org/1999/xlink"'
+PNG_1PX = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=="
+
+def t_svg_subset():
+    """SVG pictures are parsed, and only the subset the console's own pictures use is accepted (13.42's 1,092 SVGs, the
+    resource file's and two apps', all pass: checked when the subset was made). Pictures built the ways the console's
+    are (a drawing tool's comments and gradients, masks, a <use> of a path, class style rules, a drop shadow, an
+    embedded PNG, names in Japanese) pass; scripts, event handlers, other namespaces, entities, links out of the
+    picture in any spelling, animation, text, CSS beyond plain paint, and broken XML are each refused by name."""
+    assert call("POST", "/api/themes", {"id": "svgs", "name": "SVGs"})[0] == 200
+    star = f"{MEDIA}/icons/star.svg"
+    good = [
+        f'<?xml version="1.0" encoding="UTF-8"?>\n<svg width="128px" height="128px" viewBox="0 0 128 128" version="1.1" '
+        f'{SVG_NS} {XLINK_NS}>\n  <!-- Drawn in a drawing tool -->\n  <title>Star &amp; ring</title><desc>Made for a test.</desc>'
+        f'<defs><linearGradient x1="50%" y1="0%" x2="50%" y2="100%" id="lg-1"><stop stop-color="#FFF" offset="0%"/>'
+        f'<stop stop-color="#000" stop-opacity="0.5" offset="100%"/></linearGradient>'
+        f'<path d="M0 0h10v10z" id="path-1"/></defs><g id="Page" stroke="none" stroke-width="1" fill="none" fill-rule="evenodd">'
+        f'<mask id="mask-2" fill="white"><use xlink:href="#path-1"/></mask><g mask="url(#mask-2)" fill="url(#lg-1)" '
+        f'transform="translate(4.000000, 4.000000)"><polygon points="0 0 10 0 5 8"/><circle cx="5" cy="5" r="2"/>'
+        f'</g></g></svg>',
+        f'<svg version="1.1" id="L1" {SVG_NS} {XLINK_NS} x="0px" y="0px" viewBox="0 0 128 128" '
+        f'style="enable-background:new 0 0 128 128;" xml:space="preserve"><style type="text/css">\n\t.st0{{fill:#FFFFFF;}}\n'
+        f'\t.st1{{fill-rule:evenodd;clip-rule:evenodd;fill:#EC2024;}}\n</style><path class="st0" d="M1 1h2v2z"/></svg>',
+        f'<svg width="144" height="144" viewBox="0 0 144 144" fill="none" {SVG_NS}><g filter="url(#f0)">'
+        f'<rect x="2" y="2" width="140" height="140" rx="12" fill="#121314"/></g><defs><filter id="f0" x="0" y="0" '
+        f'width="144" height="144" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB">'
+        f'<feFlood flood-opacity="0" result="BG"/><feColorMatrix in="SourceAlpha" type="matrix" values="0 0 0 0 0 0 0 0 0 '
+        f'0 0 0 0 0 0 0 0 0 127 0" result="A"/><feOffset/><feGaussianBlur stdDeviation="4"/><feComposite in2="A" '
+        f'operator="out"/><feBlend mode="normal" in="SourceGraphic" in2="BG" result="shape"/></filter></defs></svg>',
+        f'<svg id="_レイヤー_1" data-name="レイヤー 1" {SVG_NS} {XLINK_NS} viewBox="0 0 64 64"><defs><linearGradient '
+        f'id="グラデーション_1"/></defs><path d="M0 0h1" fill="url(#グラデーション_1)" style="mix-blend-mode: multiply;"/>'
+        f'<image x="0" y="0" width="64" height="64" preserveAspectRatio="xMidYMid meet" xlink:href="data:image/png;base64,'
+        f'{PNG_1PX}"/></svg>',
+        f'﻿<svg {SVG_NS}/>\n<!-- after -->\n',
+    ]
+    for text in good:
+        code, r = put_file("svgs", star, text.encode())
+        assert code == 200, (text[:80], r)
+    bad = [
+        (f'<svg {SVG_NS}><SCRIPT>alert(1)</SCRIPT></svg>', "<SCRIPT>"),
+        (f'<svg {SVG_NS}><script><![CDATA[alert(1)]]></script></svg>', "<script>"),
+        (f'<svg {SVG_NS} onload ="alert(1)"/>', "event handler (onload)"),
+        (f'<svg {SVG_NS}><path d="M0 0" onclick="x()"/></svg>', "event handler (onclick)"),
+        (f'<svg {SVG_NS}><foreignObject/></svg>', "<foreignObject>"),
+        (f'<svg {SVG_NS} xmlns:h="http://www.w3.org/1999/xhtml"><h:script>x</h:script></svg>', "xmlns:h"),
+        (f'<svg {SVG_NS}><g xmlns="http://www.w3.org/1999/xhtml"><script>x</script></g></svg>', "another namespace"),
+        ('<svg><path d="M0 0"/></svg>', "isn't in the SVG namespace"),
+        (f'<!DOCTYPE svg [<!ENTITY x "javascript:alert(1)">]><svg {SVG_NS}/>', "DOCTYPE"),
+        (f'<svg {SVG_NS}><title>&nbsp;</title></svg>', "&nbsp;"),
+        (f'<?xml-stylesheet href="http://evil/x.css"?><svg {SVG_NS}/>', "processing instruction"),
+        (f'<svg {SVG_NS} {XLINK_NS}><use xlink:href="&#106;avascript:alert(1)"/></svg>', "links to \"javascript:"),
+        (f'<svg {SVG_NS}><use href="other.svg#a"/></svg>', "links to \"other.svg#a\""),
+        (f'<svg {SVG_NS}><image href="data:image/svg+xml;base64,PHN2Zz48L3N2Zz4="/></svg>', "data:image/svg+xml"),
+        (f'<svg {SVG_NS}><a href="http://evil"><path d="M0 0"/></a></svg>', "<a>"),
+        (f'<svg {SVG_NS}><set attributeName="href" to="javascript:alert(1)"/></svg>', "<set>"),
+        (f'<svg {SVG_NS}><style>@import url(http://evil/x.css);</style></svg>', "<style> has a rule"),
+        (f'<svg {SVG_NS}><style>.a{{fill:u\\72l(http://x)}}</style></svg>', '"\\"'),
+        (f'<svg {SVG_NS}><path style="behavior:url(#a)" d="M0 0"/></svg>', "sets behavior"),
+        (f'<svg {SVG_NS}><path fill="URL(http://evil/#a)" d="M0 0"/></svg>', "only url(#name)"),
+        (f'<svg {SVG_NS}><path fill="&#117;rl(http://evil)" d="M0 0"/></svg>', "only url(#name)"),
+        (f'<svg {SVG_NS}><svg {SVG_NS}/></svg>', "an <svg> inside it"),
+        (f'<svg {SVG_NS}><text>hi</text></svg>', "<text>"),
+        (f'<svg {SVG_NS}><g>hi</g></svg>', "draw no text"),
+        (f'<svg {SVG_NS}><g></path></svg>', "closes nothing open"),
+        (f'<svg {SVG_NS}><g>', "ends before"),
+        (f'<svg {SVG_NS}/><svg {SVG_NS}/>', "more after"),
+        (f'<svg {SVG_NS}><path d="M0 0" d="M1 1"/></svg>', "d twice"),
+        (f'<?xml version="1.0" encoding="UTF-16"?><svg {SVG_NS}/>', "only UTF-8"),
+        (f'<svg {SVG_NS}><path d="M0 0" src="x"/></svg>', "attribute src"),
+        (f'<svg {SVG_NS}>' + "<g>" * 70 + "</g>" * 70 + "</svg>", "nests deeper"),
+    ]
+    for text, needle in bad:
+        code, r = put_file("svgs", star, text.encode())
+        assert code == 422 and needle in r["error"], (text[:80], needle, code, r)
+    code, r = put_file("svgs", star, f'<svg {SVG_NS}><title>\xff</title></svg>'.encode("latin-1"))
+    assert code == 422 and "not UTF-8" in r["error"], r
+    assert S["plugin"].alive()
+
+
+def lan_call(method, path, params=None, body=None, key=None, host=None, token=True, ua=None):
+    """A request from a device on the network: to the console's network address, so the plugin sees it come from
+    there, not from the console itself (127.0.0.1). Returns the status, the answer and any cookie set."""
+    url = path + ("?" + urllib.parse.urlencode(params) if params else "")
+    conn = http.client.HTTPConnection(S["lan_ip"], PORT, timeout=30)
+    h = {"X-PS5-Theme": "1"} if token and method != "GET" else {}
+    if key:
+        h["Cookie"] = f"theme=dark; ps5theme={key}"
+    if host is not None:
+        h["Host"] = host
+    if ua:
+        h["User-Agent"] = ua
+    conn.request(method, url, body=body, headers=h)
+    res = conn.getresponse()
+    data = res.read()
+    conn.close()
+    ctype = res.getheader("Content-Type", "")
+    return res.status, (json.loads(data) if "json" in ctype else data), res.getheader("Set-Cookie")
+
+
+def shown_code():
+    """The code the console showed last, from its notifications."""
+    lines = [l for l in open("/tmp/notifications.txt").read().splitlines() if "is the code for the device at" in l]
+    assert lines, "no code was shown"
+    m = re.search(r"(\d{3}) (\d{3}) is the code", lines[-1])
+    return m.group(1) + m.group(2)
+
+
+def t_who_can_open_the_manager():
+    """Only devices on the console's own network, and by default only those allowed with a code the console shows
+    (once, then a key of their own); the console itself always. A page that names the console by an internet name
+    (DNS rebinding) is refused, and so is an address outside the private ranges. Codes: two minutes, the device that
+    asked only, five tries, ten new ones in ten minutes; the key is kept as its hash only and outlasts a restart.
+    Any device on the network, or only the console, when chosen; a device can be forgotten."""
+    ip = status()["ip"]
+    if not ip or ip.startswith("127."):
+        print("      (skipped: no network address to ask from)", flush=True)
+        return
+    S["lan_ip"] = ip
+    iphone = "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 Version/18.0 Mobile/15E148 Safari/604.1"
+    code, r = call("GET", "/api/access")
+    assert code == 200 and r["mode"] == "paired" and r["here"] == "console" and r["allowed"] is True, r
+
+    # Not allowed yet: the page loads (and says what to do), nothing else does.
+    code, page, _ = lan_call("GET", "/")
+    assert code == 200 and b"<title>PS5 Themes</title>" in page
+    assert lan_call("GET", "/atrac9.js")[0] == 200 and lan_call("GET", "/icon.png")[0] == 200
+    code, r, _ = lan_call("GET", "/api/access")
+    assert code == 200 and r == {"mode": "paired", "here": "device", "allowed": False}, r
+    for method, path in (("GET", "/api/status"), ("GET", "/api/log"), ("GET", "/api/theme/files"), ("POST", "/api/apply"),
+                         ("PUT", "/api/theme/file"), ("DELETE", "/api/themes"), ("GET", "/api/app-db")):
+        code, r, _ = lan_call(method, path, {"id": "night"})
+        assert code == 401 and r["access"] == "pair", (method, path, code, r)
+
+    # The console's name: an address or a local name, never an internet one (from any device, the console included).
+    for host in ("evil.example.com", "evil.example.com:8095", "192.168.1.5.nip.io", "ps5.local.evil.com", "", "a b"):
+        code, r, _ = lan_call("GET", "/", host=host)
+        assert code == 403 and b"by the console's address" in r, (host, code, r)
+        assert call("GET", "/api/status", headers={"Host": host})[0] == 403, host
+    for host in (f"{ip}:{PORT}", "192.168.1.5", "ps5", "ps5.local", "PS5.LAN:8095", "playstation.home.arpa", "localhost"):
+        assert lan_call("GET", "/", host=host)[0] == 200, host
+
+    # A code: only asked for with the manager's header, only usable by the device that asked, five tries.
+    assert lan_call("POST", "/api/pair/finish", {"code": "123456"})[1]["error"] == "ask the console for a code first"
+    assert lan_call("POST", "/api/pair/start", token=False)[0] == 403
+    code, r, _ = lan_call("POST", "/api/pair/start")
+    assert code == 200 and r["seconds"] == 120, r
+    first = shown_code()
+    assert f"is the code for the device at {ip}. It works for 2 minutes." in open("/tmp/notifications.txt").read()
+    assert first not in log_text(), "the code was written in the log"
+    wrong = f"{(int(first) + 1) % 1000000:06d}"
+    for i in range(4):
+        code, r, _ = lan_call("POST", "/api/pair/finish", {"code": wrong})
+        assert code == 403 and r["error"] == "that isn't the code the console shows", (i, r)
+    code, r, _ = lan_call("POST", "/api/pair/finish", {"code": "12345"})
+    assert code == 403 and r["error"] == "too many wrong codes: ask for a new one", r
+    code, r, _ = lan_call("POST", "/api/pair/finish", {"code": first})
+    assert code == 403 and r["error"] == "ask the console for a code first", r   # spent: a new one is needed
+
+    assert lan_call("POST", "/api/pair/start")[0] == 200
+    second = shown_code()
+    code, r, cookie = lan_call("POST", "/api/pair/finish", {"code": second}, ua=iphone)
+    assert code == 200 and r == {"ok": True}, r
+    m = re.fullmatch(r"ps5theme=([0-9a-f]{64}); Path=/; Max-Age=34560000; HttpOnly; SameSite=Strict", cookie or "")
+    assert m, cookie
+    key = m.group(1)
+    assert f"iPhone, Safari at {ip} can now open the manager" in open("/tmp/notifications.txt").read()
+    devices = open(f"{BASE}/devices").read()
+    assert key not in devices and hashlib.sha256(key.encode()).hexdigest() in devices, devices
+
+    # The key opens everything, as the console's own browser can; changes still need the manager's header.
+    assert lan_call("GET", "/api/status", key=key)[0] == 200
+    assert lan_call("POST", "/api/apply", {"id": "night"}, key=key, token=False)[0] == 403
+    code, r, _ = lan_call("GET", "/api/access", key=key)
+    assert code == 200 and r["allowed"] is True and len(r["devices"]) == 1, r
+    dev = r["devices"][0]
+    assert dev["name"] == "iPhone, Safari" and dev["addr"] == ip and dev["thisOne"] is True and len(dev["id"]) == 8, dev
+    assert call("GET", "/api/access")[1]["devices"][0]["thisOne"] is False
+    for bad in (key[:-1] + ("0" if key[-1] != "0" else "1"), key[:63], key.upper(), "x" * 64):
+        assert lan_call("GET", "/api/status", key=bad)[0] == 401, bad
+
+    # An address outside the private ranges is refused whatever it carries; the key outlasts the restart.
+    S["plugin"].kill()
+    S["plugin"] = Plugin(env={"PS5THEME_TEST_PUBLIC": ip})
+    code, r, _ = lan_call("GET", "/", key=key)
+    assert code == 403 and b"own network" in r, (code, r)
+    assert call("GET", "/api/status")[0] == 200
+    S["plugin"].kill()
+    S["plugin"] = Plugin()
+    assert lan_call("GET", "/api/status", key=key)[0] == 200
+
+    # Any device on the network; only the console (the page still loads, to say so).
+    assert call("POST", "/api/access", {"mode": "network"})[1] == {"ok": True, "mode": "network"}
+    assert lan_call("GET", "/api/status")[0] == 200
+    assert lan_call("POST", "/api/pair/start")[0] == 200   # (nothing to do)
+    assert call("POST", "/api/access", {"mode": "console"})[0] == 200
+    code, r, _ = lan_call("GET", "/api/status", key=key)
+    assert code == 403 and r["access"] == "console", r
+    assert lan_call("GET", "/")[0] == 200
+    assert lan_call("GET", "/api/access")[1] == {"mode": "console", "here": "device", "allowed": False}
+    assert lan_call("POST", "/api/pair/start")[0] == 403
+    assert call("GET", "/api/status")[0] == 200
+    assert call("POST", "/api/access", {"mode": "nobody"})[0] == 400
+    assert call("POST", "/api/access", {"mode": "paired"})[0] == 200
+    assert open(f"{BASE}/access").read() == "mode=paired\n"
+
+    # Forgotten: the key opens nothing any more.
+    assert lan_call("DELETE", "/api/access/devices", {"id": "../x"}, key=key)[0] == 400
+    code, r, _ = lan_call("DELETE", "/api/access/devices", {"id": dev["id"]}, key=key)
+    assert code == 200 and r["forgotten"] == 1, r
+    assert lan_call("GET", "/api/status", key=key)[0] == 401
+    assert call("GET", "/api/access")[1]["devices"] == []
+
+    # Ten new codes in ten minutes at most (each spent here by five wrong tries; counted from the restart above).
+    made = 0
+    while made < 10:
+        assert lan_call("POST", "/api/pair/start")[0] == 200
+        made += 1
+        for _ in range(5):
+            lan_call("POST", "/api/pair/finish", {"code": "000000" if shown_code() != "000000" else "000001"})
+    code, r, _ = lan_call("POST", "/api/pair/start")
+    assert code == 429 and "too many codes" in r["error"], r
+    assert S["plugin"].alive()
+
+
+def t_settings_for_everyday():
+    """What the console says, chosen in the manager's Settings and kept across a restart: the tips on the "Theme
+    applied" notification, the progress while applying, the notification as it starts. A failure is always said. And
+    what the plugin keeps on the console's storage, part by part, where the copies left from another firmware can be
+    removed, but never one an overlay shows and never through a link."""
+    assert call("GET", "/api/settings")[1] == {"starts": True, "tips": True, "progress": True}
+    for bad in ({"name": "nope", "on": "1"}, {"name": "tips", "on": "2"}, {"name": "tips"}):
+        assert call("POST", "/api/settings", bad)[0] == 400, bad
+    assert call("POST", "/api/settings", {"name": "tips", "on": "1"}, token=False)[0] == 403
+    try:
+        assert call("POST", "/api/settings", {"name": "tips", "on": "0"})[1]["tips"] is False
+        assert call("POST", "/api/settings", {"name": "progress", "on": "0"})[1]["progress"] is False
+        assert open(f"{BASE}/settings").read() == "starts=1\ntips=0\nprogress=0\n"
+        at = len(open("/tmp/notifications.txt").read())
+        assert call("POST", "/api/apply", {"id": "night"})[0] == 200
+        wait_applied("night")
+        said = open("/tmp/notifications.txt").read()[at:]
+        assert re.search(r"^Theme applied( partly)?: Night", said, re.M) and "rest mode" not in said and "applying" not in said, said
+        # The notification as it starts, off: kept across the restart.
+        assert call("POST", "/api/settings", {"name": "starts", "on": "0"})[0] == 200
+        at = len(open("/tmp/notifications.txt").read())
+        S["plugin"].kill()
+        S["plugin"] = Plugin()
+        wait_applied("night")
+        assert "is ready" not in open("/tmp/notifications.txt").read()[at:]
+        assert call("GET", "/api/settings")[1] == {"starts": False, "tips": False, "progress": False}
+    finally:
+        for name in ("starts", "tips", "progress"):
+            assert call("POST", "/api/settings", {"name": name, "on": "1"})[0] == 200
+
+    # Storage: each part counted; another firmware's copies listed and removed.
+    st = call("GET", "/api/storage")[1]
+    assert st["firmware"] == "13.42" and st["themes"] > 0 and st["copies"] > 0 and st["ready"] > 0 and st["room"] > 0, st
+    assert st["other"] == 0 and st["otherFirmware"] == [], st
+    old, used = f"{BASE}/stock/13.40", f"{BASE}/stock/13.20"
+    write(f"{old}/system_ex/vsh_asset/a.bin", b"x" * 5000)
+    write(f"{used}/system_ex/vsh_asset/b.bin", b"y" * 3000)
+    outside = "/tmp/outside-stock"
+    write(f"{outside}/keep.bin", b"keep")
+    os.symlink(outside, f"{old}/link")               # a link inside: deleted, never followed
+    mounts = open(f"{BASE}/mounts").read()
+    with open(f"{BASE}/mounts", "a") as f:           # an overlay recorded from the other: it stays
+        f.write(f"/mnt/sandbox/TEST_000/x\t{used}/system_ex/vsh_asset\t/system_ex/vsh_asset\n")
+    try:
+        st = call("GET", "/api/storage")[1]
+        assert st["other"] == 8000 and sorted(st["otherFirmware"]) == ["13.20", "13.40"], st
+        assert call("POST", "/api/storage/clean", {"what": "everything"})[0] == 400
+        assert call("POST", "/api/storage/clean", {"what": "firmware"}, token=False)[0] == 403
+        code, r = call("POST", "/api/storage/clean", {"what": "firmware"})
+        assert code == 200 and r == {"ok": True, "removed": 1, "kept": 1, "freed": 5000}, r
+        assert not os.path.exists(old) and os.path.exists(f"{used}/system_ex/vsh_asset/b.bin")
+        assert open(f"{outside}/keep.bin", "rb").read() == b"keep"
+        assert os.path.isdir(f"{BASE}/stock/13.42"), "this console's copies stay"
+        assert "storage: removed the copies for 1 other firmware" in log_text()
+    finally:
+        open(f"{BASE}/mounts", "w").write(mounts)
+        shutil.rmtree(used, ignore_errors=True)
+        shutil.rmtree(outside, ignore_errors=True)
+    assert call("GET", "/api/storage")[1]["otherFirmware"] == []
     assert S["plugin"].alive()
 
 
@@ -2422,7 +2739,7 @@ def t_icon_style_for_titles_installed_later():
     assert all(re.search(r"(is installing\. Its icon gets|are installing\. Their icons get) the theme's icon style 5 minutes after", l)
                for l in installing), installing
     assert "ps5-theme: NEWT00005's icon can't be styled on the console. Open the theme in the manager to style it." in lines, lines
-    assert not [l for l in lines if "applying 'Iconic'" in l or "%" in l or "To see the new" in l or l.endswith("'Iconic' applied")], lines
+    assert not [l for l in lines if "applying 'Iconic'" in l or "%" in l or "rest mode to see" in l or l.startswith("Theme applied: Iconic")], lines
     code, info = call("GET", "/api/theme/icon-style", {"id": "iconic"})
     assert info["settle"] == 300 and {"NEWT00002", "NEWT00003", "NEWT00006", "NEWT00007"} <= set(info["waiting"]), info
     assert info["waiting"]["NEWT00007"] >= 299, info   # (written a moment ago: the whole wait still to go)
@@ -2449,7 +2766,7 @@ def t_icon_style_for_titles_installed_later():
     # An apply you ask for says each step as usual.
     notes_at = len(open("/tmp/notifications.txt").read())
     apply_and_wait("iconic")
-    assert "ps5-theme: applying 'Iconic'..." in notes() and "ps5-theme: 'Iconic' applied" in notes(), notes()
+    assert "ps5-theme: applying 'Iconic'..." in notes() and "Theme applied: Iconic." in notes(), notes()
     assert status()["titles"] == stamp   # nothing came or went, and the styler did nothing new
 
     # A styling run in the manager is said on the console: as it starts, as it goes (not more often than every
@@ -2500,17 +2817,26 @@ def t_icon_style_for_titles_installed_later():
     # NEWT00009, seen installed before, comes back with other files, dated long ago: the plugin saw them change just
     # now, so it waits the whole time from then, whatever their dates say, and says so.
     def install(tid, rgb, named=None, sfo_name=None):
-        for folder in (f"/user/appmeta/{tid}", f"/user/app/{tid}/sce_sys"):
-            write(f"{folder}/icon0.png", png(512, 512, rgb))
-            write(f"{folder}/icon0.dds", dds_bc7(512, 512, flags=0xa1007))
-            write(f"{folder}/param.json", b'{"titleId":"' + tid.encode() + b'"}')
+        # Made aside and dated, then moved into place: the plugin never sees it half made. (Under the ThreadSanitizer
+        # build it once looked between the files being written and dated, and said "installing again".)
+        stage = f"/user/.install-{tid}"
+        icon, tex, param = png(512, 512, rgb), dds_bc7(512, 512, flags=0xa1007), b'{"titleId":"' + tid.encode() + b'"}'
+        for folder in (f"{stage}/appmeta", f"{stage}/app/sce_sys"):
+            write(f"{folder}/icon0.png", icon)
+            write(f"{folder}/icon0.dds", tex)
+            write(f"{folder}/param.json", param)
         if named:
-            write(f"/user/appmeta/{tid}/param.json", named)
+            write(f"{stage}/appmeta/param.json", named)
         if sfo_name:
-            write(f"/user/appmeta/{tid}/param.sfo", sfo(sfo_name))
-        for d in (f"/user/appmeta/{tid}", f"/user/app/{tid}/sce_sys", f"/user/app/{tid}"):
+            write(f"{stage}/appmeta/param.sfo", sfo(sfo_name))
+        for d in (f"{stage}/appmeta", f"{stage}/app/sce_sys", f"{stage}/app"):
             for n in os.listdir(d) + [""]:
                 os.utime(os.path.join(d, n) if n else d, (old, old))
+        os.rename(f"{stage}/appmeta", f"/user/appmeta/{tid}")
+        os.rename(f"{stage}/app", f"/user/app/{tid}")
+        os.rmdir(stage)
+        for d in (f"/user/appmeta/{tid}", f"/user/app/{tid}"):
+            os.utime(d, (old, old))   # (a folder moved to another may be dated again)
     install("NEWT00009", (60, 60, 60))
     assert "NEWT00009" not in call("GET", "/api/theme/icon-style", {"id": "iconic"})[1]["waiting"]   # (seen, long installed)
     shutil.rmtree("/user/appmeta/NEWT00009")
@@ -2835,7 +3161,9 @@ def t_mix_and_match():
     """Mix and match: a new theme made of parts of others (/api/themes/mix), each file, original, song and the music
     settings copied byte for byte from the theme named for it, the themes taken from left as they were; a list that
     names a file outside its theme or that it doesn't have, a theme that isn't there or anything else is refused,
-    leaving nothing behind. The page's merge of the interface file takes each entry from its own theme."""
+    leaving nothing behind. A theme's icon style goes with its icons: the template for games installed later, the
+    picture behind them and your pictures kept with it, only those named. The page's merge of the interface file
+    takes each entry from its own theme."""
     bg, pic, song, move = png(480, 270, (10, 200, 30)), png(480, 270, (1, 2, 3)), wav(48000, 2, 2, 12000), wav(48000, 1, 0.1, 5000)
     for tid in ("mixa", "mixb"):
         assert call("POST", "/api/themes", {"id": tid, "name": tid})[0] == 200
@@ -2844,6 +3172,15 @@ def t_mix_and_match():
     assert call("PUT", "/api/theme/music", {"id": "mixa", "crc": f"{zlib.crc32(song):08x}"}, song)[0] == 200
     assert call("POST", "/api/theme/settings", {"id": "mixa", "gain": "4"})[0] == 200
     assert put_file("mixb", f"{MEDIA}/sounds/move.wav", move)[0] == 200
+    style = {"base": png_rgba(512, 512, lambda x, y: (20, 40, 160, 255)), "mask": png_rgba(512, 512, lambda x, y: (255, 255, 255, 255)),
+             "known": b"PPSA01234\nCUSA09999\n"}
+    for part, data in style.items():
+        assert call("PUT", "/api/theme/icon-style", {"id": "mixa", "part": part, "crc": f"{zlib.crc32(data):08x}"}, data)[0] == 200
+    assert call("POST", "/api/theme/icon-style", {"id": "mixa", "auto": "1", "scale": "64"})[0] == 200
+    backdrop, mine, theirs = jpeg_header(64, 64), png(30, 20, (9, 99, 199)), png(30, 20, (199, 9, 9))
+    assert call("PUT", "/api/theme/preview", {"id": "mixa", "kind": "iconbg", "crc": f"{zlib.crc32(backdrop):08x}"}, backdrop)[0] == 200
+    for title, kept in (("PPSA01234", mine), ("CUSA09999", theirs)):
+        assert call("PUT", "/api/theme/icon-style", {"id": "mixa", "part": "own", "title": title, "crc": f"{zlib.crc32(kept):08x}"}, kept)[0] == 200
     for tid in ("mixa", "mixb"):
         assert call("POST", "/api/theme/save", {"id": tid})[0] == 200
     themes = f"{BASE}/themes"
@@ -2856,7 +3193,7 @@ def t_mix_and_match():
         return out
     before = {tid: tree(tid) for tid in ("mixa", "mixb")}
     lines = [f"file\tmixa\t{HOME}/bg.png", f"source\tmixa\t{HOME}/bg.png", "music\tmixa\t1", "settings\tmixa", "preview\tmixa",
-             f"file\tmixb\t{MEDIA}/sounds/move.wav"]
+             f"file\tmixb\t{MEDIA}/sounds/move.wav", "style\tmixa", "own\tmixa\tPPSA01234", "style\tmixb"]
     code, r = call("POST", "/api/themes/mix", {"id": "mixed", "name": "Mixed = one"}, ("\r\n".join(lines) + "\n").encode())
     assert code == 200 and r["files"] == 2, (code, r)
     t = {x["id"]: x for x in status()["themes"]}["mixed"]
@@ -2867,7 +3204,13 @@ def t_mix_and_match():
     assert call("GET", "/api/theme/source", {"id": "mixed", "path": f"{HOME}/bg.png"})[1] == pic
     assert {tid: tree(tid) for tid in ("mixa", "mixb")} == before, "a theme taken from changed"
     assert not [n for n in os.listdir(themes) if n.startswith(".mix-")]
-    assert "mixed theme mixed (Mixed   one): 6 part line(s), 2 file(s)" in log_text()
+    assert "mixed theme mixed (Mixed   one): 9 part line(s), 2 file(s)" in log_text()
+    for part, data in style.items():   # the style: whole, as it was (mixb has none, which adds nothing)
+        assert open(f"{themes}/mixed/icon-style/{part}{'.txt' if part == 'known' else '.png'}", "rb").read() == data, part
+    got = call("GET", "/api/theme/icon-style", {"id": "mixed"})[1]
+    assert got["template"] is True and got["auto"] is True and got["scale"] == 64 and got["own"] == ["PPSA01234"], got
+    assert call("GET", "/api/theme/icon-style", {"id": "mixed", "own": "PPSA01234"})[1] == mine
+    assert call("GET", "/api/theme/preview", {"id": "mixed", "kind": "iconbg"})[1] == backdrop
 
     # Refused, and nothing left behind.
     os.makedirs(f"{themes}/mixb/files{HOME}", exist_ok=True)
@@ -2882,6 +3225,8 @@ def t_mix_and_match():
            ("m2", [lines[0], "music\tmixa\t9"], 422, "line 2 (music\tmixa\t9): a song is numbered 1 to 8"),
            ("m2", ["music\tmixb\t1"], 422, "mixb has no song 1"),
            ("m2", ["copy\tmixa"], 422, "unknown part copy"),
+           ("m2", ["own\tmixa\t../../active"], 422, "own: a title ID"),
+           ("m2", ["own\tmixb\tPPSA01234"], 422, "mixb has no picture kept for PPSA01234"),
            ("../m2", lines[:1], 400, "id: use letters"),
            ("m2", [], 400, "nothing to mix")]
     for tid, body, want, needle in bad:
@@ -2907,7 +3252,7 @@ def t_mix_and_match():
                                            ("snd_focus_move", "src"): hevag(20, seed=4),
                                            ("snd_2_focus_move", "src"): hevag(50, name=b"PS2_coursol_Slim", seed=5)}))
     write("/tmp/mix.js", MIX_JS.encode())
-    out = subprocess.run(["node", "/tmp/mix.js", WEB_PAGE, UI_RCO, "/tmp/mix-a.rco", "/tmp/mix-b.rco", "/tmp/mix.rco",
+    out = subprocess.run(["node", "/tmp/mix.js", WEB_LIB, UI_RCO, "/tmp/mix-a.rco", "/tmp/mix-b.rco", "/tmp/mix.rco",
                           json.dumps({"sound": "b", "picture": "b", "shape": "b"}), json.dumps({"snd_focus_move": "a"})],
                          capture_output=True, text=True)
     assert out.returncode == 0, out.stderr
@@ -2961,13 +3306,72 @@ def t_preview_pictures():
     assert {t["id"]: t for t in status()["themes"]}["night-pic"]["cover"] == "picture"
     assert call("DELETE", "/api/themes", {"id": "night-pic"})[0] == 200
 
-    # Removing the chosen picture shows the background one again.
+    # The home screen the page draws: shown before the background's, after a chosen picture; listed with its time.
+    home = jpeg_header(1024, 576)
+    assert night()["homeTime"] == 0
+    assert put("home", home)[0] == 200
+    assert night()["cover"] == "picture" and night()["homeTime"] > 0 and shown(kind="home")[1] == home
     assert call("DELETE", "/api/theme/preview", {"id": "night", "kind": "picture"})[0] == 200
+    assert night()["cover"] == "home" and shown()[1] == home
+    assert call("DELETE", "/api/theme/preview", {"id": "night", "kind": "home"})[0] == 200
+    assert night()["homeTime"] == 0
+
+    # Removing the chosen picture shows the background one again.
     assert night()["cover"] == "background" and shown()[1] == pic
     assert call("DELETE", "/api/theme/preview", {"id": "night", "kind": "background"})[0] == 200
     assert night()["cover"] == "" and shown()[0] == 404
     assert call("DELETE", "/api/theme/preview", {"id": "night", "kind": "background"})[0] == 404
     assert call("DELETE", "/api/theme/preview", {"id": "night", "kind": "picture"}, token=False)[0] == 403
+
+
+def t_save_applies_only_when_needed():
+    """Save applies the chosen theme again so the console shows what was saved: only when its files aren't the
+    ones the console shows. Not a theme that isn't chosen, not after a change to its choices, not when the
+    changes were applied before saving, and not a theme left with nothing in it (that apply would fail)."""
+    def save():
+        code, r = call("POST", "/api/theme/save", {"id": "resave"})
+        assert code == 200, (code, r)
+        return r["reapplied"], r["empty"]
+    before = status()["active"]
+    first, second, third = png(480, 270, (10, 120, 60)), png(480, 270, (120, 10, 60)), png(480, 270, (60, 10, 120))
+    try:
+        assert call("POST", "/api/themes", {"id": "resave", "name": "Resave"})[0] == 200
+        assert put_file("resave", f"{HOME}/bg.png", first)[0] == 200
+        assert save() == (False, False)   # not chosen: nothing on the console to change
+        apply_and_wait("resave")
+        done = len(applies())
+        # Only its choices changed: nothing on the console to change.
+        choice = b'{"v":1,"fit":"contain"}'
+        assert call("PUT", "/api/theme/choices", {"id": "resave", "crc": f"{zlib.crc32(choice):08x}"}, choice)[0] == 200
+        assert save() == (False, False)
+        assert "theme resave: changes saved; the console already shows these files" in log_text()
+        # A file changed: Save puts it on the console.
+        assert put_file("resave", f"{HOME}/bg.png", second)[0] == 200
+        assert save() == (True, False)
+        assert "theme resave: changes saved, applying it again" in log_text()
+        end = time.time() + 30
+        while len(applies()) == done or crc_file(f"{HOME}/bg.png") != zlib.crc32(second):
+            assert time.time() < end, "the saved background did not reach the console"
+            time.sleep(0.2)
+        wait_applied("resave")
+        # Applied before saving: the console shows them already.
+        assert put_file("resave", f"{HOME}/bg.png", third)[0] == 200
+        apply_and_wait("resave")
+        done = len(applies())
+        assert save() == (False, False)
+        # Left with nothing in it: the console keeps the last one applied, and the page is told.
+        assert call("DELETE", "/api/theme/file", {"id": "resave", "path": f"{HOME}/bg.png"})[0] == 200
+        assert save() == (False, True)
+        assert "theme resave: changes saved; nothing is left in it" in log_text()
+        time.sleep(1.5)
+        assert len(applies()) == done and crc_file(f"{HOME}/bg.png") == zlib.crc32(third)
+    finally:
+        if before and before != "none":
+            apply_and_wait(before)
+        else:
+            call("POST", "/api/apply", {"id": "none"})
+            wait_applied("")
+        call("DELETE", "/api/themes", {"id": "resave"})
 
 
 def t_save_and_discard():
@@ -3006,17 +3410,28 @@ def t_save_and_discard():
         wait_applied("night")
     assert call("POST", "/api/theme/discard", {"id": "night"})[0] == 409
 
-    # Save keeps the changes.
+    # Save keeps the changes (and an applied theme goes on the console again: t_save_applies_only_when_needed).
+    def save_and_settle(want):
+        code, r = call("POST", "/api/theme/save", {"id": "night"})
+        assert code == 200 and r["reapplied"] is applied, (code, r)
+        if applied:
+            end = time.time() + 30
+            while crc_file(f"{HOME}/bg.png") != zlib.crc32(want):
+                assert time.time() < end, "the saved background did not reach the console"
+                time.sleep(0.2)
+            wait_applied("night")
     assert put_file("night", f"{HOME}/bg.png", newer)[0] == 200
-    assert call("POST", "/api/theme/save", {"id": "night"})[0] == 200
+    save_and_settle(newer)
     assert night()["unsaved"] is False and open(f"{theme}/files{HOME}/bg.png", "rb").read() == newer
     assert put_file("night", f"{HOME}/bg.png", bg)[0] == 200
-    assert call("POST", "/api/theme/save", {"id": "night"})[0] == 200
+    save_and_settle(bg)
 
     # A picture the library makes by itself is not a change; a chosen one is.
     pic = jpeg_header(1280, 720)
     preview = lambda kind: call("PUT", "/api/theme/preview", {"id": "night", "kind": kind, "crc": f"{zlib.crc32(pic):08x}"}, pic)
     assert preview("background")[0] == 200 and night()["unsaved"] is False
+    assert preview("home")[0] == 200 and night()["unsaved"] is False
+    assert call("DELETE", "/api/theme/preview", {"id": "night", "kind": "home"})[0] == 200 and night()["unsaved"] is False
     assert preview("picture")[0] == 200 and night()["unsaved"] is True
     assert call("POST", "/api/theme/discard", {"id": "night"})[0] == 200
     assert night()["cover"] == "background"
@@ -3219,7 +3634,7 @@ def t_interface_pictures():
            (rco.replaced({("iconid_texture_app_fallback", "src"): magenta_svg}), "not a complete PNG"),
            (rco.replaced({("iconid_home", "src"): b'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"/>'}),
             "must keep the console's own <svg> opening"),
-           (rco.replaced({("iconid_home", "src"): SVG_ICON.split(b">")[0] + b"><script>alert(1)</script></svg>"}), 'SVG contains "<script"'),
+           (rco.replaced({("iconid_home", "src"): SVG_ICON.split(b">")[0] + b"><script>alert(1)</script></svg>"}), "the SVG has <script>"),
            (rco.replaced({("en-US", "src"): b"strings" * 49 + b"STRING!"}), "only pictures, sounds, shapes and colours can be changed"),
            # Colours: the same names, in order, each a whole number 0..0xFFFFFFFF; nothing else.
            (rco.replaced({("color_default", "src"): b'{"button.fill.enabled": 1}'}), "colours color_default must keep the console's 14 names"),
@@ -3293,7 +3708,7 @@ def t_interface_pictures():
     # The page's colour test: every palette painted by group, transparency kept, names and layout as the console's;
     # the console accepts it.
     write("/tmp/colors.js", COLORS_JS.encode())
-    out = subprocess.run(["node", "/tmp/colors.js", WEB_PAGE, UI_RCO, "/tmp/colored.rco"], capture_output=True, text=True)
+    out = subprocess.run(["node", "/tmp/colors.js", WEB_LIB, UI_RCO, "/tmp/colored.rco"], capture_output=True, text=True)
     assert out.returncode == 0, out.stderr
     colored = open("/tmp/colored.rco", "rb").read()
     pals = {f[1]: json.loads(Rco(colored).data(f[5], f[6])) for f in Rco(colored).files() if f[1].startswith("color_")}
@@ -3310,7 +3725,7 @@ def t_interface_pictures():
             assert got == (before if rgb is None else (before & 0xff000000) | rgb), (pid, name, hex(got))
     assert put_file("ui", UI_RCO, colored)[0] == 200
     # The panel test: each panel and base mat colour a distinct colour, everything else as the console's.
-    out = subprocess.run(["node", "/tmp/colors.js", WEB_PAGE, UI_RCO, "/tmp/panels.rco", "panel"], capture_output=True, text=True)
+    out = subprocess.run(["node", "/tmp/colors.js", WEB_LIB, UI_RCO, "/tmp/panels.rco", "panel"], capture_output=True, text=True)
     assert out.returncode == 0, out.stderr
     panels = open("/tmp/panels.rco", "rb").read()
     pals = {f[1]: json.loads(Rco(panels).data(f[5], f[6])) for f in Rco(panels).files() if f[1].startswith("color_")}
@@ -3323,7 +3738,7 @@ def t_interface_pictures():
     assert put_file("ui", UI_RCO, panels)[0] == 200
     # The colour editor: each colour by what it changes, the console's transparency kept; light text only (dark labels
     # on light buttons stay); the accent's shades follow it in proportion; the other palettes untouched.
-    out = subprocess.run(["node", "/tmp/colors.js", WEB_PAGE, UI_RCO, "/tmp/edited.rco", "edit"], capture_output=True, text=True)
+    out = subprocess.run(["node", "/tmp/colors.js", WEB_LIB, UI_RCO, "/tmp/edited.rco", "edit"], capture_output=True, text=True)
     assert out.returncode == 0, out.stderr
     edited = open("/tmp/edited.rco", "rb").read()
     pals = {f[1]: json.loads(Rco(edited).data(f[5], f[6])) for f in Rco(edited).files() if f[1].startswith("color_")}
@@ -3340,7 +3755,7 @@ def t_interface_pictures():
     # The page's shape editor: unchanged numbers give the console's own text,
     # new ones are written where the old ones stand, and the console accepts it.
     write("/tmp/shapes.js", SHAPES_JS.encode())
-    out = subprocess.run(["node", "/tmp/shapes.js", WEB_PAGE, UI_RCO, "/tmp/shaped.rco"], capture_output=True, text=True)
+    out = subprocess.run(["node", "/tmp/shapes.js", WEB_LIB, UI_RCO, "/tmp/shaped.rco"], capture_output=True, text=True)
     assert out.returncode == 0, out.stderr
     info = json.loads(out.stdout)
     assert info["names"] == ["bar.fill", "slider.thumb", "switch.track", "tooltip.fill", "borderRadiusRatio"], info
@@ -3356,7 +3771,7 @@ def t_interface_pictures():
     # picture keeping the console's chunks, zlib header and SVG opening.
     write("/tmp/rco.js", RCO_JS.encode())
     for mode in ("deflate", "stored"):
-        out = subprocess.run(["node", "/tmp/rco.js", WEB_PAGE, UI_RCO, "/tmp/numbered.rco", mode], capture_output=True, text=True)
+        out = subprocess.run(["node", "/tmp/rco.js", WEB_LIB, UI_RCO, "/tmp/numbered.rco", mode], capture_output=True, text=True)
         assert out.returncode == 0, out.stderr
         info = json.loads(out.stdout)
         assert info["pictures"] == 6 and info["numbered"] == 8, info
@@ -3382,7 +3797,7 @@ def t_interface_pictures():
     # console's; laid out as the console's byte for byte where its bytes don't depend on the sound; decoded again it
     # gives exactly what the encoder meant (checked in the page); the console accepts it, everything else unchanged.
     write("/tmp/sounds.js", SOUNDS_JS.encode())
-    out = subprocess.run(["node", "/tmp/sounds.js", WEB_PAGE, UI_RCO, "/tmp/sounds.rco"], capture_output=True, text=True)
+    out = subprocess.run(["node", "/tmp/sounds.js", WEB_LIB, UI_RCO, "/tmp/sounds.rco"], capture_output=True, text=True)
     assert out.returncode == 0, out.stderr
     info = json.loads(out.stdout)
     move, ps2 = info["snd_focus_move"], info["snd_2_focus_move"]
@@ -3407,7 +3822,7 @@ def t_interface_pictures():
     # accepted too, and tile icon files map to their title IDs.
     write("/tmp/picture.js", PICTURE_JS.encode())
     write("/tmp/mine.png", png(16, 16, (0, 200, 90)))
-    out = subprocess.run(["node", "/tmp/picture.js", WEB_PAGE, UI_RCO, "/tmp/mine.rco", "/tmp/mine.png", PLUS_ICON, "/tmp/tile.png"],
+    out = subprocess.run(["node", "/tmp/picture.js", WEB_LIB, UI_RCO, "/tmp/mine.rco", "/tmp/mine.png", PLUS_ICON, "/tmp/tile.png"],
                          capture_output=True, text=True)
     assert out.returncode == 0, out.stderr
     info = json.loads(out.stdout)
@@ -3530,7 +3945,7 @@ def t_title_pictures():
             assert crc_file(f"{shell}/user/appmeta/PPSA01234/icon0.dds") == zlib.crc32(my_tex)
             assert "put the console in rest mode and wake it" in result, result
             notes = open("/tmp/notifications.txt").read()
-            assert "ps5-theme: To see the new game and app icons on the home screen, put the console in rest mode" in notes
+            assert "Put the console in rest mode to see its new game and app icons" in notes
         in_shell = [l for l in recorded_mounts() if l.startswith(shell + "/user")]
         assert bool(in_shell) == (not EMULATED), recorded_mounts()
         assert not mounts_on("/user/app/PPSA01234")
@@ -3640,7 +4055,7 @@ def t_fonts():
             assert "Its font waits until the home screen's process is found." in result, result
         else:
             assert "put the console in rest mode and wake it" in result, result
-            assert "ps5-theme: To see the new font, put the console in rest mode" in open("/tmp/notifications.txt").read()
+            assert "Put the console in rest mode to see its new font." in open("/tmp/notifications.txt").read()
             for view in views:
                 assert crc_file(f"{view}/SST-Roman.otf") == zlib.crc32(good), view
                 assert crc_file(f"{view}/SST-Bold.otf") == zlib.crc32(mine_bold), view
@@ -3672,8 +4087,8 @@ def t_fonts():
 
 BC7_ALPHA_JS = r"""
 const fs = require("fs");
-const html = fs.readFileSync(process.argv[2], "utf8");
-const block = html.slice(html.indexOf("/* bc7:begin */"), html.indexOf("/* bc7:end */"));
+const lib = (...n) => n.map(x => fs.readFileSync(require("path").join(process.argv[2], x + ".js"), "utf8")).join("\n");
+const block = lib("bc7");
 const B = new Function(block + ";return { bc7Block, bc7BlockAlpha, bc7DecodeMode6 };")();
 let seed = 12345; const rnd = () => (seed = (seed * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff;
 const out = new Uint8Array(16), dec = new Uint8Array(64);
@@ -3710,14 +4125,14 @@ def t_bc7_keeps_transparency():
     """The page's BC7 block encoder for textures with see-through parts: solid
     and clear alpha exact, soft edges close, colours close, still mode 6."""
     write("/tmp/bc7a.js", BC7_ALPHA_JS.encode())
-    out = subprocess.run(["node", "/tmp/bc7a.js", WEB_PAGE], capture_output=True, text=True)
+    out = subprocess.run(["node", "/tmp/bc7a.js", WEB_LIB], capture_output=True, text=True)
     assert out.returncode == 0 and "bc7 alpha ok" in out.stdout, out.stdout + out.stderr
 
 
 ZSTD_FRAMES_JS = r"""
 const fs = require("fs");
-const html = fs.readFileSync(process.argv[2], "utf8");
-const block = html.slice(html.indexOf("/* zstd:begin */"), html.indexOf("/* zstd:end */"));
+const lib = (...n) => n.map(x => fs.readFileSync(require("path").join(process.argv[2], x + ".js"), "utf8")).join("\n");
+const block = lib("zstd");
 const Z = new Function(block + ";return { zstdStored, xxh64 };")();
 const cases = JSON.parse(process.argv[3]);
 for (const [desc, n] of cases) {
@@ -3733,8 +4148,8 @@ console.log("zstd frames ok");
 
 BLEED_JS = r"""
 const fs = require("fs");
-const html = fs.readFileSync(process.argv[2], "utf8");
-const block = html.slice(html.indexOf("/* bleed:begin */"), html.indexOf("/* bleed:end */"));
+const lib = (...n) => n.map(x => fs.readFileSync(require("path").join(process.argv[2], x + ".js"), "utf8")).join("\n");
+const block = lib("texture-place");
 const bleedClear = new Function(block + ";return bleedClear;")();
 const w = 24, h = 1, pix = new Uint8ClampedArray(w * 4);
 pix.set([200, 40, 10, 255], 0);                    // one visible pixel at the left edge
@@ -3748,8 +4163,8 @@ console.log("bleed ok");
 
 PLAYLIST_JS = r"""
 const fs = require("fs");
-const html = fs.readFileSync(process.argv[2], "utf8");
-const block = html.slice(html.indexOf("/* playlist:begin */"), html.indexOf("/* playlist:end */"));
+const lib = (...n) => n.map(x => fs.readFileSync(require("path").join(process.argv[2], x + ".js"), "utf8")).join("\n");
+const block = lib("playlist");
 const { buildPlaylist } = new Function(block + ";return { buildPlaylist };")();
 const rate = 1000, L = 0.1;
 const ok = (cond, what) => { if (!cond) throw new Error(what); };
@@ -3814,14 +4229,14 @@ def t_page_builds_playlists():
     repeats, and a crossfade never reaches where that repeat lands. The songs
     it was given are left as they were."""
     write("/tmp/playlist.js", PLAYLIST_JS.encode())
-    out = subprocess.run(["node", "/tmp/playlist.js", WEB_PAGE], capture_output=True, text=True)
+    out = subprocess.run(["node", "/tmp/playlist.js", WEB_LIB], capture_output=True, text=True)
     assert out.returncode == 0 and "playlist ok" in out.stdout, out.stdout + out.stderr
 
 
 STYLEMATCH_JS = r"""
 const fs = require("fs");
-const html = fs.readFileSync(process.argv[2], "utf8");
-const block = html.slice(html.indexOf("/* stylematch:begin */"), html.indexOf("/* stylematch:end */"));
+const lib = (...n) => n.map(x => fs.readFileSync(require("path").join(process.argv[2], x + ".js"), "utf8")).join("\n");
+const block = lib("style-match");
 const { styleMatch } = new Function(block + ";return { styleMatch };")();
 const ok = (cond, what) => { if (!cond) throw new Error(what); };
 const W = 48, H = 48, px = f => { const a = new Uint8ClampedArray(W * H * 4); for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) a.set(f(x, y), (y * W + x) * 4); return a; };
@@ -3838,12 +4253,167 @@ console.log("stylematch ok");
 """
 
 
+HOMEROWS_JS = r"""
+const fs = require("fs");
+const lib = (...n) => n.map(x => fs.readFileSync(require("path").join(process.argv[2], x + ".js"), "utf8")).join("\n");
+const { sqliteTable, homeRowsOf, hsTileX, hsTileAt } = new Function(lib("sqlite", "homescreen") + ";return { sqliteTable, homeRowsOf, hsTileX, hsTileAt };")();
+const want = JSON.parse(fs.readFileSync(process.argv[4], "utf8"));
+const ok = (cond, what) => { if (!cond) throw new Error(what); };
+const db = fs.readFileSync(process.argv[3]);
+const t = sqliteTable(db, "tbl_iconinfo_");
+ok(JSON.stringify(t.columns) === JSON.stringify(want.columns), "columns: " + JSON.stringify(t.columns));
+const norm = r => r.map(v => v instanceof Uint8Array ? `blob:${v.length}:${v[0]}:${v[v.length - 1]}` : v);
+const got = t.rows.map(norm).sort((a, b) => a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0);
+ok(JSON.stringify(got) === JSON.stringify(want.rows), "rows differ: " + JSON.stringify(got.slice(0, 3)) + " vs " + JSON.stringify(want.rows.slice(0, 3)));
+const rows = homeRowsOf(t);
+ok(JSON.stringify(rows.games) === JSON.stringify(want.games), "games: " + JSON.stringify(rows.games));
+ok(JSON.stringify(rows.media) === JSON.stringify(want.media), "media: " + JSON.stringify(rows.media));
+ok(rows.names.get("PPSA26344") === "Ghost of Yōtei" && rows.apps.has("PPSA01650") && !rows.apps.has("PPSA26344"), "names and apps");
+// Damaged files end with an error, never a hang: cut short, not SQLite, a page that leads to itself.
+for (const [bad, what] of [[db.subarray(0, 1500), "cut short"], [Buffer.from("not a database at all, really".repeat(10)), "not sqlite"]])
+  { let threw = false; try { sqliteTable(bad, "tbl_iconinfo_"); } catch (e) { threw = e instanceof Error; } ok(threw, what); }
+const loop = Buffer.from(db), size = loop.readUInt16BE(16), at = (want.root - 1) * size;
+ok(loop[at] === 0x05, "the table takes several levels");
+loop.writeUInt32BE(want.root, at + 8);   /* its last branch leads back to itself: read once, and the walk ends */
+try { sqliteTable(loop, "tbl_iconinfo_"); } catch (e) { /* an error is as good as an end */ }
+let threw = false; try { sqliteTable(db, "tbl_nothing_"); } catch (e) { threw = /no tbl_nothing_ table/.test(e.message); } ok(threw, "a missing table is said");
+// The row's geometry: the selected tile always at 172, the others 114 apart past its name's space.
+ok(hsTileX(1, 1) === 172 && hsTileX(2, 1) === 356 && hsTileX(3, 1) === 470 && hsTileX(0, 1) === 50, "tile places");
+ok(hsTileAt(200, 150, 1, 14) === 1 && hsTileAt(60, 150, 1, 14) === 0 && hsTileAt(400, 150, 1, 14) === 2 && hsTileAt(400, 300, 1, 14) === -1, "tile under a point");
+console.log("homerows ok");
+"""
+
+
+def homerows_db(path, welcome):
+    """An app database laid out as the console's: its icon table among others, small pages so the table takes
+    several levels, a record longer than a page (overflow pages), and the console's dispLocation values."""
+    import sqlite3
+    if os.path.exists(path):
+        os.remove(path)
+    db = sqlite3.connect(path)
+    db.execute("PRAGMA page_size=1024")
+    db.execute("CREATE TABLE tbl_appinfo (titleId TEXT, key TEXT, val TEXT)")
+    db.execute('CREATE TABLE tbl_iconinfo_0477014176 ("titleId" TEXT NOT NULL, titleName TEXT, lastAccessIndex INTEGER, '
+               "dispLocation INTEGER, visible INTEGER, pinnedStatus INTEGER, score REAL, icon BLOB, PRIMARY KEY(titleId))")
+    rows = [("NPXS40047", "PlayStation Store", 6, 146, 1, 2), ("NPXS40071", "Game Library", 8, 146, 1, 2),
+            ("NPXS40063", "Welcome", 0, 147, welcome, 2), ("NPXS40056", "All Apps", 7, 148, 1, 2), ("NPXS40139", "App Library", 10, 148, 1, 2),
+            ("NPXS40075", "Media Gallery", 25, 154, 1, None), ("NPXS40053", "Discover", 0, 1, 0, 2),
+            ("PPSA26344", "Ghost of Yōtei", 18, 138, 1, None), ("PPSA01650", "YouTube", 181, 188, 1, None),
+            ("PPSA99999", "Hidden Game", 999, 138, 0, None), ("bad id", "Not a title", 500, 138, 1, None)]
+    rows += [(f"PPSA{10000 + i:05d}", f"Game {i}", 100 + i, 138, 1, None) for i in range(14)]
+    rows += [(f"APPS{20000 + i:05d}", f"App {i}", 300 - i, 188, 1, None) for i in range(3)]
+    for i, r in enumerate(rows):
+        blob = bytes((i * 7 + k) % 256 for k in range(3000 if i == 3 else 40))
+        db.execute("INSERT INTO tbl_iconinfo_0477014176 VALUES (?,?,?,?,?,?,?,?)", (*r, -1.5 * i, blob))
+    db.executemany("INSERT INTO tbl_appinfo VALUES (?,?,?)", [(f"PPSA{i:05d}", "k", "v" * 200) for i in range(200)])
+    db.commit()
+    columns = ["titleId", "titleName", "lastAccessIndex", "dispLocation", "visible", "pinnedStatus", "score", "icon"]
+    got = [list(r) for r in db.execute("SELECT * FROM tbl_iconinfo_0477014176")]
+    root = db.execute("SELECT rootpage FROM sqlite_master WHERE name='tbl_iconinfo_0477014176'").fetchone()[0]
+    db.close()
+    for r in got:
+        r[7] = f"blob:{len(r[7])}:{r[7][0]}:{r[7][-1]}"
+    games = sorted((r for r in rows if r[3] in (138, 154) and r[4] and re.fullmatch(r"[A-Z]{4}\d{5}", r[0])), key=lambda r: -r[2])[:12]
+    media = sorted((r for r in rows if r[3] == 188 and r[4]), key=lambda r: -r[2])[:12]
+    return {"columns": columns, "rows": sorted(got, key=lambda r: r[0]), "root": root,
+            "games": ["NPXS40063" if welcome else "NPXS40047", *[r[0] for r in games], "NPXS40071"],
+            "media": ["NPXS40056", *[r[0] for r in media], "NPXS40139"]}
+
+
+def t_page_reads_the_home_rows():
+    """The preview's home screen shows the console's own rows, read by the page from the console's app database:
+    its SQLite tables read straight from the file (several levels, a record over overflow pages, every value type), the
+    two rows in the console's order (Welcome first when shown, else PlayStation Store; the 12 games and apps used
+    last; Game Library and App Library last), and a damaged file is an error, never a hang. The plugin sends the
+    database as it is, to an allowed device only."""
+    write("/tmp/homerows.js", HOMEROWS_JS.encode())
+    for welcome in (1, 0):
+        want = homerows_db("/tmp/home.db", welcome)
+        write("/tmp/home.json", json.dumps(want).encode())
+        out = subprocess.run(["node", "/tmp/homerows.js", WEB_LIB, "/tmp/home.db", "/tmp/home.json"], capture_output=True, text=True)
+        assert out.returncode == 0 and "homerows ok" in out.stdout, out.stdout + out.stderr
+    with open("/system_data/priv/mms/app.db", "rb") as f:
+        assert call("GET", "/api/app-db") == (200, f.read())
+
+
+CCDRAW_JS = r"""
+const fs = require("fs");
+const lib = (...n) => n.map(x => fs.readFileSync(require("path").join(process.argv[2], x + ".js"), "utf8")).join("\n");
+const calls = [];
+/* a canvas that writes down what is drawn on it */
+const fakeCtx = () => new Proxy({ globalAlpha: 1, fillStyle: "", font: "", letterSpacing: "0px" }, {
+  get(t, k) {
+    if (k in t) return t[k];
+    if (k === "measureText") return s => ({ width: String(s).length * 10 });
+    if (k === "createLinearGradient" || k === "createConicGradient") return () => ({ addColorStop: (at, c) => calls.push(["stop", at, c]) });
+    if (k === "drawImage") return (img, ...a) => calls.push(["img", img.tag, ...(a.length === 8 ? a.slice(4) : a), t.globalAlpha]);
+    if (k === "fillText") return (s, x, y) => calls.push(["text", s, x, y, t.globalAlpha, t.letterSpacing]);
+    if (k === "fillRect") return (x, y, w, h) => calls.push(["rect", t.fillStyle, x, y, w, h]);
+    if (k === "fill") return () => calls.push(["fill", t.fillStyle]);
+    return () => {};
+  },
+  set(t, k, v) { t[k] = v; return true; },
+});
+globalThis.document = { createElement: () => ({ tag: "canvas", width: 0, height: 0, getContext: fakeCtx }) };
+const { ccScreenDraw, ccPieceBox, ccIconX } = new Function(lib("homescreen") + ";return { ccScreenDraw, ccPieceBox, ccIconX };")();
+const ok = (cond, what) => { if (!cond) throw new Error(what + "\n" + JSON.stringify(calls.filter(c => c[0] !== "stop").slice(0, 80))); };
+const pic = (tag, w, h) => ({ tag, width: w, height: h });
+const near = (a, b) => Math.abs(a - b) < 1e-6;
+// Placement: three quarters of each piece's size on the console, the corner piece top right, the panel along the bottom.
+const t = ccPieceBox("top", 980, 620), b = ccPieceBox("bottom", 2560, 820);
+ok(t.x === 1185 && t.y === 0 && t.w === 735 && t.h === 465, "top piece box " + JSON.stringify(t));
+ok(b.x === 0 && b.y === 465 && b.w === 1920 && b.h === 615, "bottom piece box " + JSON.stringify(b));
+ok(ccIconX(0, 11) === 400 && ccIconX(5, 11) === 960 && ccIconX(10, 11) === 1520, "the row's centres");
+const ids = ["home", "switcher", "notification", "game_base", "music", "download", "sound", "mic", "controller", null, "power"];
+const home = { bg: pic("bg", 64, 36), art: pic("art", 64, 20), tab: "games", tabs: ["Games", "Media"], tiles: [{ img: pic("tile", 8, 8), name: "All Apps" }],
+  focus: 0, clock: "14:00", search: null, settings: null, font: "", hub: null };
+const scene = { home, top: { img: pic("top", 245, 155), w: 980, h: 620 }, bottom: { img: pic("bottom", 2560, 820), w: 2560, h: 820 },
+  icons: ids.map(id => id && { img: pic(id, 64, 64), dot: id === "notification" }), capture: pic("capture", 64, 64),
+  colors: { backdrop: 0xff020408, card: 0xa3020408 }, clock: "14:00", shot: { day: "30/10", time: "13:46" } };
+ccScreenDraw(fakeCtx(), scene);
+const imgs = tag => calls.filter(c => c[0] === "img" && c[1] === tag);
+ok(imgs("bg").length === 2 && imgs("art").length === 1, "the home screen behind without its artwork, the screenshot with it");
+ok(JSON.stringify(imgs("top")[0].slice(2, 6)) === "[1185,0,735,465]" && JSON.stringify(imgs("bottom")[0].slice(2, 6)) === "[0,465,1920,615]",
+   "pieces in place, a quarter-size picture drawn at its size on the console");
+ok(calls.some(c => c[0] === "rect" && c[1] === "rgba(0,0,0,0.47)" && c[4] === 1920), "the background darker behind it");
+ok(calls.some(c => c[0] === "stop" && c[1] === 0 && c[2] === "rgba(2,4,8,0.95)") && calls.some(c => c[0] === "stop" && c[1] === 1 && c[2] === "rgba(2,4,8,0.34)"),
+   "the palette's backdrop, nearly opaque at the top");
+ok(calls.some(c => c[0] === "fill" && c[1] === `rgba(2,4,8,${0xa3 / 255})`), "the palette's card colour with its own opacity");
+ids.forEach((id, i) => {
+  if (!id) return;
+  const d = imgs(id);
+  ok(d.length === 1 && near(d[0][2], ccIconX(i, 11) - 22) && near(d[0][3], 1011 - 22) && d[0][4] === 44 && d[0][6] === .55, "icon " + id);
+});
+ok(calls.some(c => c[0] === "fill" && c[1] === "#009aff") && calls.some(c => c[0] === "fill" && c[1] === "#5b606b"), "the notification dot and the profile picture's circle");
+const text = s => calls.filter(c => c[0] === "text" && c[1] === s);
+ok(text("Recently created")[0].slice(2, 6).join() === "108,776,0.78,0.75px" && text("New screenshot")[0].slice(2, 6).join() === "108,818,1,1.1px",
+   "the card's texts");
+ok(text("30/10")[0][2] === 108 && text("13:46")[0][2] === 108 + 50 + 16 && text("13:46")[0][3] === 864, "the date, then the time");
+ok(text("0").filter(c => c[2] === 1834 - 5 && near(c[3], 72.7)).length === 3, "the clock where the home screen's is (behind, in the screenshot, its own)");
+// A look with no pieces: the rest is drawn all the same.
+calls.length = 0;
+ccScreenDraw(fakeCtx(), { ...scene, top: null, bottom: null, capture: null });
+ok(!imgs("top").length && !imgs("bottom").length && text("New screenshot").length === 1, "no pieces");
+console.log("ccdraw ok");
+"""
+
+
+def t_page_draws_the_control_center():
+    """The preview's Control Center is drawn as the console draws it, measured from a capture of 13.42's: the home
+    screen behind it without its artwork and darker, the palette's backdrop over it, the look's pieces at three
+    quarters of their size on the console (top right, and along the bottom), the clock, the focused card with a
+    screenshot of the home screen and its texts, and the row of the console's icons."""
+    write("/tmp/ccdraw.js", CCDRAW_JS.encode())
+    out = subprocess.run(["node", "/tmp/ccdraw.js", WEB_LIB], capture_output=True, text=True)
+    assert out.returncode == 0 and "ccdraw ok" in out.stdout, out.stdout + out.stderr
+
+
 def t_page_tells_styled_icons():
     """The page tells an icon the style made (one it lost track of) from one changed by hand: outside the shape,
     clear of its edge, it is the template's backdrop, but for rounding. A shape that leaves too little of the
     backdrop can't be told, and isn't taken as the style's."""
     write("/tmp/stylematch.js", STYLEMATCH_JS.encode())
-    out = subprocess.run(["node", "/tmp/stylematch.js", WEB_PAGE], capture_output=True, text=True)
+    out = subprocess.run(["node", "/tmp/stylematch.js", WEB_LIB], capture_output=True, text=True)
     assert out.returncode == 0 and "stylematch ok" in out.stdout, out.stdout + out.stderr
 
 
@@ -3854,7 +4424,7 @@ def t_page_writes_the_consoles_zstd_frames():
     cases = [[d, n] for d in (0xa0, 0xa4, 0x80, 0x84, 0x60, 0x64, 0x00, 0x04, 0x24, 0x20) for n in (0, 1, 200, 3000, 70000, 300000)
              if not (d >> 6 == 0 and d & 0x20 and n > 255) and not (d >> 6 == 1 and (n < 256 or n > 65791))]
     write("/tmp/zstdjs.js", ZSTD_FRAMES_JS.encode())
-    out = subprocess.run(["node", "/tmp/zstdjs.js", WEB_PAGE, json.dumps(cases)], capture_output=True, text=True)
+    out = subprocess.run(["node", "/tmp/zstdjs.js", WEB_LIB, json.dumps(cases)], capture_output=True, text=True)
     assert out.returncode == 0 and "zstd frames ok" in out.stdout, out.stdout + out.stderr
     for desc, n in cases:
         data = bytes((i * 31 + 7) & 255 for i in range(n))
@@ -3867,8 +4437,8 @@ def t_page_writes_the_consoles_zstd_frames():
 
 PLACE_JS = r"""
 const fs = require("fs");
-const html = fs.readFileSync(process.argv[2], "utf8");
-const block = html.slice(html.indexOf("/* pad:begin */"), html.indexOf("/* pad:end */"));
+const lib = (...n) => n.map(x => fs.readFileSync(require("path").join(process.argv[2], x + ".js"), "utf8")).join("\n");
+const block = lib("texture-place");
 const P = new Function(block + ";return { textureDraw, textureAnchor, placementParams };")();
 const near = (a, b) => Math.abs(a - b) < 0.5;
 const eq = (name, got, want) => { for (const k of Object.keys(want)) if (!near(got[k], want[k])) throw new Error(`${name}: ${k} is ${got[k]}, wanted ${want[k]}`); };
@@ -3919,7 +4489,7 @@ def t_page_places_textures_against_their_edge():
     texture meets (bottom panel: bottom; top-right piece: top and right), with
     the padding left clear."""
     write("/tmp/place.js", PLACE_JS.encode())
-    out = subprocess.run(["node", "/tmp/place.js", WEB_PAGE], capture_output=True, text=True)
+    out = subprocess.run(["node", "/tmp/place.js", WEB_LIB], capture_output=True, text=True)
     assert out.returncode == 0 and "place ok" in out.stdout, out.stdout + out.stderr
 
 
@@ -3927,7 +4497,7 @@ def t_page_bleeds_colour_into_clear_pixels():
     """Textures with see-through parts carry colour in their clear pixels, as
     the console's do: the nearest visible colour, then white."""
     write("/tmp/bleed.js", BLEED_JS.encode())
-    out = subprocess.run(["node", "/tmp/bleed.js", WEB_PAGE], capture_output=True, text=True)
+    out = subprocess.run(["node", "/tmp/bleed.js", WEB_LIB], capture_output=True, text=True)
     assert out.returncode == 0 and "bleed ok" in out.stdout, out.stdout + out.stderr
 
 
@@ -4088,7 +4658,7 @@ def t_appearance_textures():
         assert open(top, "rb").read() == stored and open(bottom, "rb").read() == stored_bottom
         result = call("GET", "/api/status")[1]["result"]       # the artwork is read as the interface starts
         assert "put the console in rest mode and wake it" in result and "Appearance artwork" in result, result
-        assert "ps5-theme: To see the new Appearance artwork, put the console in rest mode and wake it." in open("/tmp/notifications.txt").read()
+        assert "Put the console in rest mode to see its new Appearance artwork." in open("/tmp/notifications.txt").read()
         for p, c in keep.items():                      # the rest of the folder is the console's
             assert crc_file(p) == c, p
         assert len(mounts_on(SYSA)) == 1
@@ -4265,6 +4835,179 @@ def t_shellui_exit_releases_sandbox():
         apply_and_wait("night")
         clear_sandboxes()
         call("DELETE", "/api/themes", {"id": "shellui"})
+
+
+def t_rests_in_a_row_keep_the_theme():
+    """Rests one after another, as quickly as a person can (30 s apart on the console, 1.87): each closes a home
+    screen that was up, and the next starts in a new sandbox. Three within a minute were taken for a crash loop, and
+    the theme came down. A home screen that was up long enough before it closed starts the count again; one that
+    closes as it starts, again and again, still takes the theme down. The two apps that start with the home screen
+    close with it: ours come out of their sandboxes too, as its exit is seen, so the system can take their views
+    down (left in, those views stayed up for good, 1.88); and soon after the log says what the system left up."""
+    if EMULATED:
+        print("      (skipped: needs real mounts)", flush=True)
+        return
+    copy_program("/bin/sleep", "/tmp/SceShellUI")
+    was = status()["applied"]
+    ours_in = lambda box: [l.split()[4] for l in open("/proc/self/mountinfo").read().splitlines()
+                           if l.split()[4].startswith(box + "/") and "/data/ps5-theme/" in l.split()[3]]
+
+    def view(box):
+        os.makedirs(f"{box}/system_ex", exist_ok=True)
+        subprocess.run(["mount", "--bind", "/system_ex", f"{box}/system_ex"], check=True)
+        return box
+
+    def covered(box):
+        end = time.time() + 5
+        while crc_file(f"{box}{HOME}/bg.png") != zlib.crc32(S["bg"]):   # watched, covered: its sandbox counted
+            assert time.time() < end, ("the view was not covered", box, log_text()[-1500:])
+            time.sleep(0.02)
+
+    def close(shell):
+        mark = len(log_text())
+        shell.kill()
+        shell.wait()
+        end = time.time() + 5
+        while "ShellUI exited:" not in log_text()[mark:]:
+            assert time.time() < end, "the home screen's exit was not seen"
+            time.sleep(0.02)
+        return log_text()[mark:]
+
+    def launcher(box):   # the system takes a closed sandbox down, newest view first; one in use stays up
+        for point in reversed([l.split()[4] for l in open("/proc/self/mountinfo").read().splitlines()]):
+            if point.startswith(box + "/"):
+                subprocess.run(["umount", point], capture_output=True)
+
+    shell = None
+    apply_and_wait("night")
+    S["plugin"].term()
+    # up 2 s: rest mode; what the system left, looked at 1 s after (5 s on the console, longer than these rests)
+    S["plugin"] = Plugin(env={"PS5THEME_TEST_CRASH_WINDOWS": "60,600,2,1"})
+    try:
+        wait_applied("night")
+        mark = len(log_text())
+        rests = []
+        for n in range(5):                  # five rests within about 20 s: each home screen up 2 to 4 s
+            box = view(next_shellui_box())
+            shell = subprocess.Popen(["/tmp/SceShellUI", "600"])
+            started = time.time()
+            covered(box)
+            num = box.rsplit("_", 1)[1]
+            apps = [view(f"/mnt/sandbox/{app}_{num}") for app in ("NPXS40101", "NPXS40102")]
+            for b in apps:
+                covered(b)                  # once there 2 s, with the home screen running
+            time.sleep(max(0, 2.3 - (time.time() - started)))   # up long enough: a rest, not a crash
+            said = close(shell)
+            shell = None
+            assert re.search(rf"ShellUI exited: \d+ overlay\(s\) taken out of its sandbox NPXS40087_{num} and of "
+                             rf"NPXS40101_{num}, NPXS40102_{num} \(closing with it\) in \d+ ms(, as its exit began)?; "
+                             r"up [2-9] s", said), said
+            for b in [box] + apps:
+                assert not ours_in(b), ("ours left in a sandbox that closed with the home screen", ours_in(b))
+                if not (n == 3 and b == apps[1]):   # (once, the system leaves one up)
+                    launcher(b)
+            rests.append(num)
+            assert status()["applied"] == "night", f"taken down after rest {n + 1}: {log_text()[mark:][-1500:]}"
+        assert "taking the theme down" not in log_text()[mark:]
+        end = time.time() + 8
+        while log_text()[mark:].count("1 s after the home screen exited, ") < 5:
+            assert time.time() < end, ("what the system left was not said", log_text()[mark:][-2000:])
+            time.sleep(0.1)
+        for n, num in enumerate(rests):
+            if n == 3:
+                want = (f"1 s after the home screen exited, 1 of the system's view(s) in the sandboxes that closed with "
+                        f"it were still up, which stay until a restart: NPXS40102_{num}/system_ex\n")
+            else:
+                want = (f"1 s after the home screen exited, the system had taken down the sandboxes that closed with it "
+                        f"(NPXS40087_{num}, NPXS40101_{num}, NPXS40102_{num})\n")
+            assert want in log_text()[mark:], (want, log_text()[mark:][-2500:])
+
+        mark = len(log_text())
+        for n in range(2):                  # then home screens that close as they start
+            box = view(next_shellui_box())
+            shell = subprocess.Popen(["/tmp/SceShellUI", "600"])
+            covered(box)
+            close(shell)
+            shell = None
+        view(next_shellui_box())            # the third restart within the minute
+        end = time.time() + 10
+        while status()["applied"]:
+            assert time.time() < end, ("the crash loop was not caught", log_text()[-1500:])
+            time.sleep(0.1)
+        s = wait_applied("")
+        assert s["result"].endswith(" was taken down: the console's interface kept restarting with it applied (NPXS40087)."), s
+        assert "the system app NPXS40087 restarted 3 times within 60 s" in log_text()[mark:]
+    finally:
+        if shell:
+            shell.kill()
+            shell.wait()
+        clear_sandboxes()
+        if was:
+            apply_and_wait(was)
+
+
+def t_overlays_come_out_newest_view_first():
+    """When the home screen exits, the system takes its sandbox down newest view first, and a view with one of ours
+    still in it stays up for good: on 13.42 the last view it makes (of /mnt/rnps) held our oldest overlays, which
+    came out last, and stayed up after most rests (1.88). Ours come out in the system's order: those in the newest
+    view first, whichever of ours was made last."""
+    if EMULATED:
+        print("      (skipped: needs real mounts)", flush=True)
+        return
+    was = status()["applied"]
+    mine = png(64, 64, (255, 0, 0))
+    shell = None
+    S["plugin"].term()
+    S["plugin"] = Plugin(env={"PS5THEME_TEST_LOG_RELEASE": "1"})
+    try:
+        if was:
+            wait_applied(was)
+        assert call("POST", "/api/themes", {"id": "order", "name": "Order"})[0] == 200
+        assert put_file("order", f"{GAME}/icon0.png", mine)[0] == 200
+        assert put_file("order", f"{HOME}/bg.png", S["bg"])[0] == 200
+        # The home screen running in its sandbox as the theme is applied: games' pictures go only into its view.
+        box = next_shellui_box()
+        for sub in ("user", "system_ex"):   # its view of /user first, then of /system_ex: the newer one
+            os.makedirs(f"{box}/{sub}", exist_ok=True)
+            subprocess.run(["mount", "--bind", "/" + sub, f"{box}/{sub}"], check=True)
+        copy_program("/bin/sleep", "/tmp/SceShellUI")
+        shell = subprocess.Popen(["/tmp/SceShellUI", "600"])
+        apply_and_wait("order")
+        end = time.time() + 10
+        while f"watching ShellUI (pid {shell.pid}," not in log_text():
+            assert time.time() < end, "ShellUI's process was not found"
+            time.sleep(0.1)
+        game, home = f"{box}{GAME}", f"{box}{HOME}"
+        end = time.time() + 5
+        while crc_file(f"{game}/icon0.png") != zlib.crc32(mine) or crc_file(f"{home}/bg.png") != zlib.crc32(S["bg"]):
+            assert time.time() < end, ("the new home screen's views were not covered", log_text()[-1500:])
+            time.sleep(0.05)
+        # Ours in the older view made again, so it is the newest of ours.
+        assert subprocess.run(["umount", game]).returncode == 0
+        end = time.time() + 5
+        while crc_file(f"{game}/icon0.png") != zlib.crc32(mine):
+            assert time.time() < end, ("not covered again", log_text()[-1500:])
+            time.sleep(0.05)
+        mark = len(log_text())
+        shell.kill()
+        shell.wait()
+        shell = None
+        end = time.time() + 5
+        while "ShellUI exited:" not in log_text()[mark:]:
+            assert time.time() < end, "the home screen's exit was not seen"
+            time.sleep(0.02)
+        said = [l for l in log_text()[mark:].splitlines() if "taking out, in this order:" in l]
+        assert said, log_text()[mark:]
+        order = said[0].split("taking out, in this order:")[1].split()
+        assert order.index(home) < order.index(game), order
+    finally:
+        if shell:
+            shell.kill()
+            shell.wait()
+        clear_sandboxes()
+        if was:
+            apply_and_wait(was)
+        call("DELETE", "/api/themes", {"id": "order"})
 
 
 def t_shellui_guard_holds_up():
@@ -4570,7 +5313,7 @@ def t_home_music_at9():
     assert "1 file checked" in s["result"] and "not converted to home music" not in s["result"], s["result"]
     # How to hear it: the home screen starts its music again after another app's.
     hint = "To hear the new home music, highlight a game or app that plays its own music"
-    assert hint in s["result"] and f"ps5-theme: {hint}" in open("/tmp/notifications.txt").read(), s["result"]
+    assert hint in s["result"] and "Its music plays after a game's or app's own music has." in open("/tmp/notifications.txt").read(), s["result"]
     assert open(path, "rb").read() == music                       # what ShellUI reads now
     # The editor still gets the system version (kept at apply), to match
     # loudness and length against and to validate further uploads with.
@@ -4691,8 +5434,8 @@ TESTS = [t_startup, t_ui_and_icon_served, t_mutations_need_token, t_create_theme
          t_stock_mirror_and_linked_staging, t_stage_folders_reused_without_links,
          t_firmware_mismatch_is_refused, t_delete_rules, t_concurrent_requests_during_apply,
          t_restore_stock_cleans_up, t_overlays_reach_system_views, t_crash_loop_takes_theme_down, t_busy_overlay_is_never_forced, t_recovers_after_hard_kill, t_update_from_payload_manager, t_update_from_plain_elf, t_update_hands_over, t_update_at_boot, t_web_comes_back_after_rest_mode, t_takeover_when_web_is_down, t_stop_tool_keeps_the_theme, t_failed_write_closes_its_file, t_survives_malformed_and_abusive_requests,
-         t_slow_clients_do_not_block_others, t_deep_folders_are_not_walked, t_pictures_are_revalidated, t_log_rotates, t_media_policy, t_music, t_music_playlist, t_theme_choices, t_settings_and_duplicate, t_mix_and_match, t_writes_from_many_threads_stay_whole, t_every_combination_holds, t_status_keeps_its_walk, t_storage_reserve, t_console_pictures, t_icon_style_for_titles_installed_later, t_themes_of_many_folders, t_preview_pictures, t_save_and_discard, t_discard_applies_only_when_needed, t_discard_cut_off_is_put_back, t_cut_off_uploads_are_not_theme_files,
-         t_home_background_textures, t_interface_pictures, t_title_pictures, t_fonts, t_bc7_keeps_transparency, t_page_writes_the_consoles_zstd_frames, t_page_builds_playlists, t_page_tells_styled_icons, t_page_bleeds_colour_into_clear_pixels, t_page_places_textures_against_their_edge, t_texture_sources, t_appearance_textures, t_shellui_exit_releases_sandbox, t_shellui_guard_holds_up, t_crash_takes_overlays_out_of_shellui, t_shellui_exits_during_apply, t_title_where, t_watch_files, t_home_music_at9, t_long_mount_paths_use_parent_folder, t_system_is_byte_identical_afterwards, t_crash_is_reported_and_recovered,
+         t_slow_clients_do_not_block_others, t_deep_folders_are_not_walked, t_nothing_deleted_under_a_mount, t_pictures_are_revalidated, t_log_rotates, t_media_policy, t_svg_subset, t_who_can_open_the_manager, t_settings_for_everyday, t_music, t_music_playlist, t_theme_choices, t_settings_and_duplicate, t_mix_and_match, t_writes_from_many_threads_stay_whole, t_every_combination_holds, t_status_keeps_its_walk, t_storage_reserve, t_console_pictures, t_icon_style_for_titles_installed_later, t_themes_of_many_folders, t_preview_pictures, t_save_and_discard, t_save_applies_only_when_needed, t_discard_applies_only_when_needed, t_discard_cut_off_is_put_back, t_cut_off_uploads_are_not_theme_files,
+         t_home_background_textures, t_interface_pictures, t_title_pictures, t_fonts, t_bc7_keeps_transparency, t_page_writes_the_consoles_zstd_frames, t_page_builds_playlists, t_page_tells_styled_icons, t_page_reads_the_home_rows, t_page_draws_the_control_center, t_page_bleeds_colour_into_clear_pixels, t_page_places_textures_against_their_edge, t_texture_sources, t_appearance_textures, t_shellui_exit_releases_sandbox, t_rests_in_a_row_keep_the_theme, t_overlays_come_out_newest_view_first, t_shellui_guard_holds_up, t_crash_takes_overlays_out_of_shellui, t_shellui_exits_during_apply, t_title_where, t_watch_files, t_home_music_at9, t_long_mount_paths_use_parent_folder, t_system_is_byte_identical_afterwards, t_crash_is_reported_and_recovered,
          t_privilege_failure_exits_cleanly]
 
 

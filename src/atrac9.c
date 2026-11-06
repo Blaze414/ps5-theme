@@ -12,6 +12,7 @@
 
 #include <fcntl.h>
 #include <pthread.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -20,8 +21,8 @@
 
 #include <sys/stat.h>
 
-#include "theme.h"
 #include "atrac9_tables.h"
+#include "media.h"
 
 
 #define AT9_MAX_BYTES     (64ull << 20)

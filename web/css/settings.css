@@ -1,0 +1,70 @@
+/* Who can open the manager (Access), and the screen for a device not allowed yet. */
+body.gated .gear, body.gated .now { visibility: hidden; }
+.gate { max-width: 34rem; margin: 12vh auto 0; display: grid; gap: 16px; justify-items: start; }
+.gate h1 { margin: 0; }
+.gate form { display: flex; gap: 10px; flex-wrap: wrap; align-items: end; }
+.gate input { width: 9.5em; font-size: 1.5rem; letter-spacing: .12em; text-align: center; font-variant-numeric: tabular-nums; }
+/* Settings: the categories in a list, the chosen one beside it (on a phone, one after the other), as on the console. */
+.settings { display: grid; gap: 28px; grid-template-columns: minmax(0, 1fr); padding: 8px 0 40px; }
+@media (min-width: 900px) { .settings { grid-template-columns: 300px minmax(0, 1fr); gap: 48px; } }
+.settings h1 { margin: 0 0 16px; }
+.settings-list { display: grid; gap: 4px; }
+.settings-list a { display: flex; align-items: center; gap: 14px; padding: 12px 14px; border-radius: var(--radius); text-decoration: none;
+  transition: background .15s, transform .15s var(--ease); }
+.settings-list svg { width: 24px; height: 24px; flex: none; color: var(--muted); }
+.settings-list b { display: block; font-weight: 500; }
+.settings-list small { display: block; font-size: .8125rem; color: var(--muted); }
+.settings-list a:hover { background: var(--surface-hover); }
+.settings-list a[aria-current="page"] { background: var(--surface-strong); }
+.settings-list a:focus-visible { background: #fff; color: #000; transform: scale(1.02); }
+.settings-list a:focus-visible svg, .settings-list a:focus-visible small { color: rgba(0, 0, 0, .62); }
+.settings-pane { min-width: 0; }
+.settings-pane .back { display: none; }
+.pane-head { display: flex; align-items: center; gap: 12px; min-height: 44px; margin-bottom: 16px; }
+.pane-head h2 { margin: 0; font-size: 1.5rem; font-weight: 500; }
+.pane-head .spacer { flex: 1; }
+.pane-sub { margin: 32px 0 10px; font-size: 1.0625rem; font-weight: 500; }   /* the same as a part's .sub-head */
+@media (max-width: 899px) {
+  .settings.has-part .settings-side { display: none; }
+  .settings:not(.has-part) .settings-pane { display: none; }
+  .settings-pane .back { display: inline-block; margin-bottom: 8px; color: var(--muted); text-decoration: none; padding: 6px 10px 6px 0; }
+  .settings-pane .back::before { content: "‹ "; }
+}
+/* A choice among a few, one per row with a radio at the end, as the console's own settings lists. */
+.choices { display: grid; gap: 6px; }
+.choice { display: flex; align-items: center; gap: 16px; width: 100%; padding: 14px 16px; border: 0; border-radius: var(--radius);
+  background: var(--surface); color: inherit; text-align: left; cursor: pointer; transition: background .15s, transform .15s var(--ease); }
+.choice b { display: block; font-weight: 500; }
+.choice small { display: block; font-size: .8125rem; color: var(--muted); margin-top: 2px; }
+.choice .radio { margin-left: auto; flex: none; width: 22px; height: 22px; border-radius: 50%; box-shadow: inset 0 0 0 2px var(--faint); }
+.choice[aria-checked="true"] .radio { box-shadow: none; background: radial-gradient(circle, #fff 0 4px, var(--blue) 4.5px); }
+.choice:hover { background: var(--surface-hover); }
+.choice:focus-visible { background: #fff; color: #000; transform: scale(1.01); }
+.choice:focus-visible small { color: rgba(0, 0, 0, .62); }
+.choice:focus-visible .radio { box-shadow: inset 0 0 0 2px rgba(0, 0, 0, .5); }
+.choice[aria-checked="true"]:focus-visible .radio { box-shadow: none; }
+.settings-pane .row-item .dir { white-space: normal; }
+/* On a phone, the list alone until one is chosen: nothing in it looks chosen before then. */
+@media (max-width: 899px) { .settings:not(.has-part) .settings-list a[aria-current="page"] { background: none; } }
+/* An on/off setting: a switch at the end of its row. */
+.choice .switch { margin-left: auto; flex: none; width: 46px; height: 28px; border-radius: 999px; background: var(--surface-strong);
+  box-shadow: inset 0 0 0 2px var(--faint); position: relative; transition: background .15s; }
+.choice .switch::after { content: ""; position: absolute; top: 4px; left: 4px; width: 20px; height: 20px; border-radius: 50%; background: var(--muted);
+  transition: transform .15s var(--ease), background .15s; }
+.choice[aria-checked="true"] .switch { background: var(--blue); box-shadow: none; }
+.choice[aria-checked="true"] .switch::after { transform: translateX(18px); background: #fff; }
+.choice:focus-visible .switch { box-shadow: inset 0 0 0 2px rgba(0, 0, 0, .5); }
+/* Storage: one bar in parts, as the console's own storage screen, and what each part is. */
+.usage { display: flex; height: 14px; border-radius: 999px; overflow: hidden; background: var(--surface); margin: 4px 0 18px; }
+.usage i { display: block; min-width: 3px; }
+.usage-themes { background: var(--blue); } .usage-copies { background: #7c5cff; } .usage-ready { background: #2fb7a6; }
+.usage-other { background: var(--warn); } .usage-logs { background: rgba(255, 255, 255, .45); }
+.facts .key { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 10px; vertical-align: 1px; }
+.facts dt small { display: block; font-size: .8125rem; color: var(--faint); margin-top: 2px; }
+.facts dd .btn { margin-left: 12px; }
+/* Facts about the console and the plugin: a name and its value on each row. */
+.facts { display: grid; gap: 6px; margin: 0; }
+.facts > div { display: flex; justify-content: space-between; align-items: baseline; gap: 16px; padding: 14px 16px; border-radius: var(--radius); background: var(--surface); }
+.facts dt { color: var(--muted); }
+.facts dd { margin: 0; font-weight: 500; text-align: right; overflow-wrap: anywhere; }
+#pair-msg.err { color: var(--danger); }

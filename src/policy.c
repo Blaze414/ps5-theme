@@ -6,7 +6,7 @@
    validated against the stock file so ShellUI receives exactly the kind of
    data it already handles:
      image  PNG/JPEG/WebP: same format and exact pixel size
-     svg    well-formed-looking SVG without scripts or external references
+     svg    the SVG subset of the console's own pictures, parsed (svg.c)
      audio  WAV: same codec, channels, sample rate and bit depth
             AT9: the same ATRAC9 format, and every block unpacks cleanly
             (atrac9.c)
@@ -28,6 +28,10 @@
 
 #include <sys/stat.h>
 
+#include "policy.h"
+#include "config.h"
+#include "fsguard.h"
+#include "media.h"
 #include "theme.h"
 
 
@@ -352,32 +356,7 @@ check_magic(const char *cand, const char *stock, int (*container)(const uint8_t 
 
 /* ---------------- SVG ---------------- */
 
-/* SVG text in memory (a file, or a picture inside a resource file). */
-int
-svg_check_mem(const uint8_t *data, size_t n, char *why, size_t len) {
-  static const char *const banned[] = {
-    "<script", "javascript:", "<foreignobject", "href=\"http", "href='http", "href=\"//",
-    "xlink:href=\"http", "@import", "url(http", "<iframe", "<!entity",
-  };
-  char *buf = malloc(n + 1);
-  if(!buf) { snprintf(why, len, "cannot read the SVG"); return -1; }
-  for(size_t i = 0; i < n; i++) {
-    if(!data[i]) { free(buf); snprintf(why, len, "SVG contains binary data"); return -1; }
-    buf[i] = (char)((data[i] >= 'A' && data[i] <= 'Z') ? data[i] + 32 : data[i]);
-  }
-  buf[n] = 0;
-  int ok = strstr(buf, "<svg") != NULL;
-  for(size_t i = 0; ok && i < sizeof(banned) / sizeof(*banned); i++) {
-    if(strstr(buf, banned[i])) {
-      snprintf(why, len, "SVG contains \"%s\", which is not allowed", banned[i]);
-      free(buf);
-      return -1;
-    }
-  }
-  free(buf);
-  if(!ok) { snprintf(why, len, "not an SVG file"); return -1; }
-  return 0;
-}
+/* The SVG subset and its parser: svg.c. */
 
 
 static int
@@ -575,9 +554,7 @@ static int validate_now(const char *cand, const char *stock, char *why, size_t l
 #define CHECKED_TAG PLUGIN_VERSION "r" CHECK_RULES
 #define CHECKED_MAX  8192
 
-typedef struct file_id {
-  unsigned long long dev, ino, size, mtime_s, mtime_ns;
-} file_id_t;
+typedef fs_id_t file_id_t;
 
 typedef struct checked {
   file_id_t cand, stock;
@@ -601,11 +578,7 @@ file_id(const char *path, file_id_t *id) {
   return 0;
 }
 
-static int
-same_id(const file_id_t *a, const file_id_t *b) {
-  return a->dev == b->dev && a->ino == b->ino && a->size == b->size &&
-         a->mtime_s == b->mtime_s && a->mtime_ns == b->mtime_ns;
-}
+#define same_id fs_id_same
 
 static const char *
 id_line(char *out, size_t size, const checked_t *c) {
@@ -676,12 +649,8 @@ checked_save(const checked_t *c) {
     else checked_lines = nchecked;
     return;
   }
-  if(!fs_write_allowed(CHECKED_FILE)) return;
-  int fd = open(CHECKED_FILE, O_WRONLY | O_CREAT | O_APPEND | O_NOFOLLOW, 0644);
-  if(fd < 0) return;
   id_line(line, sizeof(line), c);
-  if(write(fd, line, strlen(line)) > 0) checked_lines++;
-  close(fd);
+  if(!fs_append_file(CHECKED_FILE, line, strlen(line))) checked_lines++;
 }
 
 
@@ -693,8 +662,31 @@ asset_checks_remembered(void) {
 }
 
 
+static int validate_once(const char *cand, const char *stock, char *why, size_t len, fs_id_t *passed);
+
 int
 asset_validate(const char *cand, const char *stock, char *why, size_t len) {
+  return validate_once(cand, stock, why, len, NULL);
+}
+
+
+/* With the identity of the file that passed. A check may rewrite the file in the console's own form (a texture's
+   zstd frame: texture.c), which makes it a new file: then what is there now is checked once more, and must stay. */
+int
+asset_validate_id(const char *cand, const char *stock, char *why, size_t len, fs_id_t *passed) {
+  int rc = validate_once(cand, stock, why, len, passed);
+  if(rc == 1) rc = validate_once(cand, stock, why, len, passed);
+  if(rc == 1) {
+    snprintf(why, len, "it changed while it was being checked");
+    return -1;
+  }
+  return rc;
+}
+
+
+/* 0 passed (and *passed, if asked, is the file checked), -1 refused, 1 passed but the file changed meanwhile. */
+static int
+validate_once(const char *cand, const char *stock, char *why, size_t len, fs_id_t *passed) {
   checked_t c;
   memset(&c, 0, sizeof(c));
   int ids = !file_id(cand, &c.cand) && !file_id(stock, &c.stock);
@@ -707,6 +699,7 @@ asset_validate(const char *cand, const char *stock, char *why, size_t len) {
         snprintf(why, len, "%s", checked[i].why);
         pthread_mutex_unlock(&checked_lock);
         atomic_fetch_add(&remembered_count, 1);
+        if(ok && passed) *passed = c.cand;
         return ok ? 0 : -1;
       }
     }
@@ -715,15 +708,20 @@ asset_validate(const char *cand, const char *stock, char *why, size_t len) {
 
   int rc = validate_now(cand, stock, why, len);
 
-  /* Only a file that is still the one checked is remembered. */
+  /* Only a file that is still the one checked is remembered, or said to have passed. */
   file_id_t after;
-  if(ids && !file_id(cand, &after) && same_id(&after, &c.cand)) {
+  int same = ids && !file_id(cand, &after) && same_id(&after, &c.cand);
+  if(same) {
     c.ok = !rc;
     snprintf(c.why, sizeof(c.why), "%s", rc ? why : "");
     for(char *q = c.why; *q; q++) if(*q == '\t' || *q == '\n' || *q == '\r') *q = ' ';
     pthread_mutex_lock(&checked_lock);
     checked_save(&c);
     pthread_mutex_unlock(&checked_lock);
+  }
+  if(!rc && passed) {
+    if(!same) return 1;
+    *passed = c.cand;
   }
   return rc;
 }

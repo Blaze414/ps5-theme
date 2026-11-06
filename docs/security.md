@@ -16,25 +16,36 @@ Who can reach the plugin, what protects the system, and the fuzzing results. Par
 If you find a way to make the plugin write where it shouldn't, run something it shouldn't, or be reached by someone
 it shouldn't, report it privately: on GitHub, the repository's **Security** tab, then **Report a vulnerability**.
 Please don't open a public issue or post it elsewhere until a fixed version is released. Say what you did, on which
-firmware, and what happened; the Activity log helps. Reports are answered there, and the fix credited to you if you
+firmware, and what happened; the log (Settings › Log) helps. Reports are answered there, and the fix credited to you if you
 want.
 
 ## Who can reach the plugin
 
-- **Anyone on your local network.** The manager listens on port 8095 and
-  has no password, so anyone on the network can upload files and apply
-  themes. Use it on a network you trust.
-- **Not web pages.** Requests that change anything must carry an
-  `X-PS5-Theme` header, which browsers won't send from another site, so a
-  web page opened on the console can't drive the API.
-- **Not other machines, for updates.** The hand-over request used by updates
-  is accepted only from the console itself.
-- **What it can read back.** Beyond themes and the files they replace,
-  anyone on the network can read the plugin's log, the mount table, and the
-  names (not contents) of the files the system keeps for one game, with the
-  database lines that mention that game. Since 1.66 also the console's interface
-  icons and small pictures of its system textures, for the manager's
-  previews.
+- **The devices you allow, and the console itself** (since 1.88). A phone or
+  computer opens the manager once you have allowed it, with a code the
+  console shows; the console's own browser always can. In **Access** you can
+  instead let any device on your network open it (as before 1.88), or only
+  the console. How it works:
+  [Who can open the manager](how-it-works.md#who-can-open-the-manager).
+- **Only your own network.** Requests from addresses outside the private
+  ranges (the internet, through a forwarded port) are refused, whatever they
+  carry.
+- **Not web pages.** A request that names the console by an internet name is
+  refused, so a page that points its own name at the console (DNS rebinding)
+  gets nothing. Requests that change anything must also carry an
+  `X-PS5-Theme` header, which browsers won't send from another site, and the
+  allowed device's key is a cookie only the manager's own requests carry
+  (`SameSite=Strict`).
+- **Not other machines, for updates.** The hand-over and stop requests are
+  accepted only from the console itself.
+- **What an allowed device can read back.** Beyond themes and the files they
+  replace: the plugin's log, the mount table, the names (not contents) of the
+  files the system keeps for one game with the database lines that mention
+  that game, the console's interface icons and small pictures of its system
+  textures (for the manager's previews), the console's app database (the
+  games and apps it has and when each was used last, which the preview's home
+  screen is drawn from, since 1.89; only read), and the list of allowed devices
+  (their kind of device, address and dates; never their keys).
 - **Nothing outside your network.** The plugin sends nothing over the
   internet.
 
@@ -48,7 +59,11 @@ console with those rights. So that code gets the most testing.
 - Every write goes through the write guard and stays inside
   `/data/ps5-theme/` and the tile's folder (see
   [Never writing the system](how-it-works.md#never-writing-the-system), including what it
-  doesn't cover). Mix and match copies files only between themes, under
+  doesn't cover). Since 1.88 each write is made in the folder that was
+  checked, opened one folder at a time and never through a link, so nothing
+  swapped in between can send it elsewhere (a test races a swapping thread
+  against it on every push), and the log, crash reports and the record of
+  checks go through it too. Mix and match copies files only between themes, under
   `/data/ps5-theme/themes/`, each path checked as an upload's is and kept
   inside its theme's folder. The one exception is the plugin bringing its own older
   installed copies in etaHEN's and PS5 Payload Manager's folders up to date
@@ -68,6 +83,14 @@ console with those rights. So that code gets the most testing.
 - Only media can be replaced, never code, and each file is checked against
   the system file it replaces (see
   [What the checks cover, and what they don't](how-it-works.md#what-the-checks-cover-and-what-they-dont)).
+  What is staged and mounted is the very file and folder that passed (since
+  1.88: compared by identity on the open file, and on the overlay after it
+  goes on).
+- SVG pictures, which the console's interface draws, are parsed, and only
+  the subset its own pictures use is accepted: no scripts, event handlers,
+  other namespaces, entities, animation, or links outside the picture, in
+  any spelling (since 1.88; before, a list of refused words). See
+  [SVG pictures](how-it-works.md#svg-pictures).
 
 ## Fuzzing results
 
@@ -86,7 +109,8 @@ are the numbers from those runs, made after the fixes below:
 | WAV | 3,781,560 in 60 s | no findings |
 | PNG / JPEG / WebP headers | 7,098,883 in 3 min | no findings |
 | JSON | 3,274,997 in 60 s | no findings |
-| SVG check | 24,814,338 in 3 min | no findings |
+| SVG check (the list of refused words, before 1.88) | 24,814,338 in 3 min | no findings |
+| SVG parser, the console's subset (1.87, 3 November) | 8,502,642 in 2 min | no findings |
 | PNG pictures against the console's own (with the plugin's inflate) | 26,897,248 in 3 min | no findings |
 | Interface resource files, with the sound checks (26 October) | 10,444,860 in 3 min | no findings |
 | Interface resource files, structure kept (only pointers and embedded files vary), with the sound checks (26 October) | 7,377,665 in 3 min | no findings |
@@ -109,6 +133,7 @@ make sure it catches the bug.
 
 | Bug | Found by | Old code | Fixed |
 |---|---|---|---|
+| **The write guard checked one lookup and wrote through another** (time of check to time of use). It resolved a path's folder, checked it, then opened the path again; a folder swapped for a link in between was followed. | Review (a reader's, after 1.80) | `tests/fsguard/race.c`, one thread swapping a folder for a link to one outside, four writing through it: in 15 s, 4 files made outside and a file placed there deleted. | Each write is made relative to the folder opened and checked (1.88). The same test: about 280,000 guarded writes, renames and deletes, nothing outside touched. It runs on every push. |
 | **A WAV file whose check never ended.** A chunk size of `0xFFFFFFF7` made the step to the next chunk wrap to 0 in 32-bit arithmetic. | Fuzzing: the WAV target stopped making progress, spinning at full CPU on a 181-byte file. | The test's 48-byte upload got no answer (timed out after 30 s) and tied up one of the manager's 4 worker threads for good. Four such uploads would leave it unable to serve anyone. | Refused at once: "not a valid WAV file". |
 | **A texture unpacked with no limit.** A 25-byte file claiming to unpack to 200 MB. | Review | Room for 200 MB was set aside before the file was found to be invalid ("not a valid zstd-compressed texture"). | Refused before unpacking: "larger than the system texture". The texture fuzz target ran about 17 times faster afterwards (93 to 1,577 inputs a second). |
 | **A file left open when saving failed.** `fsync(fd) \|\| close(fd)` skipped the close when `fsync` failed. | Review | 25 failed saves raised the plugin's open files from 8 to 33, one leaked per failure. | No file left open (the test allows a margin of 3 for open connections), `theme.ini` intact, no temporary file left behind. |
@@ -149,7 +174,7 @@ Also fixed in 1.59 after a review of the whole plugin and manager page:
 - **The refit could read another theme's picture** if you switched themes
   while it ran. It now reads from the theme it started with.
 - **Refusals weren't in the log.** Checks the plugin refused (and other
-  conflicts) now show in **Activity** as "web: refused (code): reason".
+  conflicts) now show in the log as "web: refused (code): reason".
 - **Discard could bring back an upload's temporary file.** The copy of a theme
   that Discard goes back to is made at its first change, which is an upload
   still in its temporary `.part` file; the copy took that file too, and after
@@ -167,11 +192,25 @@ Also fixed in 1.59 after a review of the whole plugin and manager page:
 
 - **Fuzzing makes bugs less likely, not impossible.** It ran for minutes,
   not days.
-- **The HTTP server is not fuzzed.** Request handling (`src/web.c`) is tested
+- **The HTTP server is not fuzzed.** Request handling (`src/http.c`, `src/routes.c`) is tested
   with malformed, oversized and slow requests in the host suite.
 - **A file that passes can still upset the console's own decoders.** The
   checks are about format and structure, not proof that every decoder
   handles a file safely.
 - **Another program on the console with full rights** could get around the
   write guard, but such a program can write the system directly anyway.
-- **There is no password.** Anyone on your network can use the manager.
+- **Rest mode can make the system remove folders.** The plugin never writes
+  outside its own folders, but an overlay of its own still in the home
+  screen's sandbox as the system takes it down can lead the system to remove
+  empty folders of the real `/user` (seen twice on 13.42: no home screen until
+  a restart, which made them again). Since 1.88 the overlays come out as the
+  home screen's exit begins, which narrows this; to rule it out, choose
+  **No theme** before rest mode. See
+  [Challenges](challenges.md#empty-folders-the-system-removed-at-rest-mode).
+- **The connection isn't encrypted.** The manager is plain HTTP on your
+  network: someone who can watch your network's traffic could see an allowed
+  device's key and use it. Forget a device in **Settings › Devices** to make its key
+  useless.
+- **An allowed device stays allowed** until you forget it (or it is the one
+  used least, when 32 are allowed); anyone using that browser can open the
+  manager.

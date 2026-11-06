@@ -148,7 +148,17 @@ for name in ("stock", "pictures", "sound", "sound-ok"):   # rco-data: the pointe
 
 # SVG
 put("svg", "plain", b'<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10"><rect width="5" height="5"/></svg>')
-put("svg", "style", b'<?xml version="1.0"?><svg><style>.a{fill:red}</style><use xlink:href="#a"/></svg>')
+put("svg", "style", b'<?xml version="1.0" encoding="UTF-8"?><svg xmlns="http://www.w3.org/2000/svg" '
+                    b'xmlns:xlink="http://www.w3.org/1999/xlink"><style type="text/css">.a{fill:red}.b, #c{stroke:rgb(1,2,3)}'
+                    b'</style><use xlink:href="#a" style="fill:url(#g);opacity:0.5"/></svg>')
+put("svg", "paint", b'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 9 9"><!-- c --><title>a &amp; &#x41;&#66;</title>'
+                    b'<defs><linearGradient id="g" x1="0%"><stop offset="0" stop-color="#fff"/></linearGradient>'
+                    b'<mask id="m"><rect width="9" height="9"/></mask><filter id="f"><feColorMatrix type="matrix" '
+                    b'values="0 0 0 1 0"/><feGaussianBlur stdDeviation="2"/></filter></defs>'
+                    b'<g mask="url( #m )" filter="url(#f)" transform="translate(1, 2)"><path d="M0 0h9" fill="url(#g)"/>'
+                    b'</g></svg>')
+put("svg", "image", b'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1 1"><image width="1" height="1" '
+                    b'preserveAspectRatio="xMidYMid meet" href="data:image/png;base64,iVBORw0KGgo="/></svg>')
 
 # fonts: the stock font, and one-thing-wrong variants for the mutator to start from
 open(f"{stock_dir}/stock.ttf", "wb").write(font_fixture.font("tt", glyphs=150))

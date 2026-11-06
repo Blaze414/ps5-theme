@@ -1,0 +1,30 @@
+/* Live theme preview: the home screen and the Control Center drawn on a canvas as the console draws them. The
+   stage is a container, so the outlines over it size in cqh/cqw and scale with it. */
+.pv-overlay { position: fixed; inset: 0; z-index: 55; display: grid; place-items: center; padding: 24px;
+  background: rgba(4, 7, 14, .74); -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px); animation: in .2s var(--ease); }
+.pv-dialog { width: min(1100px, 94vw); max-height: 92vh; display: flex; flex-direction: column; gap: 14px; }
+.pv-bar { display: flex; align-items: center; gap: 10px; }
+.pv-bar h2 { font-size: 1.125rem; font-weight: 500; margin: 0; }
+.pv-bar .spacer { flex: 1; }
+.pv-stage { position: relative; width: 100%; aspect-ratio: 16 / 9; border-radius: var(--radius-lg); overflow: hidden;
+  background: radial-gradient(120% 120% at 72% -12%, #2a4f8f, #0b1222 60%); box-shadow: 0 30px 80px rgba(0, 0, 0, .6);
+  container-type: size; }
+.pv-stage .pv-busy { position: absolute; inset: 0; display: grid; place-items: center; color: var(--faint); font-size: .9rem; }
+.pv-stage canvas.hs { position: absolute; inset: 0; width: 100%; height: 100%; display: block; cursor: pointer; }
+.ap-preview .pv-stage canvas.hs, .pv-stage canvas.hs.cc { cursor: default; }
+.pv-note { color: var(--muted); font-size: .85rem; margin: 0; }
+.pv-toolbar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.pv-tabs { display: flex; gap: 6px; }
+.pv-looklbl { margin-left: auto; display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: .85rem; }
+.pv-looklbl select { padding: 6px 10px; border-radius: 10px; background: var(--surface); border: 0; }
+/* The Appearance part's own preview: the same drawings, inline, with an outline where a piece the console has none of would sit */
+.ap-preview { display: grid; gap: 10px; }
+.ap-preview .pv-toolbar { justify-content: space-between; }
+.ap-preview .pv-tabs { flex-wrap: wrap; }
+.ap-preview .pv-stage { box-shadow: none; border-radius: var(--radius); max-width: 720px; }
+.ap-dot { display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: var(--blue); margin-left: 6px; }
+.ap-slot { position: absolute; z-index: 1; display: grid; place-items: center; padding: 1cqh 2cqw; text-align: center;
+  border: .35cqh dashed rgba(255, 255, 255, .5); background: rgba(0, 0, 0, .22); color: rgba(255, 255, 255, .82); font-size: 2.6cqh; }
+.ap-slot.art { top: 0; left: 0; right: 0; height: 24cqh; border-top: 0; border-radius: 0 0 1.4cqh 1.4cqh; }
+.ap-slot.top { top: 0; right: 0; width: 36cqw; height: 20cqh; border-top: 0; border-right: 0; border-radius: 0 0 0 1.4cqh; }
+.ap-slot.bottom { left: 0; right: 0; bottom: 0; height: 36cqh; border-bottom: 0; border-radius: 1.4cqh 1.4cqh 0 0; }

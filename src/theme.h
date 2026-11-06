@@ -1,162 +1,24 @@
-/* Shared declarations for ps5-theme. */
-#ifndef PS5_THEME_H
-#define PS5_THEME_H
+/* theme.c: what a theme is on the console: its name and theme.ini, its home music settings, and the system files
+   it may change. */
+#ifndef PS5_THEME_THEME_H
+#define PS5_THEME_THEME_H
 
 #include <stddef.h>
-#include <stdint.h>
 
-#define PLUGIN_VERSION "1.80"
-#define TITLE_ID       "THEM00001"
-#define WEB_PORT       8095
-
-#define BASE_DIR     "/data/ps5-theme"
-#define THEMES_DIR   BASE_DIR "/themes"
-#define STAGE_DIR    BASE_DIR "/stage"
-#define DUMP_DIR     BASE_DIR "/dump"
-#define STOCK_DIR    BASE_DIR "/stock"
-#define SNAP_DIR     BASE_DIR "/snapshots"
-#define UPDATE_DIR   BASE_DIR "/update"     /* drop a newer ps5-theme.elf or .plugin here */
-#define LOG_DIR      BASE_DIR "/logs"
-#define INCOMING_DIR BASE_DIR "/incoming"   /* uploads being received (web.c part_name) */
-#define LOG_FILE     LOG_DIR "/log.txt"
-#define ACTIVE_FILE  BASE_DIR "/active"
-#define MOUNTS_FILE  BASE_DIR "/mounts"
-#define LIVE_FILE    BASE_DIR "/live"      /* the applied theme's targets and stages */
-#define TILE_DIR     "/user/app/" TITLE_ID
-
-
-/* log.c */
-void log_init(void);
-/* Seconds on a clock that only goes forward, for waits and intervals: the console sets its own clock from the
-   network after it starts, and a wall-clock interval measured across that jump stalls or ends early. */
-long long mono_seconds(void);
-void snapshots_recover(void);   /* (web.c) a Discard cut off between its two steps put right */
-void log_msg(const char *fmt, ...) __attribute__((format(printf, 1, 2)));
-void log_err(const char *fmt, ...) __attribute__((format(printf, 1, 2)));
-void notify(const char *fmt, ...) __attribute__((format(printf, 1, 2)));
-
-
-/* fsguard.c: every write the plugin makes goes through these. A write is only
-   allowed when the real (symlink-resolved) location is inside BASE_DIR or
-   TILE_DIR, and the final path component is never followed. */
-int  fs_guard_init(void);
-int  fs_write_allowed(const char *path);
-int  fs_read_within(const char *path, const char *root);
-int  fs_open_write(const char *path);
-/* Free space kept for the console on the storage the plugin writes to. */
-#define FS_RESERVE (1ull << 30)
-int  fs_room_for(uint64_t need);
-/* How many writes the plugin has made: what was worked out from its folders holds while this stays the same. */
-unsigned fs_generation(void);
-#define STORAGE_FULL "the console's storage is nearly full: free some space, then try again"
-
-int  fs_mkdirs(const char *path);
-int  fs_rename(const char *from, const char *to);
-int  fs_unlink(const char *path);
-/* Replace an installed copy of ps5-theme (etaHEN's or Payload Manager's folders), checked first. */
-int  fs_replace_payload(const char *path, const void *data, size_t len, int (*check)(const char *tmp));
-int  fs_rmdir(const char *path);
-int  fs_symlink(const char *target, const char *path);
-int  fs_link(const char *existing, const char *path);
-int  fs_copy_file(const char *existing, const char *path);
-int  fs_rm_rf_under(const char *root, const char *path);
-int  fs_write_file(const char *path, const void *data, size_t len);
-int  fs_is_dir(const char *path);
-int  fs_append_file(const char *path, const void *data, size_t len);
-uint32_t crc32_update(uint32_t crc, const void *buf, size_t len);
-int  fs_crc32_file(const char *path, uint32_t *crc, uint64_t *size);
-int  fs_copy_tree(const char *src, const char *dst);
-int  fs_link_tree(const char *src, const char *dst);
-
-
-/* verify.c: image format and size checks used before a file enters a theme. */
-enum { IMG_NONE = 0, IMG_PNG, IMG_JPEG, IMG_WEBP };
-typedef struct image_info {
-  int      format;
-  uint32_t width, height;
-} image_info_t;
-
-int         image_format_for_path(const char *path);
-const char *image_format_name(int format);
-int         image_probe(const char *path, image_info_t *out);
-int         image_probe_mem(const uint8_t *data, size_t len, image_info_t *out);
-
-
-/* policy.c: which system files a theme may replace and how a candidate is
-   validated against the stock file. Code and unknown types are protected. */
-enum { KIND_BLOCKED = 0, KIND_IMAGE, KIND_SVG, KIND_AUDIO, KIND_FONT, KIND_JSON, KIND_VIDEO, KIND_TEXTURE, KIND_RCO };
-typedef struct wav_info {
-  uint32_t format, channels, rate, bits;
-  uint8_t  subformat[16];
-  uint64_t data_offset, data_size;
-} wav_info_t;
-
-int         asset_kind(const char *path);
-int         title_folder(const char *dir);
-
-int         app_path_ok(const char *path);
-const char *asset_kind_name(int kind);
-uint64_t    asset_size_limit(int kind);
-int         asset_validate(const char *candidate, const char *stock, char *why, size_t len);
-int         asset_checks_remembered(void);   /* results reused since the last call */
-int         svg_check_mem(const uint8_t *data, size_t len, char *why, size_t why_len);
-
-/* inflate.c, png.c: checking PNG pictures against the console's own. */
-long        inflate_raw(const uint8_t *src, size_t len, size_t *used, uint8_t *dst, size_t cap, size_t window);
-/* png.c: a picture's pixels as RGBA (8-bit RGB or RGBA, not interlaced), and pixels
-   of the stock's size written back as a PNG of exactly the stock's kind (its chunks, its zlib header). At most
-   2048 pixels a side. */
-uint8_t    *png_decode_rgba(const uint8_t *png, size_t len, uint32_t *w, uint32_t *h);
-uint8_t    *png_encode_like(const uint8_t *stock, size_t stock_len, const uint8_t *rgba, size_t *out_len);
-int         png_check_against(const uint8_t *stock, size_t stock_len, const uint8_t *cand, size_t cand_len,
-                              char *why, size_t why_len);
-
-/* rco.c: ShellUI resource containers; only their pictures may change. */
-int         rco_validate(const char *candidate, const char *stock, char *why, size_t len);
-/* One of the console's interface icons (an iconid_* picture) from the interface file at `path`: 0 with *out
-   (malloc'd, the caller frees) and *len, or -1 when there's no such icon. */
-int         rco_icon(const char *path, const char *id, uint8_t **out, size_t *len);
-int         wav_probe(const char *path, wav_info_t *out);
-
-/* font.c: a replacement font must be a whole TrueType or OpenType font with
-   the characters text needs; 0 if so, else -1 and a plain reason. */
-int         font_check_mem(const uint8_t *buf, size_t n, char *why, size_t len);
-
-
-
-/* Theme music. The console plays its own home music, /system_ex/vsh_asset/
-   bgm_home.at9 (ATRAC9), which a theme replaces like any other file; the
-   browser encodes it. The theme also keeps the source as 48 kHz 16-bit
-   stereo PCM, so the music can be encoded again at another loudness or for a
-   console whose home music has a different format. */
-#define MUSIC_FILE      "music.wav"       /* track 1's source; added tracks are music2.wav, music3.wav, … */
-#define MUSIC_MAX_BYTES (128ull << 20)
-#define MUSIC_RATE      48000
-#define HOME_MUSIC      "/system_ex/vsh_asset/bgm_home.at9"
+/* Theme music. The console plays its own home music, HOME_MUSIC (ATRAC9),
+   which a theme replaces like any other file; the browser encodes it. The
+   theme also keeps the source as 48 kHz 16-bit stereo PCM, so the music can
+   be encoded again at another loudness or for a console whose home music has
+   a different format. */
+#define HOME_MUSIC       "/system_ex/vsh_asset/bgm_home.at9"
+#define MUSIC_FILE       "music.wav"       /* track 1's source; added tracks are music2.wav, music3.wav, … */
+#define MUSIC_MAX_BYTES  (128ull << 20)
+#define MUSIC_RATE       48000
 #define MUSIC_MAX_TRACKS 8                 /* a playlist's songs; the console caps playback at ~2× its own track */
-
-/* Installed games' and apps' metadata, one folder per title: their icons and
-   other pictures may be themed (only pictures: the rest is the system's).
-   Most PS5 games' records point instead at the sce_sys folder of the game's
-   installation, /user/app/<title>/sce_sys, the only part of APP_DIR that
-   may be themed. */
-#define APPMETA_DIR     "/user/appmeta"
-#define APP_DIR         "/user/app"
-#define PATCH_DIR       "/user/patch"
-#define DOWNLOAD_DIR    "/user/download"   /* the console's downloads, one folder per title, written as they come */
-/* The pictures the console downloads from PlayStation Network: a title's
-   (one folder per title) and its game's (one folder per concept, which a
-   game's editions share). The app database points some games' tiles at
-   these instead (Death Stranding's at conceptmeta/234585 on 13.42). */
-#define FONT_DIR        "/preinst/common/font"    /* the console's text fonts (SST and others) */
-#define SYS_ASSET_DIR   "/system/vsh_asset"       /* the Appearance themes' textures, Welcome backgrounds */
-#define CATALOG_DIR     "/user/catalog_downloader"
-#define CATALOG_APPMETA_DIR CATALOG_DIR "/appmeta"
-#define CONCEPTMETA_DIR CATALOG_DIR "/conceptmeta"
-#define GAIN_MIN        (-12)            /* dB relative to the system music's loudness */
-#define GAIN_MAX        12
-#define MUSIC_MAX_MS    3600000          /* bounds for the selected portion */
-#define BLEND_MAX_MS    8000
+#define MUSIC_MAX_MS     3600000           /* bounds for the selected portion */
+#define BLEND_MAX_MS     8000
+#define GAIN_MIN         (-12)             /* dB relative to the system music's loudness */
+#define GAIN_MAX         12
 
 /* theme.ini music settings: loudness, the music part and the loop part of
    music.wav (milliseconds, end 0 = to the end of the music; loop -1 = none),
@@ -188,136 +50,32 @@ typedef struct {
   char between[12];                      /* joint between songs: "crossfade", "fade" or "cut" */
   char end_mode[12];                     /* "loop-all" or "loop-last" */
 } music_settings_t;
-int   music_wav_ok(const char *path, wav_info_t *info, char *why, size_t len);
-
-
-/* atrac9.c: ATRAC9 (.at9) format and bitstream checks. */
-int   at9_validate(const char *candidate, const char *stock, char *why, size_t len);
-
-
-/* texture.c: DDS textures (.dds, .dds.zst). */
-typedef struct texture_info {
-  uint32_t width, height, mips, array, dxgi;
-  char     fourcc[5];
-  uint32_t header_len;
-  uint64_t data_len;
-  int      known;            /* data size checked against the format */
-} texture_info_t;
-
-uint8_t    *texture_load(const char *path, size_t *len, int *compressed);
-int         texture_parse(const uint8_t *d, size_t len, texture_info_t *t);
-/* The texture's format and DDS header; *zstd (if given) says whether the file
-   holds zstd-compressed data, found by its content (the console keeps some
-   compressed textures under a plain .dds name). */
-int         texture_info(const char *path, texture_info_t *t, uint8_t header[148], int *zstd);
-int         texture_validate(const char *candidate, const char *stock, char *why, size_t len);
-/* The frame header of a system texture's zstd file (up to 16 bytes), for the
-   page to copy exactly; 0 if the file isn't zstd-compressed. */
-size_t      texture_frame_head(const char *path, uint8_t out[16]);
-const char *texture_format_name(const texture_info_t *t);
-/* A quarter-size picture of a texture (one RGBA pixel per 4x4 block, its opacity-weighted average), for the
-   manager's previews: BC7, BC1 and 8-bit RGBA/BGRA. 0 with *rgba malloc'd (the caller frees). */
-int         texture_preview(const char *path, uint8_t **rgba, uint32_t *w, uint32_t *h);
-int         texture_preview_mem(const uint8_t *d, size_t len, uint8_t **rgba, uint32_t *w, uint32_t *h);
-/* An opaque picture of the stock texture's size written as that texture (its header, its format, every mip):
-   BC7 or BC1, uncompressed. NULL for anything else. */
-uint8_t    *texture_encode_like(const uint8_t *stock, size_t stock_len, const uint8_t *rgba, size_t *out_len);
-
-
-/* zstd.c: Zstandard decompression (to read and verify .dds.zst textures). */
-int64_t  zstd_content_size(const uint8_t *src, size_t len);
-int64_t  zstd_decompress(const uint8_t *src, size_t len, uint8_t *dst, size_t cap);
-uint64_t xxh64(const void *data, size_t len);
-
-
-/* crash.c */
-#define WEB_WORKERS 4
-enum { CRUMB_MAIN = 0, CRUMB_LISTEN, CRUMB_TILE, CRUMB_GUARD, CRUMB_WEB, CRUMB_COUNT = CRUMB_WEB + WEB_WORKERS };
-void crash_install(void);
-/* Called first on a fatal signal, from the signal handler: system calls and static memory only. */
-void crash_on_fatal(void (*fn)(void));
-void crash_thread_init(int slot);
-void crash_thread_exit(int slot);
-void crumb(int slot, const char *fmt, ...) __attribute__((format(printf, 2, 3)));
-void crash_report_previous(void);
-
-
-/* main.c */
-void fw_string(char *out, size_t size);
-int  read_ini_value(const char *path, const char *key, char *out, size_t size);
-int  target_allowed(const char *path);
-int  theme_name_valid(const char *name);
-int  fw_matches(const char *list, const char *fw);
-void asset_listing_path(char *out, size_t size);
-void read_active(char *out, size_t size);
-int  write_active(const char *name);
-/* Apply the chosen theme again if it is still `expect`, said on the console once it is done with `note` (a line, or
-   several), not step by step: for icons styled by themselves while a game may be open. -1 if another is chosen. */
-int  reapply_quietly(const char *expect, const char *note);
-/* The folders a theme may change files in, at most (the manager checks a theme against it). */
-int  max_theme_folders(void);
-/* Titles the applied theme has pictures for that weren't installed when it was applied: how many, up to max. */
-int  titles_awaiting_install(char (*out)[16], int max);
-int  applied_theme(char *out, size_t size);
-int  applying_theme(char *out, size_t size);
-int  apply_progress(char *text, size_t size);   /* percent, or -1 when idle */
-#define RESULT_MAX 1536   /* an apply's outcome with all its hints (pictures, font, artwork, music) */
-void last_result(char *out, size_t size);
-void themes_lock(void);
-void themes_unlock(void);
-/* The files a theme had when it was last applied (call with themes_lock held). */
-void applied_files_record(const char *name);
-void applied_files_forget(void);
-int  applied_files_unchanged(const char *name);
 void read_music_settings(const char *id, music_settings_t *m);
+int  write_theme_ini(const char *id, const char *name, const char *fw, const music_settings_t *music);
 int  music_loop_valid(const char *loop);
 int  music_order_valid(const char *order);
 int  music_end_mode_valid(const char *mode);
 void music_source_file(int slot, char *out, size_t size);   /* "music.wav" or "music<slot>.wav" */
-/* Where the system version of `asset` can be read. While a theme is applied
-   the system path shows the theme's version, so every apply keeps a copy of
-   each file it replaces under STOCK_DIR/<firmware>/. */
-void stock_path(const char *asset, char *out, size_t size);
-/* web.c: a replaceable asset (an allowed folder, an existing regular file, its real location allowed too). */
+
+int  theme_name_valid(const char *name);
+void theme_title(const char *id, char *out, size_t size);  /* its name from theme.ini, else its ID */
+int  read_ini_value(const char *path, const char *key, char *out, size_t size);   /* 0 if found */
+void fw_string(char *out, size_t size);
+int  fw_matches(const char *list, const char *fw);
+
+/* The system files a theme may change: in a themable folder (target_allowed), and for asset_path_valid also an
+   existing regular file whose real location is allowed too. */
+int  target_allowed(const char *path);
 int  asset_path_valid(const char *path);
-/* autostyle.c: the icon style for games and apps installed later, run in the background. */
-void *autostyle_thread(void *arg);
-int  autostyle_settle(void);                 /* seconds nothing in a title's folders may change before it counts as installed */
-int  autostyle_wait(const char *title);      /* seconds until it does (0: installed), -1: no such title or no icon yet */
-void titles_stamp(char *out, size_t size);   /* changes when the installed titles do, or the styler did something */
-void title_name(const char *title, char *out, size_t size);   /* the name the console shows, else the ID */
-/* What the console says once the theme is applied again for icons styled and titles whose pictures went back. */
-void autostyle_note(char *out, size_t size, const char (*styled)[16], int nstyled, const char (*back)[16], int nback);
-int  write_theme_ini(const char *id, const char *name, const char *fw, const music_settings_t *music);
-
-
-/* update.c: one running copy, and handing over to a newer one. */
-int   version_value(const char *v);        /* "1.23" -> 123, or -1 */
-int   my_version(void);
-int   instance_lock(int wait_ms);          /* 0 once this copy holds the lock */
-int   running_version(void);               /* of the copy answering locally, or -1 */
-int   ask_handoff(void);
-void  request_handoff(int pid);            /* pid of the newer copy, or 0 if it didn't say */
-int   handoff_requested(void);
-int   handoff_due(void);                   /* asked, and the newer copy is still there */
-void  request_stop(void);                  /* ps5-theme-stop asked (async-signal-safe) */
-int   stop_requested(void);
-void  record_running(void);                /* PID_FILE, once this copy holds the lock */
-
-/* running.c, shared with ps5-theme-stop. */
-#define INSTANCE_LOCK   BASE_DIR "/instance.lock"
-#define PID_FILE        BASE_DIR "/pid"      /* "<pid> <start>" of the copy holding the lock */
-int   running_copy(int self);
-/* One request to the copy answering on this console's web port (`out`: its reply); 0 on a 200 reply. */
-int   local_request(const char *method, const char *path, char *out, size_t size);
-int   title_mount_point(const char *on);
-int   release_overlays(const char *under, int (*match)(const char *on), char (*recorded)[1024], int nrecorded, int *stuck);
-int   update_check(void);                  /* 1 if a newer copy was started */
-
-
-/* web.c, tile.c */
-void *web_server_thread(void *arg);
-void  lan_address(char *out, size_t size);
-int   tile_install(void);
+const char *theme_folder(size_t i);   /* the i-th themable folder, ending in '/'; NULL after the last */
+/* Kinds of themable folder. The home screen's own views only (home_view_only): titles' pictures and the fonts. */
+int  title_target(const char *dir);
+int  font_target(const char *dir);
+int  artwork_target(const char *dir);
+int  home_view_only(const char *dir);
+void asset_listing_path(char *out, size_t size);
+/* Where the system version of `asset` can be read. While a theme is applied the system path shows the theme's
+   version, so every apply keeps a copy of each file it replaces under STOCK_DIR/<firmware>/. */
+void stock_path(const char *asset, char *out, size_t size);
 
 #endif

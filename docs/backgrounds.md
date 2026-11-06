@@ -112,7 +112,7 @@ background is shown, with a switch. On 13.42:
 - **The console's background after rest mode:** a screen that read its
   background before the theme was back in place can show the console's own
   until it reloads. **Apply again** brings it back at once.
-- **Applied partly:** **Activity** says which file was skipped and why.
+- **Applied partly:** the log (**Settings › Log**) says which file was skipped and why.
 
 ## How it is made
 

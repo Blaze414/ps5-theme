@@ -1,0 +1,85 @@
+/* Edit page: the way back, the theme's name as the title; the list of the theme's parts beside the part being
+   changed, as in the console's Settings. On a phone the list comes first and a part opens on its own. */
+.back { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); text-decoration: none; font-size: .9375rem;
+  padding: 6px 12px 6px 8px; margin-left: -8px; border-radius: 999px; transition: background .15s, color .15s; }
+.back:hover { color: var(--text); background: var(--surface-hover); }
+.back:focus-visible { outline: none; background: #fff; color: #000; }
+.back::before { content: "‹"; font-size: 1.375rem; line-height: 1; margin-top: -2px; }
+.edit-title { display: grid; gap: 2px; min-width: 0; }
+.edit-title h1 { overflow-wrap: anywhere; }
+.editor { display: grid; gap: 20px; grid-template-columns: minmax(0, 1fr); scroll-margin-top: 88px; }
+@media (min-width: 900px) {
+  .editor { grid-template-columns: 300px minmax(0, 1fr); align-items: start; }
+  .secnav { position: sticky; top: 88px; max-height: calc(100vh - 104px); overflow-y: auto; }
+  .list-back { display: none !important; }
+}
+@media (max-width: 899px) {
+  .editor.picked .secnav, .editor:not(.picked) .pane { display: none; }
+}
+.secnav { scrollbar-width: thin; scrollbar-color: rgba(255, 255, 255, .18) transparent; }
+.secnav { display: grid; gap: 2px; padding: 8px; border-radius: var(--radius-lg); background: var(--surface); align-content: start; }
+.nav-group { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 14px 10px 4px;
+  font-size: .75rem; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--faint); }
+.nav-more { border: 0; background: transparent; color: var(--muted); font: inherit; letter-spacing: .02em; text-transform: none;
+  font-weight: 500; font-size: .8125rem; padding: 4px 10px; border-radius: 999px; cursor: pointer; }
+.nav-more:hover { color: var(--text); background: var(--surface-hover); }
+.nav-more:focus-visible { outline: none; background: #fff; color: #000; }
+.nav-hint { margin: 0; padding: 0 10px 6px; font-size: .8125rem; color: var(--faint); }
+.nav-item { display: flex; align-items: center; gap: 12px; padding: 7px 10px 7px 7px; border-radius: 14px; text-decoration: none;
+  color: var(--text); transition: background .15s, transform .18s var(--ease); }
+.nav-item:hover { background: var(--surface-hover); }
+.nav-item.sel { background: var(--surface-strong); }
+.nav-item:focus-visible { outline: none; background: #fff; color: #000; transform: scale(1.02); }
+.nav-item:focus-visible .nav-status { color: rgba(0, 0, 0, .62); }
+.nav-thumb { flex: none; width: 48px; height: 48px; border-radius: 10px; overflow: hidden; display: grid; place-items: center;
+  background: #1a2131; color: var(--muted); }
+.nav-thumb svg { width: 24px; height: 24px; }
+.nav-thumb img { width: 100%; height: 100%; object-fit: contain; }
+.nav-thumb img.cover { object-fit: cover; }
+.nav-thumb .aa { font-size: 1.25rem; line-height: 1; color: var(--text); }
+.nav-thumb img.ci { width: 28px; height: 28px; object-fit: contain; opacity: .78; }
+.nav-item.sel .nav-thumb img.ci, .nav-item:hover .nav-thumb img.ci { opacity: 1; }
+.nav-thumb .ci-fb { display: contents; }
+.nav-item:focus-visible .nav-thumb { box-shadow: 0 0 0 2px #000 inset; }
+.nav-text { display: grid; min-width: 0; }
+.nav-name { font-size: .9375rem; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.nav-status { font-size: .8125rem; color: var(--faint); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.nav-item.on .nav-status { color: var(--muted); }
+.nav-item.on .nav-status::before { content: ""; display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: var(--blue); margin: 0 6px 1px 0; }
+.pane { display: grid; gap: 14px; min-width: 0; align-content: start; }
+.pane h2[tabindex] { outline: none; }
+.pane-title { grid-column: 1 / -1; font-size: 1.0625rem; font-weight: 500; }
+.panel.start { display: grid; gap: 8px; box-shadow: inset 3px 0 0 var(--blue); }
+.panel.start h2 { font-size: 1.0625rem; font-weight: 500; }
+.panel.start ol { margin: 0; padding-left: 1.3em; display: grid; gap: 6px; color: var(--muted); font-size: .9375rem; }
+.panel.start a { color: var(--text); }
+.steps { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 6px; }
+.step { display: grid; gap: 2px; padding: 12px 16px; border-radius: var(--radius); background: var(--surface); text-decoration: none;
+  font-weight: 500; transition: background .15s, transform .18s var(--ease); }
+.step .note { font-weight: 400; font-size: .8125rem; }
+.step.next { text-align: right; }
+.step:hover { background: var(--surface-hover); }
+.step:focus-visible { outline: none; background: #fff; color: #000; transform: scale(1.02); }
+.step:focus-visible .note { color: rgba(0, 0, 0, .62); }
+.list-back { justify-self: start; }
+/* Why a button can't be used, beside it rather than only in a tooltip */
+.card .why { font-size: .8125rem; color: var(--warn); }
+
+/* Messages: errors stay until closed; any message closes with its × */
+.toast { padding-right: 40px; }
+.toast .x { position: absolute; top: 8px; right: 8px; width: 28px; height: 28px; border: 0; border-radius: 50%; padding: 0;
+  background: transparent; color: var(--muted); font-size: 1.125rem; line-height: 1; cursor: pointer; }
+.toast .x:hover, .toast .x:focus-visible { background: #fff; color: #000; outline: none; }
+
+/* Forms opened from the library's buttons have a title, as a dialog would */
+.form-title { grid-column: 1 / -1; display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+.form-title h2 { font-size: 1.25rem; font-weight: 500; }
+
+/* Phones: the page's buttons share the row evenly instead of wrapping one by one */
+@media (max-width: 600px) {
+  .head > .btn { flex: 1 1 auto; }
+  .head .spacer { flex-basis: 100%; height: 0; }
+}
+
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }
+.visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }

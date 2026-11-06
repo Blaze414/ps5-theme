@@ -8,7 +8,7 @@
 #include <stdint.h>
 #include <string.h>
 
-#include "theme.h"
+#include "media.h"
 
 
 #define MAXBITS   15

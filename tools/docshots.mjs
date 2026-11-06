@@ -16,6 +16,10 @@
 //
 //   PS5_THEME_URL=http://192.168.1.20:8095 node tools/docshots.mjs <out dir> [shots|probe] [only name,...]
 // then copy the pictures wanted into docs/screenshots/.
+//
+// From 1.88 the manager opens only on devices allowed with a code, which this tool won't ask for (that would change
+// the console's list of devices). While taking screenshots, choose Any device on your network in the manager's
+// Access, on the console, and Devices you allow again afterwards.
 import { spawn } from "node:child_process";
 import { writeFileSync, mkdirSync, mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -167,6 +171,11 @@ try {
   await send("Fetch.enable", { patterns: [{ urlPattern: "*", requestStage: "Request" }] });
   await viewport(1600, 1000);
   await send("Page.navigate", { url: `${CONSOLE}/?r=${Date.now()}#/library` });
+  await sleep(2500);
+  if (await run(`document.body.classList.contains("gated")`)) {
+    throw new Error("the manager asks to allow this computer: in its Access, on the console, choose Any device on your " +
+                    "network while taking screenshots (see the top of this file)");
+  }
   await waitFor(`typeof state !== "undefined" && !!state.status && !!state.status.fw && !!document.querySelector(".card")`, "the library");
   await sleep(2500);
 
@@ -192,17 +201,19 @@ try {
       await shoot("library.png", { x: 0, y: 0, w: 1600, h });
     }
     if (want("new-theme.png")) {
-      await run(`(() => { state.creating = true; state.mix = null; renderLibrary(); scrollTo(0, 0); return 1; })()`);
+      await run(`(() => { newTheme(); scrollTo(0, 0); return 1; })()`);
       await sleep(800); await tidy();
-      await shoot("new-theme.png", await boxOf("#create", 0));
-      await run(`(() => { state.creating = false; renderLibrary(); return 1; })()`);
+      await shoot("new-theme.png", await boxOf("", 0, 4000, `document.querySelector("#create").parentElement`));   /* the screen: title and form */
+      await run(`(() => { closeCreate(); return 1; })()`);
+      await sleep(600);
     }
     if (want("mix.png")) {
-      await run(`(() => { openMix(); return 1; })()`);
-      await waitFor(`!!document.querySelector("form#mix")`, "the mix form", 300000);
+      await run(`(() => { newTheme("mix"); scrollTo(0, 0); return 1; })()`);
+      await waitFor(`!!document.querySelector("#create .mix-rows")`, "Mix and match", 300000);
       await sleep(1500); await tidy();
-      await shoot("mix.png", await boxOf("form#mix", 0, 1300));
-      await run(`(() => { state.mix = null; renderLibrary(); return 1; })()`);
+      await shoot("mix.png", await boxOf("#create", 0, 1300));
+      await run(`(() => { closeCreate(); return 1; })()`);
+      await sleep(600);
     }
     if (want("applying.png")) {
       staged = s => ({ ...s, applying: "yakuza-0", progress: { text: "Checking it on the console (11 of 15)", percent: 72 } });
@@ -299,7 +310,7 @@ try {
       await shoot("save-bar.png", await boxOf("#savebar", 0));
     }
     if (want("activity.png")) {
-      await go("#/activity", `!!document.querySelector("#log") && document.querySelector("#log").textContent.length > 200`, "the log");
+      await go("#/settings/log", `!!document.querySelector("#log") && document.querySelector("#log").textContent.length > 200`, "the log");
       /* only the plugin's own lines: none naming a game or app of the console's library */
       await run(`(() => { const l = document.querySelector("#log");
         l.textContent = l.textContent.split("\\n").filter(x => !/\\/user\\/|appmeta|[A-Z]{4}\\d{5}/.test(x)).join("\\n"); return 1; })()`);

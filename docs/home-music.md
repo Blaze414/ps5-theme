@@ -156,7 +156,7 @@ the manager puts the songs together into it.
 
 - **Still the console's music:** do the step above (another app's music,
   then back to the home screen). Check that the apply said **applied**, not
-  **applied partly**; **Activity** says what was skipped and why.
+  **applied partly**; the log (**Settings › Log**) says what was skipped and why.
 - **Encode again** in the section: home music made with versions 1.10 to
   1.12 doesn't pass the console's checks (the console played it as ticks or
   silence). **Encode again** makes it again from the song the theme keeps.

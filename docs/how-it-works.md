@@ -59,10 +59,27 @@ enforced, not assumed. Every write the plugin makes goes through
 
 - A write is allowed only when the path is inside `/data/ps5-theme/` or the
   tile's `/user/app/THEM00001/`.
-- The deepest existing parent, with symlinks resolved, must be inside the
-  same place, so a planted symlink can't redirect a write.
-- The final path component is never followed (`O_NOFOLLOW`, `rename` and
-  `unlink` semantics).
+- **It is made in the folder that was checked** (since 1.88). The folder a
+  write lands in is opened from its root one folder at a time: each opened as
+  a folder, never through a link. The write, rename, link or delete is then made relative to that
+  open folder (`openat`, `renameat`, `unlinkat`), so nothing that changes
+  afterwards can send it elsewhere. Before 1.88 the guard resolved the path,
+  checked where it led, then wrote by the path again: a folder swapped for a
+  link in between was followed (see
+  [Challenges](challenges.md#a-check-and-a-write-that-were-two-lookups)).
+- The final path component is never followed either (`O_NOFOLLOW`, `rename`
+  and `unlink` semantics), and a pipe, a device or a folder is never opened
+  to write or read as a file.
+- **Folders are made** relative to the open folder too (`mkdirat`). On the
+  PS5 these calls go through the plugin's own: the SDK's report a failure as
+  if it were the result (see
+  [Challenges](challenges.md#failures-that-looked-like-results)).
+- A folder deleted with everything in it is walked the same way: a link in
+  it is deleted, never what it points to. A folder with anything mounted at it
+  or under it (by the console's mount table) isn't deleted at all.
+- The plugin's own log, its crash reports and its record of checked files go
+  through the guard too (the crash handler writes into the logs folder it
+  opened at start, which is all it can safely do).
 - Theme files, settings and uploads are written under a temporary name and
   renamed into place, so a crash never leaves half a file.
 - **Room for the console** (since 1.66): the storage under `/data` is the
@@ -157,6 +174,14 @@ under another mount, never gets a second one.
 
 The same care when overlays come out (since 1.69):
 
+- **In the order the system takes them down** (since 1.89). The system
+  takes a sandbox's views down newest first, and a view with an overlay of
+  ours still in it as it gets there stays up until the console restarts. So
+  ours come out in the same order: those inside the newest view first. The
+  two apps that close and start again with the home screen (`NPXS40101` and
+  `NPXS40102`) have theirs taken out at the same time. Before, about five of
+  the system's views stayed after every rest on 13.42 (see
+  [Challenges](challenges.md#views-left-up-after-every-rest)).
 - **Only what is exactly ours.** An unmount by path takes off the newest
   mount at that point. Where the system has made a mount over one of ours,
   that would be the system's, so such an overlay of ours stays (the log
@@ -200,7 +225,7 @@ applied:
 | Kind | Rule |
 |---|---|
 | PNG / JPEG / WebP | Same format and exact pixel size, so every display resolution stays correct |
-| SVG | Must contain `<svg`; scripts, external links, `foreignObject` and entities are refused |
+| SVG | Parsed, and only the subset the console's own pictures use is accepted (since 1.88): see [SVG pictures](#svg-pictures) |
 | WAV | Same codec, sample rate, channels and bit depth |
 | AT9 (ATRAC9) | Exactly the system file's format; every block of audio unpacks cleanly; only coding features the system file itself uses; no more than twice its length |
 | Fonts | A whole TrueType or OpenType (CFF) font: tables in bounds and none twice, the tables every font needs, outlines, glyph counts and metrics that agree, and a character map covering printable ASCII. Collections and WOFF are refused |
@@ -216,6 +241,39 @@ dimensions, is the kind of file the home screen already handles. Code is
 never themable. The home screen's
 colours and layout live inside ShellUI's encrypted JavaScript; changing them
 would mean patching ShellUI at runtime, which is deliberately out of scope.
+
+## SVG pictures
+
+The console draws SVG in its interface: most of the icons in its resource
+file, and two pictures of its apps. A theme's SVG goes where the console's
+own is, so since 1.88 it may use what the console's own use, and nothing
+more (`src/svg.c`). The document is parsed as XML, front to back, and every
+element, attribute, link and style rule must be one the subset names:
+
+- UTF-8 text, an optional `<?xml?>` declaration (version 1.0, UTF-8) and
+  comments; no DOCTYPE, entity declarations, CDATA sections or other
+  processing instructions, and no character references but the five XML ones
+  and numeric ones, which are decoded before anything is checked;
+- one `<svg>` root in the SVG namespace, holding only drawing elements:
+  shapes, groups, gradients, masks, clip paths, a few filter steps (drop
+  shadows and colour matrices), `<use>`, `<image>`, `<title>`, `<desc>` and
+  `<style>`; no nested `<svg>`, nothing animated, scripted or linked, no
+  drawn text;
+- only presentation and geometry attributes, in the SVG and xlink namespaces
+  only;
+- links only inside the picture (`href="#name"` on `<use>`, `url(#name)` in a
+  paint, mask, clip path or filter), and a picture only as PNG or JPEG data
+  embedded on `<image>`;
+- style rules of plain class, id or element selectors, each a list of
+  presentation properties with simple values (colours, numbers, keywords,
+  `rgb()`, `url(#name)`).
+
+Each refusal names what is outside the subset ("the SVG has `<script>`",
+"the SVG's `<use>` links to `other.svg#a`"). All 1,092 SVG pictures of 13.42
+(1,090 in the interface file, two in apps) pass, and so does every icon the
+manager makes from them with your picture in it. Before 1.88 the check looked
+for a list of dangerous words, which different spellings, namespaces and
+encodings could get around.
 
 ## What the checks cover, and what they don't
 
@@ -428,10 +486,10 @@ Overlays are taken out (here, and when ShellUI exits at rest mode) by what
 the console's mount table shows, not only by the plugin's records, so an
 overlay missing from the records still comes out.
 
-After rest mode the system keeps some apps' older sandboxes, with the
-theme's overlay still in their view of `/system_ex/vsh_asset`. A copy that
-starts carries on with the theme all the same: such leftovers stay recorded
-and come down with the next theme change. Only a game's or app's picture
+Views the system couldn't take down at rest mode (before 1.89, about five
+each time, with the theme's overlays still in them) stay until the console
+restarts. A copy that starts carries on with the theme all the same: such
+leftovers stay recorded and come down with the next theme change. Only a game's or app's picture
 left in one makes it apply the theme again, which takes it out.
 
 ## Save and Discard
@@ -658,7 +716,7 @@ start until a restart. Instead:
 
 A stage folder that an overlay still uses is never deleted.
 
-The apply's summary line in Activity says how long each step took (since
+The apply's summary line in the log says how long each step took (since
 1.77): "… 2 file(s) compared by content; 18.4 s (preparing 4.1, switching
 12.9, checking 1.4)". Each overlay is added to the plugin's record of them
 as one more line as it goes on, not by writing the whole record again and
@@ -678,7 +736,16 @@ anyway. If one app restarts 3 times within 60 seconds, or 5 times within 10
 minutes, while a theme is applied, the plugin takes the theme down at once,
 selects stock so the theme isn't put back at the next start, and says so on
 the console and in the manager. One restart, as after rest mode, is normal
-and changes nothing.
+and changes nothing, and so are rests one after another: a home screen that
+was up 15 seconds or more before it closed was in use, as rest mode only
+follows one that was, and its restart starts the count again (since 1.88;
+20 seconds until 1.89, when rests on the console came 24 seconds apart).
+One crashing as it starts never gets that far: on the console it was
+replaced every 9 seconds. The rests that were taken for a crash loop came 30
+seconds apart (see
+[Challenges](challenges.md#rests-in-a-row-taken-for-a-crash-loop)). A loop
+in which the home screen stays up 15 seconds or more each time is no longer
+caught; the one seen, once a minute (1.39), had a cause that is gone.
 Sandboxes left by earlier restarts can stay on the console for good, so the
 plugin counts only sandboxes newer than the ones it found when the theme was
 applied. The restarts are timed by the console's clock, so rest mode counts
@@ -688,7 +755,7 @@ as within the time (since 1.77).
 
 A view the watcher leaves as it is (one of the plugin's overlays is already
 there, under a mount the system made on top of it later, as after a game is
-installed again) is looked at again every minute but written in Activity
+installed again) is looked at again every minute but written in the log
 once per apply (since 1.77; 1.76 wrote the same lines every minute, 5,800 a
 day, and pushed what mattered out of the log). The theme shows there again
 after rest mode, when the home screen's new sandbox gets its views.
@@ -708,6 +775,18 @@ copy of each file (`stock_path`), never a theme's.
   on its own. Only `iconid_` ids of letters, digits and underscores are
   accepted, and the reply carries `Content-Security-Policy: default-src
   'none'`, so an SVG opened on its own can't run anything.
+- **`/api/app-db`**: the console's app database
+  (`/system_data/priv/mms/app.db`) as it is, for the preview's home screen
+  (since 1.89). The page reads its icon table itself (an SQLite reader of
+  about 100 lines: the schema on page 1, each table a b-tree of pages, a
+  record too long for its page continued in overflow pages; every page is
+  read at most once, so a damaged or half-written file ends in an error,
+  never a loop) and orders the two rows as 13.42 does: Welcome while it is
+  shown, else PlayStation Store; the 12 games (and Media Gallery) or apps
+  used last, by `lastAccessIndex`; Game Library or App Library last. Where a
+  title shows is its `dispLocation` (138 a game, 154 Media Gallery, 188 an
+  app). The file is only read, by the plugin's own process, for an allowed
+  device.
 - **`/api/asset/picture?path=…`**: a system texture as a quarter-size
   picture, one RGBA pixel per 4x4 block (the block's average, its colour
   weighted by how opaque each pixel is): a 4K background becomes 960x540, an
@@ -850,7 +929,7 @@ A new theme made of parts of others (since 1.65).
 
 ## The web server
 
-A small HTTP/1.1 server in C (`src/web.c`): one listener thread and four
+A small HTTP/1.1 server in C (`src/http.c`, its routes in `src/routes.c`): one listener thread and four
 workers fed by a bounded queue, which answers `503 busy` when full, so a slow
 or broken client can't hold up others. A request's line and headers get 10
 seconds in all (since 1.77; before, only each read was timed, and a client
@@ -881,6 +960,59 @@ guard counts its writes, after each one, so a change made through the
 plugin shows at once) or for 10 seconds, so a change made from outside, over
 FTP, shows within that. Everything else in the status (names, music, the
 unsaved mark, the preview picture) is read every time.
+
+## Notifications
+
+Since 1.88 the plugin's notifications look like etaHEN's own: its icon beside
+a first line and a second under it ("PS5 Themes is ready" / "Open the Themes
+tile, or 192.168.1.20:8095 on a phone or computer"). They go through the
+system's notification service (`sceNotificationSend` in
+`libSceNotification`), with the toast the system and etaHEN use for
+downloads; the icon is the plugin's logo, written once at start as
+`/data/ps5-theme/icon.png`, which the service reads. The library is linked
+as the plugin starts, as etaHEN's own services link theirs, and its function
+is looked up rather than imported: on a firmware without it, or when the
+service refuses, the plain notification (`sceKernelSendNotificationRequest`)
+says the same, both lines in one.
+
+Fewer of them, too. The plugin used to say it was starting and, two seconds
+later, that it was ready; it now says it once, when it is. After an apply it
+said "applied" and then one notification per thing to do (rest mode for the
+icons, for the font, for the artwork; the music); it now says it once,
+"Theme applied", with what to do on the second line. Stopping was said twice,
+by the plugin and by the stop tool; the tool, which knows how it went, says
+it now. Which ones appear is chosen in the manager's
+[Settings › Notifications](manager.md#notifications); a failure is always
+said.
+
+## Who can open the manager
+
+Since 1.88 (`src/access.c`), the manager answers only devices on the
+console's own network: addresses in the private ranges (10/8, 172.16/12,
+192.168/16, 169.254/16, 100.64/10) and the console itself. A request that
+names the console by an internet name is refused too: a web page can point
+its own name at an address on your network (DNS rebinding), and the browser
+would then treat the manager as that page's own. An IPv4 address, `localhost`,
+a one-word name, or a name ending in `.local`, `.lan`, `.home`, `.home.arpa`
+or `.internal` is accepted.
+
+Who may open it is chosen in the manager's **Settings › Devices**:
+
+- **Devices you allow** (the default). A phone or computer asks for a code;
+  the console shows six digits in a notification; typed on that device, they
+  give its browser a key of its own: a cookie of 32 random bytes from the
+  kernel's generator, sent only with the manager's own requests (`HttpOnly`,
+  `SameSite=Strict`). The console keeps only its SHA-256 (`devices`), so the
+  file can't be used to sign in. A code works for two minutes, only for the
+  device that asked, and for five tries; ten codes at most in ten minutes.
+- **Any device on your network**, as before 1.88.
+- **Only this console.**
+
+The console's own browser (the Themes tile opens `127.0.0.1`) can always
+open it, and so can the stop tool and a newer copy asking to take over.
+The page itself always loads, so a device not allowed sees what to do;
+nothing else answers it. Changes still need the `X-PS5-Theme` header, which
+another site's page can't send.
 
 ## The tile
 
@@ -913,6 +1045,9 @@ they share, and how:
 - **Caches** (the status's walk of each theme, the interface icons' index,
   the remembered checks) each have their own lock, held briefly, with no
   other lock taken inside it, so no two threads can wait on each other.
+- **Who may open the manager** (since 1.88: the choice, the allowed devices
+  and the code being shown) is under a lock of its own (`access_lock`), taken
+  by every request first and released before anything else is.
 
 - **Discard** puts a theme back by moving its folder aside and the saved
   copy in its place. For that moment the theme has no folder, so it does it

@@ -92,9 +92,9 @@ text (a screenshot taken on the console).*
    own artwork, decoded from the console's texture by the plugin, and so is
    the background when the theme has none; a line under the picture says
    which pieces are yours and which the console's. The search, settings and
-   Control Center icons and the tiles are the console's own too; only the
-   layout around them is approximate. The preview follows the piece you
-   attach or place.
+   Control Center icons and the tiles are the console's own too, laid out as
+   the console lays them out (the Control Center since 1.91). The preview
+   follows the piece you attach or place.
 6. **Adjust it.** Change the placement, the padding or the clock band and the
    texture is made again at once from the original the theme keeps (see
    [Changing a piece later](#changing-a-piece-later) for when it isn't,
@@ -115,7 +115,7 @@ text (a screenshot taken on the console).*
 If it doesn't look right: a piece that stays as it was usually means a
 different Appearance theme is selected on the console or the console wasn't
 put through rest mode; a message that the theme was **applied partly** names
-the file that was refused and why, in the **Activity** list.
+the file that was refused and why, in the log (**Settings › Log**).
 
 ## Changing a piece later
 

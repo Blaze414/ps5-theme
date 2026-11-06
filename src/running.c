@@ -6,16 +6,21 @@
 #include <arpa/inet.h>
 #include <errno.h>
 #include <netinet/in.h>
+#include <pthread.h>
 #include <signal.h>
+#include <stdatomic.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/socket.h>
 #include <sys/time.h>
+#include <time.h>
 #include <unistd.h>
 
+#include "running.h"
+#include "config.h"
+#include "log.h"
 #include "platform.h"
-#include "theme.h"
 
 #define RELEASE_MAX 1024
 
@@ -101,30 +106,149 @@ title_mount_point(const char *on) {
 }
 
 
-/* Take this plugin's overlays (mounts of folders under BASE_DIR: stage
-   folders and the stock layers put over overlays in use) out, newest first:
-   those whose mount point starts with `under` and, with `match`, that it
-   accepts. They are found in the console's mount table, so an overlay
-   missing from the records comes out too; where the table can't be listed
-   that way, `recorded` (mount points, oldest first) is used. Never forced:
-   one in use stays and is counted in *stuck. Only the newest mount at its
-   point is taken off: an unmount by path takes the newest there, which for
-   one of ours under a mount the system made later would be the system's, so
-   such a one stays (counted in *stuck too). The number taken out. */
-int
-release_overlays(const char *under, int (*match)(const char *on), char (*recorded)[1024], int nrecorded, int *stuck) {
+/* Inside one of the views a sandbox has of a folder the system can write (/user and its other name /original_user,
+   /system_ex, /mnt/rnps): an overlay of ours there keeps the system from taking that view down when the app exits,
+   and on 13.42 the system then removed empty folders of the real /user through it (/user/bgft among them, which
+   every app's sandbox needs: no app, nor the next home screen, started until a restart; 2026-11-04). Taken out first
+   when the mount table can't say which view each one is in. */
+static int
+inside_writable_view(const char *on) {
+  return strstr(on, "/user/") || strstr(on, "/original_user/") || strstr(on, "/system_ex/") || strstr(on, "/mnt/rnps");
+}
+
+/* The overlays to take out, shared by the threads taking them out. */
+typedef struct release_work {
+  char (*list)[1024];
+  const int *order;
+  int n;
+  atomic_int next, out, stuck;
+  int pid;          /* a process whose exit the caller's thread looks for between unmounts; 0: none */
+  long long gone;   /* when it was seen gone (CLOCK_MONOTONIC, ms); 0: not yet */
+} release_work_t;
+
+static long long
+steady_ms(void) {
+  struct timespec t;
+  clock_gettime(CLOCK_MONOTONIC, &t);
+  return (long long)t.tv_sec * 1000 + t.tv_nsec / 1000000;
+}
+
+static void
+release_some(release_work_t *w, int watch) {
+  for(int i; (i = atomic_fetch_add(&w->next, 1)) < w->n; ) {
+    if(!plat_unmount_once(w->list[w->order[i]])) atomic_fetch_add(&w->out, 1);
+    else atomic_fetch_add(&w->stuck, 1);
+    if(watch && !w->gone && plat_wait_exit(w->pid, 0)) w->gone = steady_ms();
+  }
+}
+
+static void *
+release_worker(void *arg) {
+  release_some(arg, 0);
+  return NULL;
+}
+
+/* Newest view first, then the newest of ours. */
+typedef struct { int view, at; } release_key_t;
+
+static int
+newest_view_first(const void *a, const void *b) {
+  const release_key_t *x = a, *y = b;
+  if(x->view != y->view) return x->view < y->view ? 1 : -1;
+  return x->at < y->at ? 1 : x->at > y->at ? -1 : 0;
+}
+
+#define RELEASE_THREADS 4   /* the caller and three more: 115 overlays took up to a second one after another (13.42) */
+
+/* Take this plugin's overlays (mounts of folders under BASE_DIR: stage folders and the stock layers put over overlays
+   in use) out: those whose mount point starts with `under` and, with `match`, that it accepts; a few at a time. The
+   order is the system's own when it takes a sandbox down: newest view first, so each of ours is out of a view before
+   the system comes to that view. On 13.42 the last views it makes are the ones it takes down first: the home
+   screen's /mnt/rnps, and the two apps' that close with it, vsh_asset; ours there came out last, after the system
+   had tried, and those views stayed up for good, five after every rest (1.88). Where the table can't say which view
+   each is in, those inside a view the system can write go first (inside_writable_view), newest first. They are
+   found in the console's mount table, so an overlay missing from the records comes out too; where the table can't
+   be listed that way, `recorded` (mount points, oldest first) is used. Never forced: one in use stays and is counted
+   in *stuck. Only the newest mount at its point is taken off: an unmount by path takes the newest there, which for
+   one of ours under a mount the system made later would be the system's, so such a one stays (counted in *stuck
+   too). With `pid`, the caller's thread looks between unmounts for that process to be gone, and says when in *gone
+   (CLOCK_MONOTONIC, ms; 0: not seen). The number taken out. */
+static int
+release_ordered(const char *under, int (*match)(const char *on), char (*recorded)[1024], int nrecorded, int *stuck,
+                int pid, long long *gone) {
   char (*live)[1024] = malloc(sizeof(*live) * RELEASE_MAX);   /* per call: two threads use this */
-  int n = -1, out = 0, buried = 0;
-  if(live) n = plat_our_top_mounts(BASE_DIR "/", under, live, RELEASE_MAX, &buried);
+  int *view = malloc(sizeof(int) * RELEASE_MAX);
+  int *order = malloc(sizeof(int) * (size_t)(RELEASE_MAX > nrecorded ? RELEASE_MAX : nrecorded));
+  release_key_t *keys = malloc(sizeof(*keys) * RELEASE_MAX);
+  int n = -1, buried = 0;
+  if(gone) *gone = 0;
+  if(live && order) n = plat_our_top_mounts(BASE_DIR "/", under, live, RELEASE_MAX, &buried, view);
   char (*list)[1024] = n >= 0 ? live : recorded;
   if(n < 0) n = nrecorded, buried = 0;
   *stuck = buried;
-  for(int i = n - 1; i >= 0; i--) {
-    if(strncmp(list[i], under, strlen(under)) || (match && !match(list[i]))) continue;
-    if(list == recorded && !plat_is_our_mount(list[i], BASE_DIR "/")) continue;
-    if(!plat_unmount_once(list[i])) out++;
-    else (*stuck)++;
+  if(!order) {   /* (no memory for the order: one after another, as listed) */
+    int out = 0;
+    for(int i = n - 1; i >= 0; i--) {
+      if(strncmp(list[i], under, strlen(under)) || (match && !match(list[i]))) continue;
+      if(list == recorded && !plat_is_our_mount(list[i], BASE_DIR "/")) continue;
+      if(!plat_unmount_once(list[i])) out++;
+      else (*stuck)++;
+    }
+    free(live);
+    free(view);
+    free(keys);
+    return out;
   }
+  int k = 0;
+  if(list == live && view && keys) {
+    for(int i = 0; i < n; i++) {
+      if(match && !match(list[i])) continue;
+      keys[k].view = view[i];
+      keys[k++].at = i;
+    }
+    qsort(keys, (size_t)k, sizeof(*keys), newest_view_first);
+    for(int i = 0; i < k; i++) order[i] = keys[i].at;
+  } else {
+    for(int pass = 0; pass < 2; pass++) {
+      for(int i = n - 1; i >= 0; i--) {
+        if(strncmp(list[i], under, strlen(under)) || (match && !match(list[i]))) continue;
+        if((inside_writable_view(list[i]) ? 0 : 1) != pass) continue;   /* (pass 0: inside such views) */
+        if(list == recorded && !plat_is_our_mount(list[i], BASE_DIR "/")) continue;
+        order[k++] = i;
+      }
+    }
+  }
+#ifdef TEST_HOOKS
+  if(getenv("PS5THEME_TEST_LOG_RELEASE") && k) {   /* the order, for a test */
+    char said[4096];
+    size_t at = (size_t)snprintf(said, sizeof(said), "taking out, in this order:");
+    for(int i = 0; i < k && at < sizeof(said); i++) at += (size_t)snprintf(said + at, sizeof(said) - at, " %s", list[order[i]]);
+    log_msg("%s", said);
+  }
+#endif
+  release_work_t w = { list, order, k, 0, 0, 0, pid, 0 };
+  pthread_t helpers[RELEASE_THREADS - 1];
+  int started = 0;
+  for(int t = 0; t < RELEASE_THREADS - 1 && k > 4 * (t + 1); t++) {
+    if(!pthread_create(&helpers[t], NULL, release_worker, &w)) started++;
+  }
+  release_some(&w, pid > 0);
+  for(int t = 0; t < started; t++) pthread_join(helpers[t], NULL);
+  *stuck += atomic_load(&w.stuck);
+  if(gone) *gone = w.gone;
+  free(order);
   free(live);
-  return out;
+  free(view);
+  free(keys);
+  return atomic_load(&w.out);
+}
+
+int
+release_overlays(const char *under, int (*match)(const char *on), char (*recorded)[1024], int nrecorded, int *stuck) {
+  return release_ordered(under, match, recorded, nrecorded, stuck, 0, NULL);
+}
+
+int
+release_watching(const char *under, int (*match)(const char *on), int pid, long long *gone, int *stuck) {
+  return release_ordered(under, match, NULL, 0, stuck, pid, gone);
 }

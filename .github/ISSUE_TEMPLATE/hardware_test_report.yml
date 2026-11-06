@@ -11,7 +11,7 @@ body:
     id: release
     attributes:
       label: Release
-      placeholder: "1.80"
+      placeholder: "1.88"
     validations:
       required: true
   - type: dropdown
@@ -43,22 +43,23 @@ body:
   - type: textarea
     id: steps
     attributes:
-      label: Steps 1 to 9
+      label: Steps 1 to 10
       description: For each, "as expected", or what you saw instead.
       value: |
         1. Start:
-        2. A theme:
-        3. Apply again:
-        4. Icon style:
-        5. Rest mode, three times:
-        6. A game installed:
-        7. No theme:
-        8. Restart:
-        9. Update:
+        2. Allow your phone or computer:
+        3. A theme:
+        4. Apply again:
+        5. Icon style:
+        6. Rest mode, three times:
+        7. A game installed:
+        8. No theme:
+        9. Restart:
+        10. Update:
     validations:
       required: true
   - type: textarea
     id: log
     attributes:
-      label: Activity log
+      label: Log
       render: text

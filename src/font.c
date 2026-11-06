@@ -28,7 +28,7 @@
 #include <stdio.h>
 #include <string.h>
 
-#include "theme.h"
+#include "media.h"
 
 #define FONT_MAX_TABLES 64
 #define FONT_MAX_SEGMENTS 32768     /* a format 4 map is at most 65535 bytes of segments */

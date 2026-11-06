@@ -1,0 +1,89 @@
+/* Library tiles */
+.grid { display: grid; gap: 20px; grid-template-columns: repeat(auto-fill, minmax(min(20rem, 100%), 1fr)); }
+.card {
+  background: var(--surface); border-radius: var(--radius-lg); overflow: hidden;
+  display: flex; flex-direction: column;
+  transition: transform .2s var(--ease), box-shadow .2s, background .2s;
+}
+.card:hover { background: var(--surface-hover); }
+.card:focus-within { transform: scale(1.02); box-shadow: 0 0 0 2px rgba(255, 255, 255, .9), 0 18px 40px rgba(0, 0, 0, .45); }
+.card.current { box-shadow: 0 0 0 2px var(--blue); }
+.card.current:focus-within { box-shadow: 0 0 0 2px #fff, 0 18px 40px rgba(0, 0, 0, .45); }
+.preview {
+  aspect-ratio: 16 / 9; display: flex; gap: 10px; align-items: center; justify-content: center; padding: 18px;
+  background: linear-gradient(160deg, rgba(31, 124, 240, .16), rgba(255, 255, 255, .02));
+}
+.card-open { display: block; text-decoration: none; color: inherit; }
+.preview.shot { padding: 0; background: #000; }
+.preview.shot img { width: 100%; height: 100%; max-width: none; object-fit: cover; border-radius: 0; }
+.preview img { height: 100%; max-width: 30%; object-fit: contain; border-radius: 8px; }
+.preview .logo { height: 56px; max-width: none; border-radius: 12px; }
+.preview .none { color: var(--faint); font-size: .875rem; }
+.card .body { padding: 16px 18px 18px; display: flex; flex-direction: column; gap: 6px; flex: 1; }
+.card .title { display: flex; align-items: center; gap: 8px; justify-content: space-between; }
+.card .name { font-weight: 500; font-size: 1.125rem; overflow-wrap: anywhere; }
+.card .meta { color: var(--muted); font-size: .875rem; }
+.card .actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px; }
+.card .actions.secondary { margin-top: 0; }
+.card .actions.secondary .btn { padding: 0 10px; }
+.card .actions .danger { margin-left: auto; }
+
+.empty { border-radius: var(--radius-lg); background: var(--surface); padding: 56px 24px; text-align: center; display: grid; gap: 14px; justify-items: center; }
+.empty h2 { font-size: 1.375rem; font-weight: 400; }
+.hint { margin-top: 32px; font-size: .9375rem; color: var(--muted); }
+.hint code { color: var(--text); background: var(--surface-strong); padding: 2px 8px; border-radius: 6px; }
+
+.panel { background: var(--surface); border-radius: var(--radius-lg); padding: 20px; }
+form.create { display: grid; gap: 16px; grid-template-columns: 1fr; margin-bottom: 24px; }
+.panel.mix { display: grid; gap: 14px; margin-bottom: 24px; }
+/* New theme: a name, then how it starts, each way shown as a picture; Mix and match is one of them. */
+.panel.new-theme { display: grid; gap: 20px; margin-bottom: 24px; padding: 24px; grid-template-columns: minmax(0, 1fr); }
+.panel.new-theme > *, .new-theme .field, .mix-rows, .mix-row, .mix-elem { min-width: 0; }   /* (a row of pictures scrolls; the page never does) */
+@media (max-width: 599px) {
+  .panel.new-theme { padding: 18px; }
+  .starts .opt { grid-template-columns: 104px minmax(0, 1fr); column-gap: 12px; align-items: center; justify-items: stretch; }
+  .starts .opt .start-art { grid-row: span 2; margin: 0; }
+  .starts .opt b { align-self: end; }
+  .starts .opt small { align-self: start; }
+  .start-art.plus { font-size: 1.8rem; }
+}
+.field.big input { font-size: 1.25rem; padding: 14px 18px; }
+.field.big input::placeholder { color: var(--faint); }
+.opts.starts { grid-template-columns: repeat(auto-fit, minmax(min(100%, 210px), 1fr)); }
+.starts .opt { padding: 10px 10px 12px; }
+.start-art { width: 100%; aspect-ratio: 16 / 9; border-radius: 8px; overflow: hidden; background: rgba(255, 255, 255, .05); margin-bottom: 8px;
+  display: flex; align-items: center; justify-content: center; }
+.start-art img { width: 100%; height: 100%; object-fit: cover; }
+.start-art.plus { color: var(--muted); font-size: 2.6rem; font-weight: 200; }
+.start-art svg { width: 44px; height: 44px; color: var(--muted); }
+.start-art.slices img { flex: 1; min-width: 0; }
+.start-art.slices img + img { border-left: 2px solid var(--bg); }
+.opt[aria-disabled="true"] { opacity: .45; cursor: default; }
+.create-foot { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.create-foot .choice { flex: 1 1 320px; max-width: 520px; padding: 10px 14px; }
+.create-foot .spacer { flex: 1; }
+/* Mix and match: each part a row of pictures, the console's own first, one per theme that has the part. */
+.mix-fill { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.mix-fill > span { color: var(--muted); font-size: .875rem; margin-right: 4px; }
+.mix-rows { display: grid; }
+.mix-row { padding: 16px 0 6px; border-top: 1px solid rgba(255, 255, 255, .07); }
+.mix-head { display: flex; align-items: baseline; gap: 12px; margin-bottom: 10px; }
+.mix-head b { font-weight: 500; font-size: 1.0625rem; }
+.mix-head small { color: var(--faint); }
+.mix-head .btn { margin-left: auto; }
+.picks { display: flex; gap: 10px; max-width: calc(100% + 8px); overflow-x: auto; padding: 4px 4px 12px; margin: 0 -4px; scroll-snap-type: x proximity; }
+.picks .opt { flex: none; width: 156px; scroll-snap-align: start; }
+.picks.small .opt { width: 120px; }
+.picks .opt b { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pick-art { width: 100%; aspect-ratio: 16 / 9; border-radius: 8px; overflow: hidden; margin-bottom: 6px; background: #000;
+  display: flex; align-items: center; justify-content: center; color: var(--muted); }
+.pick-art img { width: 100%; height: 100%; object-fit: cover; }
+.pick-art.contain img { object-fit: contain; }
+.pick-art svg { width: 34%; height: 50%; }
+.pick-art .aa { font-size: 1.8rem; font-weight: 500; }
+.pick-art .time { font-size: .75rem; margin-left: 6px; }
+.opt:focus-visible .pick-art { color: var(--muted); }
+.mix-elem { display: grid; gap: 4px; margin: 0 0 6px 16px; padding-left: 14px; border-left: 2px solid rgba(255, 255, 255, .07); }
+.mix-elem > span { font-size: .8125rem; color: var(--muted); }
+@media (min-width: 720px) { form.create { grid-template-columns: 2fr 1fr auto; align-items: end; } }
+form.create .row { display: flex; gap: 8px; }

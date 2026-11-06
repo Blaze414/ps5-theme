@@ -1,0 +1,140 @@
+/* Visual language modelled on the PS5 system UI: deep navy field, white type,
+   rounded tiles, pill buttons, and a focus state that turns white and lifts. */
+:root {
+  --bg: #060911;
+  --surface: rgba(255, 255, 255, .06);
+  --surface-hover: rgba(255, 255, 255, .10);
+  --surface-strong: rgba(255, 255, 255, .14);
+  --text: #ffffff;
+  --muted: rgba(255, 255, 255, .64);
+  --faint: rgba(255, 255, 255, .40);
+  --blue: #1f7cf0;
+  --ok: #3fcf8e;
+  --warn: #f5b440;
+  --danger: #ff6159;
+  --radius-lg: 20px;
+  --radius: 14px;
+  --ease: cubic-bezier(.2, .8, .2, 1);
+  color-scheme: dark;
+}
+@media (min-width: 1600px) { html { font-size: 18px; } }
+
+* { box-sizing: border-box; }
+html, body { margin: 0; }
+body {
+  min-height: 100vh;
+  color: var(--text);
+  background:
+    radial-gradient(1400px 720px at 88% -18%, rgba(34, 72, 140, .55), rgba(34, 72, 140, 0) 62%),
+    radial-gradient(900px 560px at -12% 112%, rgba(18, 40, 84, .7), rgba(18, 40, 84, 0) 60%),
+    var(--bg);
+  background-attachment: fixed;
+  font: 400 1rem/1.5 "SST", "SST Pro", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  letter-spacing: .005em;
+  -webkit-font-smoothing: antialiased;
+}
+button, input, select { font: inherit; color: inherit; }
+a { color: inherit; }
+img { display: block; }
+:focus { outline: none; }
+[hidden] { display: none !important; }
+/* No text cursor outside the fields: focus moves to the page on navigation,
+   and some browsers draw a caret in plain text then. */
+body { caret-color: transparent; }
+input, textarea, [contenteditable] { caret-color: auto; }
+
+.wrap { max-width: 1520px; margin: 0 auto; padding: 0 16px; }
+@media (min-width: 720px) { .wrap { padding: 0 40px; } }
+
+/* Top bar */
+header {
+  position: sticky; top: 0; z-index: 10;
+  background: linear-gradient(rgba(6, 9, 17, .94), rgba(6, 9, 17, .78));
+  -webkit-backdrop-filter: blur(18px); backdrop-filter: blur(18px);
+}
+.bar { display: flex; align-items: center; gap: 16px; min-height: 72px; padding: 10px 0; }
+.brand { display: flex; align-items: center; gap: 12px; font-size: 1.125rem; font-weight: 500; text-decoration: none; border-radius: 12px; padding: 4px 8px 4px 4px; margin-left: -4px; }
+.brand img { width: 30px; height: 30px; border-radius: 8px; }
+.brand:focus-visible { background: #fff; color: #000; }
+@media (max-width: 719px) { header { position: static; } }
+/* What the console shows now, as plain text: it isn't a button, so it doesn't look like one. */
+.now { margin-left: auto; min-width: 0; font-size: .875rem; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.now b { color: var(--text); font-weight: 600; }
+/* Settings, where the console has it: a gear at the top right that turns white when selected. */
+.gear { flex: none; width: 44px; height: 44px; display: grid; place-items: center; border-radius: 50%; color: var(--muted);
+  transition: background .15s, color .15s, transform .15s var(--ease); }
+.gear svg { width: 24px; height: 24px; }
+.gear:hover { color: var(--text); background: var(--surface-hover); }
+.gear[aria-current="page"] { color: var(--text); background: var(--surface-strong); }
+.gear:focus-visible { background: #fff; color: #000; transform: scale(1.08); }
+
+main { padding: 28px 0 96px; }
+main:focus { outline: none; }
+h1 { font-size: clamp(1.625rem, 2.4vw, 2.25rem); margin: 0; font-weight: 400; letter-spacing: -.01em; }
+h2 { font-size: 1.0625rem; margin: 0; font-weight: 500; }
+.muted { color: var(--muted); }
+.head { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 24px; }
+.head .spacer { flex: 1; }
+
+/* Buttons: pills that go white when focused, as on the console */
+.btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+  min-height: 44px; padding: 0 22px; border-radius: 999px; border: 0;
+  background: var(--surface-strong); color: var(--text); cursor: pointer;
+  font-weight: 500; text-decoration: none; white-space: nowrap;
+  transition: transform .18s var(--ease), background .15s, color .15s, box-shadow .18s;
+}
+.btn:hover { background: rgba(255, 255, 255, .22); }
+.btn.primary { background: #fff; color: #000; }
+.btn.primary:hover { background: rgba(255, 255, 255, .86); }
+.btn.ghost { background: transparent; color: var(--muted); }
+.btn.ghost:hover { background: var(--surface-hover); color: var(--text); }
+.btn.danger { color: var(--danger); }
+.btn.danger.armed { background: var(--danger); color: #fff; }
+/* Stopping a run part-way leaves some icons in the style and some not: red as soon as it is pointed at or selected
+   (the controller's focus), before it is pressed. */
+.btn.stop-run:hover, .btn.stop-run:focus-visible { background: var(--danger); color: #fff; }
+.btn:focus-visible {
+  background: #fff; color: #000; transform: scale(1.05);
+  box-shadow: 0 0 0 2px #fff, 0 10px 28px rgba(0, 0, 0, .5);
+}
+.btn.danger:focus-visible { color: #c62f27; }
+.btn[disabled] { opacity: .35; cursor: default; transform: none; }
+.btn.sm { min-height: 36px; padding: 0 14px; font-size: .875rem; }
+/* A few choices side by side (aria-pressed). Focus is white, as on the console, so the chosen one is told by its
+   tick and blue ring, which stay when it is focused. */
+.btn.chip { background: transparent; color: var(--muted); }
+.btn.chip:hover { background: var(--surface-hover); color: var(--text); }
+.btn.chip[aria-pressed="true"] { background: rgba(31, 124, 240, .24); color: var(--text); box-shadow: inset 0 0 0 2px var(--blue); }
+.btn.chip[aria-pressed="true"]::before {
+  content: ""; width: 9px; height: 5px; margin: -3px 1px 0 0; border: solid currentColor; border-width: 0 0 2px 2px; transform: rotate(-45deg);
+}
+.btn.chip:focus-visible { background: #fff; color: #000; }
+.btn.chip[aria-pressed="true"]:focus-visible { background: #fff; color: #000; box-shadow: inset 0 0 0 2px var(--blue), 0 0 0 2px #fff, 0 10px 28px rgba(0, 0, 0, .5); }
+
+input[type=text], input[type=search], select {
+  min-height: 44px; padding: 0 18px; border-radius: 999px; border: 0;
+  background: var(--surface-strong); width: 100%; transition: box-shadow .15s;
+}
+/* Our own arrow, inset from the rounded end like the text is. */
+select {
+  -webkit-appearance: none; appearance: none; padding-right: 48px; cursor: pointer;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath d='M1 1.5l5 5 5-5' fill='none' stroke='%23fff' stroke-opacity='.72' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat; background-position: right 20px center; background-size: 12px 8px;
+  text-overflow: ellipsis;
+}
+input::placeholder { color: var(--faint); }
+input:focus-visible, select:focus-visible { box-shadow: 0 0 0 2px #fff; }
+input[type=range] { accent-color: var(--blue); width: 100%; max-width: 280px; }
+label.field, div.field { display: grid; gap: 8px; font-size: .875rem; color: var(--muted); }
+div.field > span:first-child { font-size: .875rem; color: var(--muted); }   /* a field's name, as on the ones with a box */
+
+.tag { font-size: .75rem; font-weight: 600; padding: 3px 10px; border-radius: 999px; white-space: nowrap; background: var(--surface-strong); color: var(--muted); }
+.tag.on { background: var(--blue); color: #fff; }
+.tag.warn { color: var(--danger); }
+
+.banner { border-radius: var(--radius); padding: 12px 16px 12px 36px; background: var(--surface); margin-bottom: 24px; position: relative; font-size: .9375rem; }
+.banner::before { content: ""; position: absolute; left: 16px; top: 20px; width: 8px; height: 8px; border-radius: 50%; background: var(--faint); }
+.banner.ok::before { background: var(--ok); }
+.banner.warn::before { background: var(--warn); }
+.banner.err::before { background: var(--danger); }

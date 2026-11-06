@@ -6,7 +6,7 @@
    Whether a copy runs is decided by the plugin's instance lock alone, and
    overlays are only touched while this program holds that lock, so never
    under a running copy. A running copy is asked to stop over its web port
-   first (since 1.73: nothing to look for), else, found by running_copy, by
+   first (nothing to look for), else, found by running_copy, by
    its signal (SIGUSR2): it takes out only the overlays of games' and apps'
    pictures, which must not stay in the home screen's view without a copy
    running to take them out at rest mode (no game or app would start after
@@ -29,8 +29,10 @@
 #include <sys/file.h>
 #include <sys/stat.h>
 
+#include "config.h"
+#include "log.h"
 #include "platform.h"
-#include "theme.h"
+#include "running.h"
 
 #define STOP_WAIT_SECONDS 120
 #define KILL_WAIT_SECONDS 10
@@ -75,6 +77,14 @@ say(const char *fmt, ...) {
 }
 
 
+/* How it ended, as the plugin says it starts: two lines with its icon. */
+static void
+done(const char *title, const char *detail) {
+  plat_toast(title, detail, TOAST_ICON);
+  log_msg("%s: %s", title, detail);
+}
+
+
 /* 0 once this program holds the lock, trying for up to `seconds`. */
 static int
 lock_within(int fd, int seconds) {
@@ -90,7 +100,7 @@ lock_within(int fd, int seconds) {
    and their records with them (MOUNTS_FILE: "<mount point>\t<source>\t
    <folder it shows>" per line, oldest first); the other records stay. */
 static int
-release_titles(int *stuck) {
+take_out_titles(int *stuck) {
   static char lines[MAX_LINES][PATH_MAX + 800], points[MAX_LINES][1024];
   int n = 0, npoints = 0, left = 0;
   FILE *f = fopen(MOUNTS_FILE, "r");
@@ -194,14 +204,14 @@ main(void) {
   }
   /* This program holds the lock now: no copy runs, and none starts until it
      ends. What one that ended without stopping left comes out. */
-  int out = release_titles(&stuck);
+  int out = take_out_titles(&stuck);
   if(out) log_msg("took %d overlay(s) of games' and apps' pictures out", out);
   if(stuck) {
     say("ps5-theme-stop: %d game picture(s) are still in use. Start ps5-theme again before rest mode.", stuck);
   } else if(pid <= 0 && !asked) {
-    say("ps5-theme isn't running. Start it to open the manager.");
+    done("PS5 Themes isn't running", "Start it to open the manager.");
   } else {
-    say("ps5-theme %s. The theme stays; start ps5-theme again to open the manager.", ended ? "was ended" : "stopped");
+    done(ended ? "PS5 Themes was ended" : "PS5 Themes stopped", "Your theme stays on. Start PS5 Themes again to change it.");
   }
   return 0;
 }

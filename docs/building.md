@@ -13,10 +13,13 @@ on Ubuntu 24.04. The `.plugin` file is the ELF with etaHEN's plugin header:
 `etaHEN_PLUGIN`, the title ID `THEM00001` and the version
 (`tools/make_plugin.py`).
 
-The manager's page (`web/index.html`) and its ATRAC9 module are built into
-the plugin twice: as they are, and compressed with `gzip -9 -n` into
-`build-meta/` as the build runs (since 1.77), for browsers that take gzip.
-`build-meta/` is made by the build and never committed.
+The manager's page is written as separate style sheets and scripts
+(`web/css/`, `web/js/`); `web/index.html` lists them in order, and
+`tools/bundle_page.py` joins them into one page in `build-meta/`. That page and
+the ATRAC9 module are built into the plugin twice: as they are, and compressed
+with `gzip -9 -n`, for browsers that take gzip. `build-meta/` is made by the
+build and never committed. `sources.mk` lists what the plugin is built from, for
+both the PS5 build and the test rig.
 
 ## What the ELF says about itself
 
@@ -36,6 +39,21 @@ ELF has both, unchanged and not loaded into memory, or fails. To read them:
 ```bash
 llvm-objcopy -O binary --only-section=.ps5meta.json build/ps5-theme.elf meta.json
 ```
+
+## System calls the SDK gets wrong
+
+A few functions of the SDK's libc (`openat`, `mkdirat`, `fstatat`,
+`renameat`, `unlinkat`, `linkat`, `symlinkat`, `readlink`, `statfs`,
+`getfsstat`, `nmount`, `unmount` and others) make the system call
+themselves and return whatever the kernel hands back. On a failure that is the
+error number, as if it were the result, and `errno` stays as it was: `openat`
+of a missing file returns 2, which reads as an open file. Since 1.88 the
+plugin makes these calls through its own (the end of `src/platform.h`,
+`src/platform_ps5.c`), which report a failure as -1 with `errno`. The build
+disassembles both ELFs and fails if anything else calls one of the SDK's
+(`tools/check_syscalls.py`), naming the function and the call to add. See
+[Challenges](challenges.md#failures-that-looked-like-results) for what it
+broke.
 
 ## PS5 Payload Manager's repository
 
@@ -64,11 +82,16 @@ every pull request:
 - the [end-to-end tests](testing.md), in a privileged container with real
   mounts, again with mounts emulated, and again under ThreadSanitizer, which
   stops at the first data race between threads;
+- the write guard raced for 30 seconds by a thread swapping a folder for a
+  link to one outside (`tests/fsguard/run.sh`): nothing may land outside;
 - the codec cross-checks: the ATRAC9 encoder, decoder and validator against
   LibAtrac9 and FFmpeg, and the zstd decoder against the reference `zstd`;
 - every parser fuzzed for 30 seconds (libFuzzer, AddressSanitizer, UBSan),
   any finding attached to the run;
-- the PS5 build, its three files and their SHA-256 sums attached to the run;
+- the PS5 build, which fails if the plugin calls one of the SDK's system
+  calls that hide a failure (see
+  [System calls the SDK gets wrong](#system-calls-the-sdk-gets-wrong)), its
+  three files and their SHA-256 sums attached to the run;
 - two more builds from nothing, which must be byte for byte the same (see
   [Reproducible builds](#reproducible-builds));
 - `tools/check_repo.py`: every local link and heading link in the README and
@@ -76,7 +99,7 @@ every pull request:
   plugin, the README and the tests.
 
 The same checks run by hand: `tests/host/run.sh` (and `emulated`, `tsan`),
-`tests/atrac9/run.sh`, `tests/fuzz/run.sh`, `./build.sh` and
+`tests/fsguard/run.sh`, `tests/atrac9/run.sh`, `tests/fuzz/run.sh`, `./build.sh` and
 `python3 tools/check_repo.py`.
 
 ## Reproducible builds
@@ -107,15 +130,30 @@ the CI builds every push twice from nothing and fails if the builds differ.
 
 | Path | What |
 |---|---|
-| `src/main.c` | The theme engine: stock copies, staging, overlays, checks, progress, re-apply at start |
-| `src/web.c` | Web server and JSON API: uploads, settings, Save/Discard, previews, status |
+| `src/main.c` | Start-up, the plugin's threads, and the engine's main loop |
+| `src/apply.c`, `src/apply_internal.h` | The theme engine: stock copies, staging, overlays, checks, re-apply at start |
+| `src/watch.c` | New views the system makes after an apply, covered; an app that keeps restarting with the theme on |
+| `src/status.c` | What the engine is doing (the applied theme, progress, the last outcome) and the chosen theme |
+| `src/theme.c` | What a theme is: its name and `theme.ini`, its music settings, the system folders it may change |
+| `src/diag.c` | What the plugin found on the console, written to its dump folder |
+| `src/config.h` | The version, the port and every path the plugin uses |
+| `src/shellui.c` | The home screen's lifecycle: its process found and watched, its sandbox emptied when it exits, nothing in a sandbox while it restarts |
+| `src/mounts.c` | The record of the overlays the plugin mounted |
+| `src/prefs.c` | The settings that aren't a theme's: which notifications the console shows |
+| `src/access.c`, `src/sha256.c` | Who may open the manager: the console's own network, devices allowed with a code, their keys kept as hashes |
+| `src/http.c` | The web server: connections, workers, answers, the embedded page |
+| `src/routes.c` | Every route of the API, and who may ask for it |
+| `src/api_*.c`, `src/api.h` | The API's answers, one file per area: themes, files, parts, icon style, mix, the console's files, diagnostics, the plugin |
+| `src/store.c` | Themes' folders as the manager changes them, and the copy Discard puts back |
+| `src/upload.c` | Uploads: received, checked, placed into a theme |
 | `src/update.c` | One running copy at a time, finding a newer plugin file and handing over to it |
 | `src/running.c` | Finding the running copy, and asking it over its own web port (shared with the stop tool) |
 | `src/autostyle.c` | The icon styler: games installed later styled in the theme's icon style |
 | `src/meta.c` | The ELF's own description and logo, in sections the console never loads |
-| `src/fsguard.c` | The write guard and file helpers (atomic writes, linked copies) |
+| `src/fsguard.c` | The write guard and file helpers (atomic writes, linked copies), each write made in the folder it checked |
 | `src/policy.c` | What can be themed, and the checks for each kind of file |
 | `src/verify.c` | Image header parsing |
+| `src/svg.c` | SVG pictures: the subset the console's own use, parsed |
 | `src/rco.c` | Interface resource file checks |
 | `src/font.c` | The check a replacement font must pass |
 | `src/png.c`, `src/inflate.c` | PNG pictures checked against the console's own, and the inflate they need |
@@ -124,8 +162,10 @@ the CI builds every push twice from nothing and fails if the builds differ.
 | `src/atrac9.c`, `src/atrac9_tables.h` | ATRAC9 checks and codebooks |
 | `src/tile.c` | The Themes tile |
 | `src/crash.c`, `src/log.c` | Crash reports, logging and notifications |
-| `src/platform_ps5.c`, `src/platform.h` | Everything specific to the console |
-| `web/index.html` | The manager: library, editor, music editor, BC7 encoder, zip reader and writer |
+| `src/platform_ps5.c`, `src/platform.h` | Everything specific to the console, and the system calls the SDK's libc gets wrong |
+| `web/index.html` | The manager's page: its markup, and its style sheets and scripts in order |
+| `web/css/`, `web/js/` | The manager's style sheets and scripts by area: library, editor, music editor, previews, settings |
+| `web/js/lib/` | The page's parts with no page in them, which the tests run too: resource files, BC7 and zstd encoders, SQLite reader, home screen layout |
 | `web/atrac9.js` | ATRAC9 encoder and decoder (also the Web Worker) |
 | `tools/stop/` | `ps5-theme-stop.elf`: stops the plugin and leaves the theme on |
 | `tools/klog/` | `ps5-klog.elf`: the kernel log on TCP port 3232, for finding out what the system does |
@@ -133,6 +173,9 @@ the CI builds every push twice from nothing and fails if the builds differ.
 | `tools/assetwatch/` | `ps5-assetwatch.elf`: for two minutes, logs the files the home screen and the web renderer map and unmap, read-only, to find where something on screen is loaded from |
 | `tools/docshots.mjs` | The manager's screenshots in `docs/screenshots/`, taken from a console's manager in a headless Chromium, read-only (every request that would change something is refused), with the console's own pictures, games' icons and the system tiles' styled icons (made from the console's own) shown as stand-ins |
 | `tools/payload_meta.py` | The ELF's description, its check, and the PS5 Payload Manager repository files |
+| `tools/check_syscalls.py` | Fails the build if anything calls one of the SDK's system call functions that hide a failure |
+| `tools/check_includes.py` | Checks each C file includes the headers it uses and no others, and that every declared function exists |
+| `tools/bundle_page.py` | Joins the manager's style sheets and scripts into one page |
 | `tools/verify-release.sh` | Rebuilds a release from its tag and compares it with the published files (see [Reproducible builds](#reproducible-builds)) |
 | `tools/` | Table generator, icon generator, plugin packer, repository checks (`check_repo.py`) |
 | `.github/workflows/ci.yml` | The tests, the codec checks, the fuzzing, the build, the reproducible build and the repository checks on every push |
@@ -140,5 +183,6 @@ the CI builds every push twice from nothing and fails if the builds differ.
 | `CONTRIBUTING.md`, `docs/architecture.md`, `docs/decisions.md` | For contributors: the rules, the map of the code, and the reasons behind it |
 | `tests/host/` | End-to-end tests and the fake console (`rco_fixture.py` builds resource files) |
 | `tests/atrac9/`, `tests/zstd/` | Codec cross-checks |
+| `tests/fsguard/` | The write guard raced by a thread swapping folders for links |
 | `tests/fuzz/` | Fuzzing the parsers |
 | `examples/sample-theme/` | A minimal theme |

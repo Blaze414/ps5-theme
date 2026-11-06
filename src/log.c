@@ -10,13 +10,16 @@
 
 #include <sys/stat.h>
 
+#include "log.h"
+#include "config.h"
+#include "fsguard.h"
 #include "platform.h"
-#include "theme.h"
 
 
 #define LOG_ROTATE_BYTES (512 * 1024)
 
 static pthread_mutex_t log_lock = PTHREAD_MUTEX_INITIALIZER;
+static _Thread_local int writing_log;   /* this thread holds log_lock: anything said meanwhile would wait on itself */
 
 
 void
@@ -55,15 +58,18 @@ vlog(const char *level, const char *fmt, va_list ap) {
   if(n > (int)sizeof(line) - 2) n = sizeof(line) - 2;
   line[n++] = '\n';
 
-  pthread_mutex_lock(&log_lock);
-  rotate_if_needed();
-  /* LOG_DIR was created through the write guard; never follow a planted link. */
-  int fd = open(LOG_FILE, O_WRONLY | O_CREAT | O_APPEND | O_NOFOLLOW, 0644);
-  if(fd >= 0) {
-    if(write(fd, line, n) < 0) { /* nothing better to do */ }
-    close(fd);
+  if(!writing_log) {   /* (a refusal by the write guard while rotating: on stdout only) */
+    pthread_mutex_lock(&log_lock);
+    writing_log = 1;
+    rotate_if_needed();
+    int fd = fs_open_append(LOG_FILE, 1);   /* through the write guard, which says nothing here */
+    if(fd >= 0) {
+      if(write(fd, line, n) < 0) { /* nothing better to do */ }
+      close(fd);
+    }
+    writing_log = 0;
+    pthread_mutex_unlock(&log_lock);
   }
-  pthread_mutex_unlock(&log_lock);
 
   /* Also to stdout, which etaHEN connects to its log socket. */
   fwrite("[ps5-theme] ", 1, 12, stdout);
@@ -95,6 +101,21 @@ log_err(const char *fmt, ...) {
   va_start(ap, fmt);
   vlog("ERROR", fmt, ap);
   va_end(ap);
+}
+
+
+/* A notification of two lines with the plugin's icon (plat_toast), said in the log as one. */
+void
+toast(const char *title, const char *fmt, ...) {
+  char detail[1024];
+  va_list ap;
+
+  va_start(ap, fmt);
+  vsnprintf(detail, sizeof(detail), fmt, ap);
+  va_end(ap);
+
+  log_msg("notify: %s%s%s", title, *detail ? ": " : "", detail);
+  plat_toast(title, detail, TOAST_ICON);
 }
 
 

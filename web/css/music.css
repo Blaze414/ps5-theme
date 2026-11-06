@@ -1,0 +1,57 @@
+/* Home music: choosing the part of the song that loops */
+.trim { display: grid; gap: 14px; }
+.wave {
+  position: relative; height: 128px; border-radius: var(--radius); overflow: hidden; touch-action: none;
+  background: rgba(255, 255, 255, .04); cursor: pointer; user-select: none; -webkit-user-select: none;
+}
+.wave canvas { position: absolute; top: 0; bottom: 0; left: 16px; width: calc(100% - 32px); height: 100%; }
+.wave .handle {
+  position: absolute; top: 0; bottom: 0; width: 28px; margin-left: -14px; padding: 0; border: 0;
+  background: transparent; cursor: ew-resize; z-index: 1;
+}
+.wave .handle::before { content: ""; position: absolute; left: 13px; top: 0; bottom: 0; width: 2px; background: #fff; }
+.wave .handle::after {
+  content: ""; position: absolute; left: 7px; top: 50%; width: 14px; height: 34px; margin-top: -17px;
+  border-radius: 7px; background: #fff; box-shadow: 0 2px 8px rgba(0, 0, 0, .5); transition: transform .15s var(--ease);
+}
+.wave .handle:focus-visible::after, .wave .handle.active::after { transform: scale(1.25); box-shadow: 0 0 0 3px var(--blue); }
+.wave .handle.loop::before { background: var(--blue); top: 40%; }
+.wave .handle.loop::after { top: auto; bottom: 8px; margin-top: 0; height: 26px; background: var(--blue); }
+.wave .handle.loop:focus-visible::after, .wave .handle.loop.active::after { box-shadow: 0 0 0 3px #fff; }
+.wave .handle.from::before { background: var(--ok); bottom: 55%; }
+.wave .handle.from::after { top: 6px; margin-top: 0; height: 22px; background: var(--ok); }
+.wave .handle.from:focus-visible::after, .wave .handle.from.active::after { box-shadow: 0 0 0 3px #fff; }
+.wave .start-flag {
+  position: absolute; top: 6px; width: 0; height: 0; margin-left: -1px; pointer-events: none;
+  border-top: 7px solid transparent; border-bottom: 7px solid transparent; border-left: 11px solid var(--ok);
+}
+.wave .start-flag[hidden], .wave .handle[hidden] { display: none; }
+.wave .playhead { position: absolute; top: 0; bottom: 0; width: 2px; margin-left: -1px; background: #fff; opacity: .8; pointer-events: none; }
+.legend { display: flex; gap: 6px 14px; align-items: center; flex-wrap: wrap; font-size: .8125rem; color: var(--muted); }
+.legend .key { display: inline-block; width: 22px; height: 4px; border-radius: 2px; margin-right: -8px; }
+.legend .key.music { background: rgba(255, 255, 255, .55); }
+.legend .key.loop { background: var(--blue); }
+.legend .key.start { background: var(--ok); width: 4px; height: 14px; margin-right: -4px; }
+
+.trim-fields { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); }
+/* Home music playlist: the songs in order, and how much of the console's length they use. */
+.pl-songs .row-item .file { white-space: normal; }
+.pl-songs .row-item .acts .btn.ghost { min-width: 36px; }
+.pl-foot { display: flex; gap: 14px; align-items: center; flex-wrap: wrap; }
+.pl-meter { flex: 1; min-width: 220px; display: grid; gap: 6px; font-size: .8125rem; color: var(--muted); }
+.pl-meter .progress { margin-top: 0; }
+.pl-meter.full .progress i { background: var(--warn); }
+.trim-actions { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.trim-actions .spacer { flex: 1; }
+
+pre.log {
+  background: var(--surface); border-radius: var(--radius-lg); padding: 18px 20px; margin: 0;
+  font: .8125rem/1.7 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  white-space: pre-wrap; overflow-wrap: anywhere; max-height: 70vh; overflow: auto; color: rgba(255, 255, 255, .82);
+}
+.activity { display: grid; gap: 20px; }
+
+.drop { position: fixed; inset: 0; z-index: 50; display: none; place-items: center; background: rgba(6, 9, 17, .72); -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px); }
+.drop.on { display: grid; }
+.drop div { border: 2px dashed rgba(255, 255, 255, .7); border-radius: 24px; padding: 56px 64px; text-align: center; }
+.drop strong { display: block; font-size: 1.5rem; font-weight: 400; margin-bottom: 6px; }

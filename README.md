@@ -8,15 +8,17 @@ Custom home-screen themes for jailbroken PS5 consoles on firmware 13.60 and
 below, as an [etaHEN](https://github.com/GronedWaffel/etahen-11.00-13.60)
 plugin or a standalone payload. Change the home screen's backgrounds, icons, sounds, fonts and home
 music, keep as many themes as you like, and switch between them from the
-console, a phone or a computer. The system is never written: every theme is a
+console, a phone or a computer. The plugin never writes the system: every theme is a
 read-only overlay held in memory, so the console is stock again the moment
 the plugin stops, and the plugin puts your theme back each time etaHEN starts.
+(One way the system can still lose folders, at rest mode, is described under
+[Rest mode](#what-it-does).)
 
 ![A theme on the console: Yakuza 0's home background and font, and the icon style on every tile of the home row, the console's own All Apps tile too](docs/screenshots/console-home.jpg)
 
 ![The theme library](docs/screenshots/library.png)
 
-Version 1.80. Developed and tested on a PS5 with firmware 13.42, both with
+Version 1.91. Developed and tested on a PS5 with firmware 13.42, both with
 etaHEN 2.5B (unified build) and on its own from PS5 Payload Manager.
 
 > **About the screenshots.** They were taken from the author's own console.
@@ -46,7 +48,9 @@ etaHEN 2.5B (unified build) and on its own from PS5 Payload Manager.
 
 - **Themes tile and web manager.** A **Themes** tile on the home screen opens
   the manager in the console's browser. The same manager works from any
-  phone or computer on your network at `http://<console-ip>:8095`.
+  phone or computer on your network at `http://<console-ip>:8095`, once you
+  have allowed it with a code the console shows (see
+  [Settings › Devices](docs/manager.md#devices)).
 - **Build a theme from parts.** Pick a part from the list, as in the
   console's Settings, and add a file: background, icons, home music, system
   sounds, fonts, animations, video, textures and other images, the home
@@ -106,15 +110,21 @@ etaHEN 2.5B (unified build) and on its own from PS5 Payload Manager.
   storage free for its own saves and records, and refuses a file that would
   eat into it (see
   [When the console's storage is nearly full](docs/manager.md#when-the-consoles-storage-is-nearly-full)).
-- **Safe through rest mode.** Nothing of a theme goes into the home screen
-  while the console is starting it, nor into any app's sandbox while the home
-  screen restarts, and all of it comes out the moment the home screen stops,
-  the plugin crashing included (see
+- **Rest mode.** Nothing of a theme goes into the home screen while the
+  console is starting it, nor into any app's sandbox while the home screen
+  restarts, and all of it comes out as the home screen begins to close (since
+  1.88), the plugin crashing included (see
   [A home screen that never came back](docs/challenges.md#a-home-screen-that-never-came-back)
   and [A console that didn't wake (again)](docs/challenges.md#a-console-that-didnt-wake-again)).
-  If the console ever doesn't wake, hold its power button until it beeps
-  twice and switches off, then start it: the theme comes back with the
-  plugin. Send the Activity log with what happened.
+  That is a race with the system: twice on 13.42, before 1.88, the plugin was
+  too late, the system removed empty folders of `/user`, and the console
+  didn't come back from rest mode until it was restarted, which made them
+  again (see
+  [Empty folders the system removed at rest mode](docs/challenges.md#empty-folders-the-system-removed-at-rest-mode)).
+  To rule it out, choose **No theme** before rest mode. If the console ever
+  doesn't wake, hold its power button until it beeps twice and switches off,
+  then start it: the theme comes back with the plugin. Send the log (the
+  manager's Settings, then **Log**) with what happened.
 - **Never writes the system.** Nothing under `/system` or `/system_ex` is
   opened for writing, only media files can be themed, and every file is
   checked against the system file it replaces (see
@@ -208,14 +218,15 @@ first, you get one copy, and the newest one.
 **What's different without etaHEN:** nothing starts it at boot unless your
 jailbreak or Payload Manager does. Both ways have been run on a PS5 with
 13.42: `ps5-theme.elf` from PS5 Payload Manager, and `ps5-theme.plugin` from
-etaHEN. If something works differently on your setup, the Activity page says
+etaHEN. If something works differently on your setup, the log (Settings › Log) says
 what happened.
 
 ## Your first theme
 
 1. Open the **Themes** tile, or `http://<console-ip>:8095` on a phone or
-   computer.
-2. Press **New theme**, give it a name and press **Create**.
+   computer. The first time on a phone or computer, press **Show a code on
+   the console** and type the six digits the console shows.
+2. Press **New theme**, give it a name, keep **Nothing yet** and press **Create**.
 3. Its edit page opens. Choose **Background** in the list and drop in a
    picture. Add home music, icons or sounds the same way. The guides to
    [backgrounds](docs/backgrounds.md) and [home music](docs/home-music.md)

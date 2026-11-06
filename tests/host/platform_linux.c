@@ -4,8 +4,10 @@
 
    With EMULATE_MOUNTS set (for sandboxes that cannot mount, e.g. a docker
    build step) an overlay is emulated by moving the folder aside and putting a
-   symlink to the staged copy in its place. Reads behave the same; the overlay
-   is not read-only, so the test suite skips its EROFS assertions then. */
+   symlink to the staged copy in its place, in one step where the filesystem
+   can swap two names (as a mount, the folder is never missing for a moment).
+   Reads behave the same; the overlay is not read-only, so the test suite skips
+   its EROFS assertions then. */
 
 #include <errno.h>
 #include <fcntl.h>
@@ -52,6 +54,31 @@ plat_notify(const char *msg) {
 }
 
 
+/* The rig's notifications file gets "<line>: <second line>" for a toast (the icon must exist, as on the console). */
+void
+plat_toast(const char *title, const char *detail, const char *icon) {
+  FILE *f = fopen("/tmp/notifications.txt", "a");
+  if(!f) return;
+  fprintf(f, "%s%s%s%s\n", title, detail && *detail ? ": " : "", detail ? detail : "",
+          icon && access(icon, R_OK) ? " [no icon]" : "");
+  fclose(f);
+}
+
+
+int
+plat_random(void *buf, size_t n) {
+  unsigned char *p = buf;
+  while(n) {
+    long got = syscall(SYS_getrandom, p, n, 0);
+    if(got < 0 && errno == EINTR) continue;
+    if(got <= 0) return -1;
+    p += got;
+    n -= (size_t)got;
+  }
+  return 0;
+}
+
+
 static int
 emulated(void) {
   return getenv("EMULATE_MOUNTS") != NULL;
@@ -82,7 +109,12 @@ plat_mount_ro(const char *from, const char *on) {
   if(emulated()) {
     char under[PATH_MAX];
     under_path(on, under, sizeof(under));
-    if(rename(on, under)) return -1;
+    /* The link made beside the folder, then the two swapped: `on` is never missing. */
+    if(!symlink(from, under)) {
+      if(!renameat2(AT_FDCWD, under, AT_FDCWD, on, RENAME_EXCHANGE)) return 0;
+      unlink(under);
+    }
+    if(rename(on, under)) return -1;   /* where names can't be swapped: in two steps */
     if(symlink(from, on)) {
       int saved = errno;
       rename(under, on);
@@ -113,7 +145,14 @@ int
 plat_unmount(const char *on) {
   if(emulated()) {
     char under[PATH_MAX];
+    struct stat st;
     under_path(on, under, sizeof(under));
+    if(lstat(on, &st) || !S_ISLNK(st.st_mode)) {   /* (only a link of ours comes down) */
+      errno = EINVAL;
+      return -1;
+    }
+    /* The folder swapped back in, then the link it leaves aside removed: `on` is never missing. */
+    if(!renameat2(AT_FDCWD, under, AT_FDCWD, on, RENAME_EXCHANGE)) return unlink(under);
     if(unlink(on)) return -1;
     return rename(under, on);
   }
@@ -386,8 +425,47 @@ plat_process_start(int pid) {
 }
 
 
+/* Linux shows no "exiting" flag: a zombie, a dead task, or a process that is gone. */
 int
-plat_our_top_mounts(const char *stage_prefix, const char *under, char (*out)[1024], int max, int *buried) {
+plat_process_exiting(int pid) {
+  char path[64], line[1024] = "";
+  snprintf(path, sizeof(path), "/proc/%d/stat", pid);
+  FILE *f = pid > 0 ? fopen(path, "r") : NULL;
+  if(!f) return 1;
+  char *rest = fgets(line, sizeof(line), f) ? strrchr(line, ')') : NULL;
+  fclose(f);
+  char state = 0;
+  if(!rest || sscanf(rest + 1, " %c", &state) != 1) return 1;
+  return state == 'Z' || state == 'X' || state == 'x';
+}
+
+
+/* Is mount point `outer` the folder `on`, or one holding it? */
+static int
+holds(const char *outer, const char *on) {
+  size_t n = strlen(outer);
+  return !strncmp(outer, on, n) && (on[n] == 0 || on[n] == '/' || (n && outer[n - 1] == '/'));
+}
+
+int
+plat_others_under(const char *stage_prefix, const char *under, char (*out)[1024], int max, int *ours) {
+  char line[4096], root[PATH_MAX], point[PATH_MAX];
+  int count = 0;
+  *ours = 0;
+  if(emulated()) return -1;
+  FILE *f = fopen("/proc/self/mountinfo", "r");
+  if(!f) return -1;
+  while(fgets(line, sizeof(line), f)) {
+    if(sscanf(line, "%*s %*s %*s %4095s %4095s", root, point) != 2 || strncmp(point, under, strlen(under))) continue;
+    if(!strncmp(root, stage_prefix, strlen(stage_prefix))) (*ours)++;
+    else if(count++ < max) snprintf(out[count - 1], 1024, "%s", point);
+  }
+  fclose(f);
+  return count;
+}
+
+int
+plat_our_top_mounts(const char *stage_prefix, const char *under, char (*out)[1024], int max, int *buried, int *view) {
   /* per call, as two threads ask: the table's mount points in the order made, whether each is ours */
   char (*points)[512] = malloc(4096 * 512), *mine = malloc(4096);
   int *ours = malloc(4096 * sizeof(int));
@@ -407,8 +485,15 @@ plat_our_top_mounts(const char *stage_prefix, const char *under, char (*out)[102
   for(int i = 0; i < nours && count < max; i++) {
     int top = 1;   /* nothing but ours over it */
     for(int k = ours[i] + 1; k < n && top; k++) top = strcmp(points[k], points[ours[i]]) || mine[k];
-    if(top) snprintf(out[count++], 1024, "%s", points[ours[i]]);
-    else (*buried)++;
+    if(!top) {
+      (*buried)++;
+      continue;
+    }
+    if(view) {   /* the newest mount not ours at its point or at a folder holding it */
+      view[count] = -1;
+      for(int k = ours[i] - 1; k >= 0 && view[count] < 0; k--) if(!mine[k] && holds(points[k], points[ours[i]])) view[count] = k;
+    }
+    snprintf(out[count++], 1024, "%s", points[ours[i]]);
   }
   free(points);
   free(mine);
@@ -501,6 +586,22 @@ plat_find_named_thread(const char *name, int except) {
 void
 plat_set_name(const char *name) {
   prctl(PR_SET_NAME, name, 0, 0, 0);
+}
+
+
+int
+plat_mounted_under(const char *path) {
+  char line[4096], point[PATH_MAX];
+  size_t len = strlen(path);
+  int found = 0;
+  FILE *f = fopen("/proc/self/mountinfo", "r");
+  if(!f) return -1;
+  while(!found && fgets(line, sizeof(line), f)) {
+    if(sscanf(line, "%*s %*s %*s %*s %4095s", point) != 1) continue;
+    found = !strncmp(point, path, len) && (point[len] == 0 || point[len] == '/');
+  }
+  fclose(f);
+  return found;
 }
 
 

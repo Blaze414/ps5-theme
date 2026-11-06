@@ -18,7 +18,7 @@
      Each title is tried once per run of the plugin.
 
    A title the theme already has pictures for, that wasn't installed when the theme was applied (uninstalled, and
-   installed again; main.c lists them), gets them by itself too, once its install is over: the theme is applied
+   installed again; apply.c lists them), gets them by itself too, once its install is over: the theme is applied
    again. If those pictures are the style's (the page's list of the titles it styled, icon-style/styled.txt, or
    made.txt), they are made again first with the style as it is now, from your picture kept for the title
    (icon-style/own/<title>.png) or else its own icon.
@@ -48,12 +48,19 @@
 
 #include <sys/stat.h>
 
-#include "platform.h"
+#include "autostyle.h"
+#include "apply.h"
+#include "config.h"
+#include "fsguard.h"
+#include "log.h"
+#include "media.h"
+#include "policy.h"
+#include "status.h"
 #include "theme.h"
 
 
 #define AUTOSTYLE_POLL     15            /* seconds between looks */
-#define AUTOSTYLE_SETTLE   120           /* (600 before 1.73, when downloads weren't watched) */
+#define AUTOSTYLE_SETTLE   120           /* seconds a title's folders stay unchanged before it is styled */
 #define AUTOSTYLE_TRIED    512
 #define STYLE_DIR          "icon-style"
 #define TEMPLATE_MAX_BYTES (8u << 20)
@@ -658,7 +665,7 @@ style_title(const char *theme, const char *title, const uint8_t *base, const uin
       snprintf(m->asset, sizeof(m->asset), "%s", asset);
       snprintf(m->dst, sizeof(m->dst), "%s/%s/files%s", THEMES_DIR, theme, asset);
       /* Written outside the theme, in the uploads' folder, and its folder made only as it is placed, under the
-         themes lock: the theme can be moved aside meanwhile (Discard, see web.c place_upload). */
+         themes lock: the theme can be moved aside meanwhile (Discard, see place_upload in upload.c). */
       static atomic_uint style_seq;
       const char *base = strrchr(asset, '/');
       snprintf(m->part, sizeof(m->part), "%s/style-%u-%s.part", INCOMING_DIR, atomic_fetch_add(&style_seq, 1), base ? base + 1 : asset);

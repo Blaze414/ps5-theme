@@ -82,10 +82,10 @@ console's own home screen tiles too (since 1.74).
   under **System tiles** drawn as it will look. Choosing one off puts it
   back.
 - **Icons you changed by hand** are styled too: your picture goes in the
-  shape. Untick **The N icons you changed by hand too** to leave them as they
-  are.
-- **Games installed later:** with **Style games and apps installed later**
-  ticked, the plugin styles a new game by itself while the theme is applied,
+  shape. Turn off **The N icons you changed by hand too** to leave them as
+  they are.
+- **Games installed later:** with **Style ones installed later** (under **Games and apps**)
+  on, the plugin styles a new game by itself while the theme is applied,
   2 minutes after its install or download has finished, then applies the
   theme again, even with a game open. The console says so by the game's
   name, once when it sees the install and once when the icon is in place.
@@ -97,13 +97,15 @@ console's own home screen tiles too (since 1.74).
 - **A game installed again** gets the theme's pictures back by itself, in
   the style as it is then.
 - **While icons are being styled**, another theme doesn't open (the library
-  and Activity do): each icon is written to the theme open as it is made, so
+  and Settings do): each icon is written to the theme open as it is made, so
   the rest would have gone into the other one. Wait, or press **Stop
   styling**.
 - **Remove the style** puts back each icon as it was: your own picture where
   you had changed one, the console's icon for the rest. A game not installed
   just then with your picture in the style keeps it until it's installed
   again; press **Remove the style** again then.
+- **In a mix:** [Mix and match](manager.md#mix-and-match) brings the style of
+  the theme most of the icons come from (since 1.88).
 
 The [manager tour](manager.md#games-and-apps) has the details.
 

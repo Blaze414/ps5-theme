@@ -31,8 +31,13 @@
 #include <time.h>
 #include <unistd.h>
 
+#include "update.h"
+#include "config.h"
+#include "fsguard.h"
+#include "log.h"
 #include "platform.h"
-#include "theme.h"
+#include "prefs.h"
+#include "running.h"
 
 
 #define ELF_LOADER_PORT  9021
@@ -634,6 +639,42 @@ update_check(void) {
            best_version / 100, best_version % 100);
     return 0;
   }
-  notify("ps5-theme: updating to %d.%02d...", best_version / 100, best_version % 100);
+  if(pref_on("starts")) toast("Updating PS5 Themes", "To %d.%02d. Your theme stays on.", best_version / 100, best_version % 100);
+  else log_msg("updating to %d.%02d (its notification is turned off in Settings)", best_version / 100, best_version % 100);
   return 1;
+}
+
+#define HANDOFF_WAIT_MS  180000    /* for an older copy to step aside (it may be applying) */
+
+/* Ask the running copy to step aside: over the web API when it answers (`running`, its version, is then known), and
+   otherwise by SIGUSR1 to its process, found by its main thread's name (rest mode can leave its web server down for
+   a while). Copies before 1.50 end on that signal, which leaves their overlays in place, as stepping aside does.
+   0 once this copy holds the lock. */
+int
+take_over(int running) {
+  if(running >= 0) {
+    log_msg("taking over from the running copy (%d.%02d)", running / 100, running % 100);
+    if(!ask_handoff()) return instance_lock(HANDOFF_WAIT_MS);
+  }
+  int pid = running_copy(getpid());
+  if(pid <= 0) {
+    /* What this copy saw, to find out why. */
+    int fd = !fs_mkdirs(DUMP_DIR) ? fs_open_write(DUMP_DIR "/takeover.txt") : -1;
+    FILE *f = fd >= 0 ? fdopen(fd, "w") : NULL;
+    if(f) {
+      plat_dump_threads(f);
+      fclose(f);
+    } else if(fd >= 0) {
+      close(fd);
+    }
+    log_err("the running copy doesn't answer on port %d and can't be found (threads listed in %s/takeover.txt)",
+            WEB_PORT, DUMP_DIR);
+    return -1;
+  }
+  if(kill(pid, SIGUSR1)) {
+    log_err("could not signal the running copy (pid %d): %s", pid, strerror(errno));
+    return -1;
+  }
+  log_msg("taking over from the running copy (pid %d), which doesn't answer on port %d: asked it by a signal", pid, WEB_PORT);
+  return instance_lock(HANDOFF_WAIT_MS);
 }

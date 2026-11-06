@@ -1,0 +1,17 @@
+/* Messages at the bottom right, clear of the buttons at the top of each page (the console's own show top right, where
+   its pages have none); above the edit page's save bar while it shows. */
+.toasts { position: fixed; z-index: 60; right: 16px; bottom: 16px; display: grid; gap: 10px; width: min(400px, calc(100vw - 32px)); }
+body:has(#savebar:not([hidden])) .toasts { bottom: 96px; }
+.toast .label, .toast .msg { white-space: pre-line; }
+.toast {
+  background: rgba(28, 34, 48, .97); border-radius: var(--radius); padding: 14px 16px 14px 34px; position: relative;
+  font-size: .9375rem; box-shadow: 0 12px 32px rgba(0, 0, 0, .45); animation: rise .25s var(--ease);
+}
+.toast::before { content: ""; position: absolute; left: 16px; top: 22px; width: 8px; height: 8px; border-radius: 50%; background: var(--faint); }
+.toast.ok::before { background: var(--ok); }
+.toast.err::before { background: var(--danger); }
+.toast.warn::before { background: var(--warn); }
+@keyframes in { from { opacity: 0; transform: translateY(-8px); } to { opacity: 1; transform: none; } }
+@keyframes rise { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+.progress { height: 4px; background: var(--surface-strong); border-radius: 2px; margin-top: 10px; overflow: hidden; }
+.progress i { display: block; height: 100%; background: var(--blue); width: 0; transition: width .2s; }

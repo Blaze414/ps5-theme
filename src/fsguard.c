@@ -1,12 +1,15 @@
 /* Guarded filesystem writes.
 
-   The plugin must never persistently change the console. etaHEN remounts the
-   system partitions read-write, so this is enforced here rather than trusted:
-   a write is allowed only when the path is lexically inside BASE_DIR or
-   TILE_DIR *and* its deepest existing ancestor, with symlinks resolved, is
-   inside the same root. The final component is never followed (O_NOFOLLOW,
-   unlink/rename/mkdir semantics), so a planted symlink cannot redirect a write
-   into /system_ex. */
+   The plugin must never persistently change the console. etaHEN remounts the system partitions read-write, so this
+   is enforced here rather than trusted: a write is allowed only inside BASE_DIR or TILE_DIR, and it is made in the
+   very folder that was checked. That folder is opened by walking down from its root one part at a time: each part
+   opened as a folder (O_DIRECTORY), never through a link (O_NOFOLLOW). The write is then made relative to that open
+   folder (openat, renameat, unlinkat ...), and the last part is never followed either. There is no second lookup of
+   the path: a folder on the way renamed, or swapped for a link, after it was opened can't send the write anywhere
+   else. A folder is deleted only if nothing is mounted at it or under it, by the mount table.
+
+   On the PS5 the calls relative to an open folder (openat, mkdirat ...) go through platform_ps5.c: the SDK's own
+   return a failure as if it were a result (see the end of platform.h). */
 
 #include <errno.h>
 #include <fcntl.h>
@@ -21,12 +24,16 @@
 #include <dirent.h>
 #include <sys/stat.h>
 
+#include "fsguard.h"
+#include "config.h"
+#include "log.h"
 #include "platform.h"
-#include "theme.h"
 
 
 static const char *const roots[] = { BASE_DIR, TILE_DIR };
 #define NROOTS (sizeof(roots) / sizeof(*roots))
+
+#define DIR_FLAGS (O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC)
 
 static uint32_t crc_table[256];
 
@@ -44,14 +51,6 @@ crc_init(void) {
     for(int k = 0; k < 8; k++) c = (c & 1) ? 0xedb88320u ^ (c >> 1) : c >> 1;
     crc_table[n] = c;
   }
-}
-
-
-int
-fs_guard_init(void) {
-  pthread_once(&crc_once, crc_init);
-  if(mkdir(BASE_DIR, 0755) && errno != EEXIST) return -1;
-  return access(BASE_DIR, W_OK) ? -1 : 0;
 }
 
 
@@ -74,6 +73,7 @@ lexical_ok(const char *path) {
   if(strstr(path, "//") || strstr(path, "/./") || strstr(path, "/../")) return 0;
   if(n >= 2 && !strcmp(path + n - 2, "/.")) return 0;
   if(n >= 3 && !strcmp(path + n - 3, "/..")) return 0;
+  if(n > 1 && path[n - 1] == '/') return 0;
   return 1;
 }
 
@@ -85,41 +85,167 @@ within(const char *path, const char *root) {
 }
 
 
-/* Real path of the deepest existing ancestor of `path` (excluding path itself). */
-static int
-existing_parent(const char *path, char *out) {
-  char dir[PATH_MAX];
+static const char *
+root_of(const char *path) {
+  for(size_t i = 0; i < NROOTS; i++) if(within(path, roots[i])) return roots[i];
+  return NULL;
+}
 
-  strcpy(dir, path);
+
+/* A refusal: said in the log as `op` (unless NULL, for the log's own writes and quiet checks), errno EPERM. */
+static int
+refuse(const char *op, const char *path, const char *why) {
+  if(op) log_err("write guard: refused %s %s (%s)", op, path ? path : "(none)", why);
+  errno = EPERM;
+  return -1;
+}
+
+static int deny(const char *op, const char *path) { return refuse(op, path, "outside the plugin's folders"); }
+
+/* What an open with O_NOFOLLOW says about a link: ELOOP, or EMLINK on FreeBSD before 13 (the console's). */
+static int
+is_link_errno(int e) {
+  return e == ELOOP || e == EMLINK;
+}
+
+
+/* `part`, missing in the open folder `dir`, made there and opened: the new folder's descriptor, or -1. */
+static int
+make_dir(int dir, const char *part) {
+  if(mkdirat(dir, part, 0755)) {
+    if(errno != EEXIST) return -1;
+  } else {
+    written(0);
+  }
+  return openat(dir, part, DIR_FLAGS);
+}
+
+/* The folder holding the last part of `path`, opened from `top` down one part at a time, and *leaf, that last part
+   (in `path`). Each part is opened as a folder, never through a link: -1 with EPERM (said as `op`). Missing folders on the way are made when `make`, else -1 with ENOENT. `top` itself is
+   followed only with `follow_top` (the payload folders, which the system may link); `path` is inside it, longer. */
+static int
+walk_to_parent(const char *top, int follow_top, const char *path, int make, const char *op, const char **leaf) {
+  int fd = open(top, follow_top ? (O_RDONLY | O_DIRECTORY | O_CLOEXEC) : DIR_FLAGS);
+  if(fd < 0) return is_link_errno(errno) ? refuse(op, path, "its folder is a link") : -1;
+  const char *p = path + strlen(top) + 1;
   for(;;) {
-    char *slash = strrchr(dir, '/');
-    if(!slash) return -1;
-    if(slash == dir) { dir[1] = 0; }
-    else *slash = 0;
-    if(realpath(dir, out)) return 0;
-    if(errno != ENOENT && errno != ENOTDIR) return -1;
-    if(!strcmp(dir, "/")) return -1;
+    const char *slash = strchr(p, '/');
+    if(!slash) {
+      if(!*p) {
+        close(fd);
+        errno = EINVAL;
+        return -1;
+      }
+      *leaf = p;
+      return fd;
+    }
+    char part[NAME_MAX + 1];
+    size_t n = (size_t)(slash - p);
+    if(!n || n > NAME_MAX) {
+      close(fd);
+      errno = ENAMETOOLONG;
+      return -1;
+    }
+    memcpy(part, p, n);
+    part[n] = 0;
+    int next = openat(fd, part, DIR_FLAGS);
+    if(next < 0 && errno == ENOENT && make) next = make_dir(fd, part);
+    int e = errno;
+    close(fd);
+    if(next < 0) {
+      if(is_link_errno(e)) return refuse(op, path, "a folder on the way is a link");
+      errno = e;
+      return -1;
+    }
+    fd = next;
+    p = slash + 1;
   }
 }
 
 
-int
-fs_write_allowed(const char *path) {
-  char parent[PATH_MAX], root_real[PATH_MAX], root_parent[PATH_MAX];
-
-  if(!path || !lexical_ok(path)) return 0;
-  for(size_t i = 0; i < NROOTS; i++) {
-    if(!within(path, roots[i])) continue;
-    if(existing_parent(path, parent)) return 0;
-
-    if(!strcmp(path, roots[i])) {
-      /* Creating the root itself: its parent must be where we expect. */
-      return !existing_parent(roots[i], root_parent) && !strcmp(parent, root_parent);
-    }
-    if(!realpath(roots[i], root_real)) return 0;
-    return within(parent, root_real);
+/* The folder holding `path`'s last part, inside one of the roots (see walk_to_parent); with `make`, the root and the
+   folders on the way are made when missing. For a root itself, the folder above it, as the system has it. */
+static int
+open_parent(const char *path, int make, const char *op, const char **leaf) {
+  const char *root = path && lexical_ok(path) ? root_of(path) : NULL;
+  if(!root) return deny(op, path);
+  size_t n = strlen(root);
+  if(!path[n]) {
+    char above[PATH_MAX];
+    size_t a = (size_t)(strrchr(root, '/') - root);
+    snprintf(above, sizeof(above), "%.*s", (int)(a ? a : 1), root);
+    *leaf = root + a + 1;
+    return open(above, O_RDONLY | O_DIRECTORY | O_CLOEXEC);
   }
+  if(make) {
+    struct stat st;
+    const char *l;
+    if(lstat(root, &st) && errno == ENOENT) {
+      int above = open_parent(root, 0, op, &l);
+      if(above >= 0) {
+        int fd = make_dir(above, l);
+        if(fd >= 0) close(fd);
+        close(above);
+      }
+    }
+  }
+  return walk_to_parent(root, 0, path, make, op, leaf);
+}
+
+
+/* `leaf` in the open folder `dir` as a plain file of its own: never a link (O_NOFOLLOW), never a device, a pipe or a
+   folder (opened without waiting, then asked). -1 with EPERM, said as `op`, for those. */
+static int
+open_file_at(int dir, const char *leaf, int flags, const char *op, const char *path) {
+  int fd = openat(dir, leaf, flags | O_NOFOLLOW | O_CLOEXEC | O_NONBLOCK, 0644);
+  if(fd < 0) return is_link_errno(errno) ? refuse(op, path, "it is a link") : -1;
+  struct stat st;
+  if(fstat(fd, &st) || !S_ISREG(st.st_mode)) {
+    close(fd);
+    return refuse(op, path, "not a plain file");
+  }
+  int fl = fcntl(fd, F_GETFL);
+  if(fl >= 0) fcntl(fd, F_SETFL, fl & ~O_NONBLOCK);
+  return fd;
+}
+
+
+/* errno kept across a close. */
+static void
+close_keep(int fd) {
+  int e = errno;
+  close(fd);
+  errno = e;
+}
+
+
+int
+fs_id_of(const struct stat *st, fs_id_t *id) {
+  if(!S_ISREG(st->st_mode)) return -1;
+  id->dev = st->st_dev;
+  id->ino = st->st_ino;
+  id->size = (unsigned long long)st->st_size;
+  id->mtime_s = (unsigned long long)st->st_mtim.tv_sec;
+  id->mtime_ns = (unsigned long long)st->st_mtim.tv_nsec;
   return 0;
+}
+
+
+int
+fs_id_same(const fs_id_t *a, const fs_id_t *b) {
+  return a->dev == b->dev && a->ino == b->ino && a->size == b->size &&
+         a->mtime_s == b->mtime_s && a->mtime_ns == b->mtime_ns;
+}
+
+
+int
+fs_guard_init(void) {
+  pthread_once(&crc_once, crc_init);
+  if(mkdir(BASE_DIR, 0755) && errno != EEXIST) return -1;   /* (by its name, under the system's own /data) */
+  int fd = open(BASE_DIR, DIR_FLAGS);   /* a folder of its own, not a link to one */
+  if(fd < 0) return -1;
+  close(fd);
+  return access(BASE_DIR, W_OK) ? -1 : 0;
 }
 
 
@@ -127,17 +253,16 @@ fs_write_allowed(const char *path) {
    of ps5-theme in etaHEN's plugin folder or PS5 Payload Manager's payload
    folders with a newer one, so the next start runs that too. Only an existing
    regular file named .plugin or .elf directly in etaHEN's folder, or at most
-   two folders deep in Payload Manager's, whose folder is really there (no
-   symlink out). The new copy is written beside it, checked by `check`, then
-   renamed over it, so a cut-off write never leaves a broken copy. The caller
-   makes sure the file is an older ps5-theme build. */
-static int deny(const char *op, const char *path);
+   two folders deep in Payload Manager's, reached without a link. The new copy
+   is written beside it, checked by `check`, then renamed over it, so a
+   cut-off write never leaves a broken copy; all in the folder that was opened
+   and checked. The caller makes sure the file is an older ps5-theme build. */
 static const char *const payload_roots[] = { "/data/etaHEN/plugins", "/data/etahen/plugins", "/data/pldmgr/payloads" };
 
 int
 fs_replace_payload(const char *path, const void *data, size_t len, int (*check)(const char *tmp)) {
-  char tmp[PATH_MAX], parent[PATH_MAX], parent_real[PATH_MAX], root_real[PATH_MAX];
-  const char *root = NULL;
+  char tmp[PATH_MAX], tmp_leaf[NAME_MAX + 1];
+  const char *root = NULL, *leaf;
   struct stat st;
 
   size_t n = path ? strlen(path) : 0;
@@ -149,17 +274,26 @@ fs_replace_payload(const char *path, const void *data, size_t len, int (*check)(
   int depth = 0;
   if(root) for(const char *p = path + strlen(root) + 1; *p; p++) depth += *p == '/';
   int deep_ok = root && depth <= (strstr(root, "pldmgr") ? 2 : 0);   /* Payload Manager: payloads/local/<name>/ */
-  snprintf(parent, sizeof(parent), "%s", path);
-  *strrchr(parent, '/') = 0;
-  if(!named || !deep_ok || lstat(path, &st) || !S_ISREG(st.st_mode) ||
-     !realpath(parent, parent_real) || !realpath(root, root_real) || !within(parent_real, root_real) ||
-     snprintf(tmp, sizeof(tmp), "%s.ps5theme-new", path) >= (int)sizeof(tmp)) {
+  if(!named || !deep_ok || snprintf(tmp, sizeof(tmp), "%s.ps5theme-new", path) >= (int)sizeof(tmp)) {
+    return deny("replace", path);
+  }
+  int dir = walk_to_parent(root, 1, path, 0, "replace", &leaf);
+  if(dir < 0) return -1;
+  if(fstatat(dir, leaf, &st, AT_SYMLINK_NOFOLLOW) || !S_ISREG(st.st_mode) ||
+     snprintf(tmp_leaf, sizeof(tmp_leaf), "%s.ps5theme-new", leaf) >= (int)sizeof(tmp_leaf)) {
+    close(dir);
     return deny("replace", path);
   }
   struct stat old;
-  if(!lstat(tmp, &old) && (!S_ISREG(old.st_mode) || unlink(tmp))) return deny("replace", tmp);   /* our own leftover only */
-  int fd = open(tmp, O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW, st.st_mode & 0777);
-  if(fd < 0) return -1;
+  if(!fstatat(dir, tmp_leaf, &old, AT_SYMLINK_NOFOLLOW) && (!S_ISREG(old.st_mode) || unlinkat(dir, tmp_leaf, 0))) {
+    close(dir);
+    return deny("replace", tmp);   /* our own leftover only */
+  }
+  int fd = openat(dir, tmp_leaf, O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC, st.st_mode & 0777);
+  if(fd < 0) {
+    close_keep(dir);
+    return -1;
+  }
   const uint8_t *p = data;
   size_t left = len;
   int ok = 1;
@@ -171,30 +305,56 @@ fs_replace_payload(const char *path, const void *data, size_t len, int (*check)(
   }
   if(fsync(fd)) ok = 0;
   if(close(fd)) ok = 0;
-  if(!ok || (check && !check(tmp)) || rename(tmp, path)) {
-    unlink(tmp);
+  if(!ok || (check && !check(tmp)) || renameat(dir, tmp_leaf, dir, leaf)) {
+    unlinkat(dir, tmp_leaf, 0);
+    close(dir);
     return -1;
   }
-  int dir = open(parent, O_RDONLY);
-  if(dir >= 0) { fsync(dir); close(dir); }
+  fsync(dir);
+  close(dir);
   return 0;
 }
 
 
-/* For reads that must stay inside a directory, e.g. serving theme files. */
+/* `path` opened to read, a regular file inside `root`, reached the way a write is (see the top): never through a
+   link. Quiet: -1 with errno (EPERM for a link or anything but a plain file). */
 int
-fs_read_within(const char *path, const char *root) {
-  char real[PATH_MAX], root_real[PATH_MAX];
-  return lexical_ok(path) && realpath(path, real) && realpath(root, root_real) &&
-         within(real, root_real);
+fs_open_read(const char *path, const char *root) {
+  const char *leaf;
+  if(!path || !root || !lexical_ok(path) || !lexical_ok(root) || !within(path, root) || !path[strlen(root)]) {
+    errno = EPERM;
+    return -1;
+  }
+  int dir = walk_to_parent(root, 0, path, 0, NULL, &leaf);
+  if(dir < 0) return -1;
+  int fd = open_file_at(dir, leaf, O_RDONLY, NULL, path);
+  close_keep(dir);
+  return fd;
 }
 
 
-static int
-deny(const char *op, const char *path) {
-  log_err("write guard: refused %s %s", op, path);
-  errno = EPERM;
-  return -1;
+/* For reads that must stay inside a directory, e.g. serving theme files. A read that follows should use
+   fs_open_read, so that what was checked is what is read. */
+int
+fs_read_within(const char *path, const char *root) {
+  int fd = fs_open_read(path, root);
+  if(fd < 0) return 0;
+  close(fd);
+  return 1;
+}
+
+
+/* A folder inside the plugin's folders, opened the way a write's is, for writing into later with openat (the crash
+   handler, which can do no more than that). */
+int
+fs_open_dir(const char *path) {
+  const char *leaf;
+  int dir = open_parent(path, 0, "open", &leaf);
+  if(dir < 0) return -1;
+  int fd = openat(dir, leaf, DIR_FLAGS);
+  close_keep(dir);
+  if(fd < 0 && is_link_errno(errno)) return refuse("open", path, "it is a link");
+  return fd;
 }
 
 
@@ -213,10 +373,27 @@ fs_room_for(uint64_t need) {
 }
 
 
+static int
+open_in_parent(const char *path, int flags, const char *op) {
+  const char *leaf;
+  int dir = open_parent(path, 0, op, &leaf);
+  if(dir < 0) return -1;
+  int fd = written(open_file_at(dir, leaf, flags, op, path));
+  close_keep(dir);
+  return fd;
+}
+
+
 int
 fs_open_write(const char *path) {
-  if(!fs_write_allowed(path)) return deny("write", path);
-  return written(open(path, O_WRONLY | O_CREAT | O_TRUNC | O_NOFOLLOW, 0644));
+  return open_in_parent(path, O_WRONLY | O_CREAT | O_TRUNC, "write");
+}
+
+
+/* For adding to the end of a file; `quiet` for the log's own (a refusal said in the log would write the log). */
+int
+fs_open_append(const char *path, int quiet) {
+  return open_in_parent(path, O_WRONLY | O_CREAT | O_APPEND, quiet ? NULL : "append");
 }
 
 
@@ -225,8 +402,7 @@ fs_open_write(const char *path) {
    the time the home screen showed its own look during a switch. */
 int
 fs_append_file(const char *path, const void *data, size_t len) {
-  if(!fs_write_allowed(path)) return deny("append", path);
-  int fd = written(open(path, O_WRONLY | O_CREAT | O_APPEND | O_NOFOLLOW, 0644));
+  int fd = fs_open_append(path, 0);
   if(fd < 0) return -1;
   const char *p = data;
   while(len) {
@@ -240,101 +416,125 @@ fs_append_file(const char *path, const void *data, size_t len) {
 }
 
 
+/* Every folder of `path` that is missing, made; each one checked as it is reached. Outside the plugin's folders, only
+   a folder that is already there is accepted (nothing is made). */
 int
 fs_mkdirs(const char *path) {
-  char tmp[PATH_MAX];
-  struct stat st;
-
-  if(!lexical_ok(path)) return deny("mkdir", path);
-  strcpy(tmp, path);
-  for(char *p = tmp + 1; ; p++) {
-    if(*p != '/' && *p != 0) continue;
-    char saved = *p;
-    *p = 0;
-    if(stat(tmp, &st) || !S_ISDIR(st.st_mode)) {
-      if(!fs_write_allowed(tmp)) return deny("mkdir", tmp);
-      if(written(mkdir(tmp, 0755)) && errno != EEXIST) return -1;
-    }
-    *p = saved;
-    if(!saved) break;
+  if(!path || !lexical_ok(path)) return refuse("mkdir", path, "not a plain path");
+  if(!root_of(path)) {
+    struct stat st;
+    if(!stat(path, &st) && S_ISDIR(st.st_mode)) return 0;
+    return deny("mkdir", path);
   }
+  const char *leaf;
+  int dir = open_parent(path, 1, "mkdir", &leaf);
+  if(dir < 0) return -1;
+  int fd = openat(dir, leaf, DIR_FLAGS);
+  if(fd < 0 && errno == ENOENT) fd = make_dir(dir, leaf);
+  close_keep(dir);
+  if(fd < 0) return is_link_errno(errno) ? refuse("mkdir", path, "it is a link") : -1;
+  close(fd);
   return 0;
 }
 
 
 int
 fs_rename(const char *from, const char *to) {
-  if(!fs_write_allowed(from)) return deny("rename", from);
-  if(!fs_write_allowed(to)) return deny("rename", to);
-  return written(rename(from, to));
+  const char *lf, *lt;
+  int df = open_parent(from, 0, "rename", &lf);
+  if(df < 0) return -1;
+  int dt = open_parent(to, 0, "rename", &lt);
+  if(dt < 0) {
+    close_keep(df);
+    return -1;
+  }
+  int rc = written(renameat(df, lf, dt, lt));
+  close_keep(df);
+  close_keep(dt);
+  return rc;
 }
 
 
 int
 fs_unlink(const char *path) {
-  if(!fs_write_allowed(path)) return deny("unlink", path);
-  return written(unlink(path));
+  const char *leaf;
+  int dir = open_parent(path, 0, "unlink", &leaf);
+  if(dir < 0) return -1;
+  int rc = written(unlinkat(dir, leaf, 0));
+  close_keep(dir);
+  return rc;
 }
 
 
 int
 fs_rmdir(const char *path) {
-  if(!fs_write_allowed(path)) return deny("rmdir", path);
-  return written(rmdir(path));
+  const char *leaf;
+  int dir = open_parent(path, 0, "rmdir", &leaf);
+  if(dir < 0) return -1;
+  int rc = written(unlinkat(dir, leaf, AT_REMOVEDIR));
+  close_keep(dir);
+  return rc;
 }
 
 
 int
 fs_symlink(const char *target, const char *path) {
-  if(!fs_write_allowed(path)) return deny("symlink", path);
-  return written(symlink(target, path));
+  const char *leaf;
+  int dir = open_parent(path, 0, "symlink", &leaf);
+  if(dir < 0) return -1;
+  int rc = written(symlinkat(target, dir, leaf));
+  close_keep(dir);
+  return rc;
 }
 
 
 /* A second name for a regular file; both names stay inside the plugin's
-   folder (staging links the stock mirror's files instead of copying them). */
+   folder (staging links the stock mirror's files instead of copying them).
+   The file linked is the one in the folder that was checked, never a link. */
 int
 fs_link(const char *existing, const char *path) {
   struct stat st;
+  const char *le, *lp;
 #ifdef TEST_HOOKS
   if(getenv("PS5THEME_TEST_NO_LINKS")) {   /* a filesystem without hard links, like the console's /data */
     errno = EPERM;
     return -1;
   }
 #endif
-  if(!fs_write_allowed(path)) return deny("link", path);
-  if(!fs_read_within(existing, BASE_DIR) || lstat(existing, &st) || !S_ISREG(st.st_mode)) {
-    return deny("link from", existing);
+  if(!existing || !lexical_ok(existing) || !within(existing, BASE_DIR)) return deny("link from", existing);
+  int de = open_parent(existing, 0, "link from", &le);
+  if(de < 0) return -1;
+  if(fstatat(de, le, &st, AT_SYMLINK_NOFOLLOW) || S_ISDIR(st.st_mode) || S_ISLNK(st.st_mode) || S_ISFIFO(st.st_mode) ||
+     S_ISCHR(st.st_mode) || S_ISBLK(st.st_mode) || S_ISSOCK(st.st_mode)) {
+    close(de);
+    return refuse("link from", existing, "not a plain file");
   }
-  return written(link(existing, path));
+  int dp = open_parent(path, 0, "link", &lp);
+  if(dp < 0) {
+    close_keep(de);
+    return -1;
+  }
+  int rc = written(linkat(de, le, dp, lp, 0));
+  close_keep(de);
+  close_keep(dp);
+  return rc;
 }
 
 
-/* A copy of a regular file inside the plugin's own folders, written through the guard; 0 on success. */
-int
-fs_copy_file(const char *existing, const char *path) {
-  struct stat st;
-  if(!fs_read_within(existing, BASE_DIR) || lstat(existing, &st) || !S_ISREG(st.st_mode)) {
-    return deny("copy from", existing);
-  }
-  if(fs_room_for((uint64_t)st.st_size)) return -1;
-  int in = open(existing, O_RDONLY);
-  if(in < 0) return -1;
-  int out = fs_open_write(path);
-  if(out < 0) {
-    close(in);
-    return -1;
-  }
-  char buf[16 * 1024];
-  int ret = 0;
+/* Copies what can be read from `in` to `out`; 0 when exactly `size` bytes were. */
+static int
+copy_fd(int in, int out, uint64_t size) {
+  char *buf = malloc(64 * 1024);
+  if(!buf) return -1;
   uint64_t copied = 0;
+  int ret = 0;
   for(;;) {
-    ssize_t n = read(in, buf, sizeof(buf));
+    ssize_t n = read(in, buf, 64 * 1024);
     if(n < 0 && errno == EINTR) continue;
     if(n < 0) { ret = -1; break; }
     if(n == 0) break;
     for(ssize_t off = 0; off < n; ) {
-      ssize_t w = write(out, buf + off, n - off);
+      ssize_t w = write(out, buf + off, (size_t)(n - off));
       if(w < 0 && errno == EINTR) continue;
       if(w <= 0) { ret = -1; break; }
       off += w;
@@ -342,8 +542,29 @@ fs_copy_file(const char *existing, const char *path) {
     if(ret) break;
     copied += (uint64_t)n;
   }
+  free(buf);
+  return ret || copied != size ? -1 : 0;
+}
+
+
+/* A copy of a regular file inside the plugin's own folders, written through the guard; 0 on success. */
+int
+fs_copy_file(const char *existing, const char *path) {
+  struct stat st;
+  int in = fs_open_read(existing, BASE_DIR);
+  if(in < 0) return errno == ENOENT ? -1 : deny("copy from", existing);
+  if(fstat(in, &st) || fs_room_for((uint64_t)st.st_size)) {
+    close_keep(in);
+    return -1;
+  }
+  int out = fs_open_write(path);
+  if(out < 0) {
+    close_keep(in);
+    return -1;
+  }
+  int ret = copy_fd(in, out, (uint64_t)st.st_size);
   close(in);
-  if(close(out) || copied != (uint64_t)st.st_size) ret = -1;
+  if(close(out)) ret = -1;
   if(ret) fs_unlink(path);
   return ret;
 }
@@ -360,110 +581,167 @@ fs_is_dir(const char *path) {
    copy) is left as it is rather than walked: each level takes stack, and a web worker has 512 KB of it. */
 #define RM_MAX_DEPTH 64
 
+/* Deletes `name` in the open folder `dir`, with everything inside it: a link is deleted, never what it points to
+   (fs_rm_rf_under has made sure nothing is mounted under it). -2 when deeper than RM_MAX_DEPTH (said as ELOOP by
+   fs_rm_rf_under, whatever fails after it). */
 static int
-rm_rf_at(const char *path, int depth) {
-  struct stat st;
-
-  if(depth > RM_MAX_DEPTH) return -2;   /* (said as ELOOP by fs_rm_rf_under, whatever fails after it) */
-  if(lstat(path, &st)) return errno == ENOENT ? 0 : -1;
-  if(!S_ISDIR(st.st_mode)) return fs_unlink(path);
-
-  DIR *d = opendir(path);
-  if(!d) return -1;
-  char *child = malloc(PATH_MAX);   /* (from the heap: see RM_MAX_DEPTH) */
-  if(!child) { closedir(d); return -1; }
+rm_at(int dir, const char *name, const char *path, int depth) {
+  if(depth > RM_MAX_DEPTH) return -2;
+  /* A folder is what opens as one, never through a link; anything else, a link included, is deleted as a name. */
+  int fd = openat(dir, name, DIR_FLAGS);
+  if(fd < 0) {
+    if(errno == ENOENT) return 0;
+    if(errno != ENOTDIR && !is_link_errno(errno)) return -1;
+    return written(unlinkat(dir, name, 0)) && errno != ENOENT ? -1 : 0;
+  }
+  DIR *d = fdopendir(fd);
+  if(!d) {
+    close_keep(fd);
+    return -1;
+  }
   struct dirent *e;
   int ret = 0;
   while((e = readdir(d))) {
     if(!strcmp(e->d_name, ".") || !strcmp(e->d_name, "..")) continue;
-    if(snprintf(child, PATH_MAX, "%s/%s", path, e->d_name) >= PATH_MAX) {
-      ret = -1;
-      continue;
-    }
-    int r = rm_rf_at(child, depth + 1);
+    int r = rm_at(dirfd(d), e->d_name, path, depth + 1);
     if(r && ret != -2) ret = r;
   }
   closedir(d);
-  free(child);
-  return fs_rmdir(path) && ret != -2 ? -1 : ret;
+  return written(unlinkat(dir, name, AT_REMOVEDIR)) && ret != -2 ? -1 : ret;
 }
 
-/* 1 if a folder under `path` is deeper than RM_MAX_DEPTH: then nothing is deleted at all, rather than part of it
-   (a theme's settings gone and its files left). */
+/* 1 if a folder inside the open folder `fd` (taken over and closed) is deeper than RM_MAX_DEPTH: then nothing is
+   deleted at all, rather than part of it (a theme's settings gone and its files left). */
 static int
-too_deep(const char *path, int depth) {
-  struct stat st;
-  if(depth > RM_MAX_DEPTH) return 1;
-  if(lstat(path, &st) || !S_ISDIR(st.st_mode)) return 0;
-  DIR *d = opendir(path);
-  char *child = d ? malloc(PATH_MAX) : NULL;
+too_deep(int fd, int depth) {
+  if(depth > RM_MAX_DEPTH) {
+    close(fd);
+    return 1;
+  }
+  DIR *d = fdopendir(fd);
+  if(!d) {
+    close(fd);
+    return 0;
+  }
   int deep = 0;
   struct dirent *e;
-  while(child && !deep && (e = readdir(d))) {
+  while(!deep && (e = readdir(d))) {
     if(!strcmp(e->d_name, ".") || !strcmp(e->d_name, "..")) continue;
-    if(e->d_type != DT_DIR && e->d_type != DT_UNKNOWN) continue;   /* (a file: no stat needed to know) */
-    if(snprintf(child, PATH_MAX, "%s/%s", path, e->d_name) < PATH_MAX) deep = too_deep(child, depth + 1);
+    if(e->d_type != DT_DIR && e->d_type != DT_UNKNOWN) continue;   /* (a file: no need to open it to know) */
+    int child = openat(dirfd(d), e->d_name, DIR_FLAGS);
+    if(child >= 0) deep = too_deep(child, depth + 1);
   }
-  if(d) closedir(d);
-  free(child);
+  closedir(d);
   return deep;
 }
 
-static int
-rm_rf(const char *path) {
-  if(too_deep(path, 0)) return -2;
-  return rm_rf_at(path, 0);
+
+static uint64_t
+bytes_at(int dir, const char *name, int depth) {
+  struct stat st;
+  if(depth > RM_MAX_DEPTH || fstatat(dir, name, &st, AT_SYMLINK_NOFOLLOW)) return 0;
+  if(S_ISREG(st.st_mode)) return (uint64_t)st.st_size;
+  if(!S_ISDIR(st.st_mode)) return 0;
+  int fd = openat(dir, name, DIR_FLAGS);
+  DIR *d = fd < 0 ? NULL : fdopendir(fd);
+  if(!d) {
+    if(fd >= 0) close(fd);
+    return 0;
+  }
+  uint64_t n = 0;
+  struct dirent *e;
+  while((e = readdir(d))) {
+    if(strcmp(e->d_name, ".") && strcmp(e->d_name, "..")) n += bytes_at(dirfd(d), e->d_name, depth + 1);
+  }
+  closedir(d);
+  return n;
+}
+
+/* The bytes of the files under `path`, inside the plugin's folders, walked as a delete walks: never through a link,
+   no deeper than RM_MAX_DEPTH. A file with two names counts twice. */
+uint64_t
+fs_tree_bytes(const char *path) {
+  const char *leaf;
+  int dir = open_parent(path, 0, NULL, &leaf);
+  if(dir < 0) return 0;
+  uint64_t n = bytes_at(dir, leaf, 0);
+  close(dir);
+  return n;
 }
 
 
 int
 fs_rm_rf_under(const char *root, const char *path) {
   size_t n = strlen(root);
+  const char *leaf;
 
   if(strncmp(path, root, n) || path[n] != '/' || !path[n + 1] || !lexical_ok(path)) {
     return deny("delete", path);
   }
-  int r = rm_rf(path);
+  /* Nothing is deleted under a mount: what is mounted there isn't the plugin's (the mount table says). */
+  if(plat_mounted_under(path) > 0) return refuse("delete", path, "something is mounted inside it");
+  int dir = open_parent(path, 0, "delete", &leaf);
+  if(dir < 0) return errno == ENOENT ? 0 : -1;
+  int r, top = openat(dir, leaf, DIR_FLAGS);
+  if(top >= 0 && too_deep(top, 0)) r = -2;
+  else r = rm_at(dir, leaf, path, 0);
+  close_keep(dir);
   if(r == -2) errno = ELOOP;
   return r ? -1 : 0;
 }
 
 
-/* Atomic replace: write to a temp file, fsync, rename over the target. Each write has a temporary name of its own:
-   two threads writing one file (the chosen theme, from two requests at once) never write into each other's, and
-   the last rename wins whole. The name ends in .part, which listings and applies skip and clear after an hour, so
-   one cut off by a crash or a power loss is never taken for a theme's file. */
+/* Atomic replace: write to a temp file, fsync, rename over the target, both in the one folder opened and checked.
+   Each write has a temporary name of its own: two threads writing one file (the chosen theme, from two requests at
+   once) never write into each other's, and the last rename wins whole. The name ends in .part, which listings and
+   applies skip and clear after an hour, so one cut off by a crash or a power loss is never taken for a theme's
+   file. */
 static atomic_uint temp_seq;
 
 int
 fs_write_file(const char *path, const void *data, size_t len) {
-  char tmp[PATH_MAX];
-  const char *p = data;
+  char tmp[NAME_MAX + 1];
+  const char *p = data, *leaf;
 
-  if(snprintf(tmp, sizeof(tmp), "%s.%u.part", path, atomic_fetch_add(&temp_seq, 1)) >= (int)sizeof(tmp)) return -1;
-  int fd = fs_open_write(tmp);
-  if(fd < 0) return -1;
-  while(len) {
+  int dir = open_parent(path, 0, "write", &leaf);
+  if(dir < 0) return -1;
+  if(snprintf(tmp, sizeof(tmp), "%s.%u.part", leaf, atomic_fetch_add(&temp_seq, 1)) >= (int)sizeof(tmp)) {
+    close(dir);
+    errno = ENAMETOOLONG;
+    return -1;
+  }
+  int fd = written(open_file_at(dir, tmp, O_WRONLY | O_CREAT | O_TRUNC, "write", path));
+  if(fd < 0) {
+    close_keep(dir);
+    return -1;
+  }
+  int failed = 0;
+  while(len && !failed) {
     ssize_t n = write(fd, p, len);
     if(n < 0 && errno == EINTR) continue;
-    if(n <= 0) { close(fd); fs_unlink(tmp); return -1; }
-    p += n;
-    len -= n;
+    if(n <= 0) failed = 1;
+    else { p += n; len -= (size_t)n; }
   }
   /* Both always run: a failed fsync must not leave the file open. */
-  int failed = fsync(fd) != 0;
+  if(!failed && fsync(fd)) failed = 1;
 #ifdef TEST_HOOKS
   if(!access("/tmp/ps5-theme-fail-fsync", F_OK)) failed = 1;   /* a disk that fails to sync */
 #endif
   if(close(fd)) failed = 1;
-  if(failed) { fs_unlink(tmp); return -1; }
-  return fs_rename(tmp, path);
+  if(!failed && written(renameat(dir, tmp, dir, leaf))) failed = 1;
+  if(failed) {
+    int e = errno;
+    unlinkat(dir, tmp, 0);
+    errno = e;
+  }
+  close_keep(dir);
+  return failed ? -1 : 0;
 }
 
 
 int
 fs_crc32_file(const char *path, uint32_t *crc, uint64_t *size) {
-  int fd = open(path, O_RDONLY);
+  int fd = open(path, O_RDONLY | O_CLOEXEC);
   if(fd < 0) return -1;
 
   uint8_t *buf = malloc(64 * 1024);
@@ -490,23 +768,32 @@ fs_crc32_file(const char *path, uint32_t *crc, uint64_t *size) {
 }
 
 
-/* Copy plain directories and regular files (never symlinks) from src to dst,
-   e.g. to duplicate a theme. dst must not exist yet. */
+/* Copy plain directories and regular files (never symlinks) from src, inside the plugin's folder, to dst, e.g. to
+   duplicate a theme. dst must not exist yet. Each file is read from the folder that was listed, never through a
+   link. */
 static int
 copy_tree_into(const char *src, const char *dst, int links, int depth) {
   struct stat st;
 
   if(depth > RM_MAX_DEPTH) { errno = ELOOP; return -1; }   /* (deeper than anything the plugin makes: see there) */
-  if(!lstat(dst, &st)) return deny("copy over existing", dst);
+  if(!lstat(dst, &st)) return refuse("copy over existing", dst, "it is there already");
+  if(!src || !lexical_ok(src) || !within(src, BASE_DIR) || !src[strlen(BASE_DIR)]) return deny("copy from", src);
   if(fs_mkdirs(dst)) return -1;
 
-  DIR *d = opendir(src);
-  if(!d) return -1;
+  const char *leaf;
+  int above = walk_to_parent(BASE_DIR, 0, src, 0, "copy from", &leaf);
+  if(above < 0) return -1;
+  int sfd = openat(above, leaf, DIR_FLAGS);
+  close_keep(above);
+  DIR *d = sfd < 0 ? NULL : fdopendir(sfd);
+  if(!d) {
+    if(sfd >= 0) close_keep(sfd);
+    return -1;
+  }
   struct dirent *e;
   int ret = 0;
-  uint8_t *buf = malloc(64 * 1024);
-  char *paths = malloc(2 * PATH_MAX);   /* this level's two paths, from the heap too */
-  if(!buf || !paths) { free(buf); free(paths); closedir(d); return -1; }
+  char *paths = malloc(2 * PATH_MAX);   /* this level's two paths, from the heap (see RM_MAX_DEPTH) */
+  if(!paths) { closedir(d); return -1; }
 
   while(!ret && (e = readdir(d))) {
     if(!strcmp(e->d_name, ".") || !strcmp(e->d_name, "..")) continue;
@@ -520,32 +807,22 @@ copy_tree_into(const char *src, const char *dst, int links, int depth) {
       ret = -1;
       break;
     }
-    if(lstat(s, &st)) continue;
-    if(S_ISDIR(st.st_mode)) {
+    int sub = openat(dirfd(d), e->d_name, DIR_FLAGS);   /* (a folder is what opens as one: see rm_at) */
+    if(sub >= 0) {
+      close(sub);
       ret = copy_tree_into(s, t, links, depth + 1);
-    } else if(S_ISREG(st.st_mode)) {
+    } else if(errno == ENOTDIR) {
+      if(fstatat(dirfd(d), e->d_name, &st, AT_SYMLINK_NOFOLLOW) || !S_ISREG(st.st_mode)) continue;
       if(links && !fs_link(s, t)) continue;
-      if(fs_room_for((uint64_t)st.st_size)) { ret = -1; break; }   /* the console's share stays free (logged) */
-      int in = open(s, O_RDONLY);
+      if(fs_room_for((uint64_t)st.st_size)) { ret = -1; break; }   /* (the console's share stays free) */
+      int in = open_file_at(dirfd(d), e->d_name, O_RDONLY, "copy from", s);
+      struct stat ist;
       int out = in < 0 ? -1 : fs_open_write(t);
-      if(in < 0 || out < 0) ret = -1;
-      while(!ret) {
-        ssize_t n = read(in, buf, 64 * 1024);
-        if(n < 0 && errno == EINTR) continue;
-        if(n < 0) ret = -1;
-        if(n <= 0) break;
-        for(ssize_t off = 0; !ret && off < n; ) {
-          ssize_t w = write(out, buf + off, n - off);
-          if(w < 0 && errno == EINTR) continue;
-          if(w <= 0) ret = -1;
-          else off += w;
-        }
-      }
+      if(in < 0 || out < 0 || fstat(in, &ist) || copy_fd(in, out, (uint64_t)ist.st_size)) ret = -1;
       if(in >= 0) close(in);
       if(out >= 0 && close(out)) ret = -1;
     }
   }
-  free(buf);
   free(paths);
   closedir(d);
   return ret;

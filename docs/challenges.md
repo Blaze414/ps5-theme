@@ -48,6 +48,13 @@ The problems met while building this, and how each was solved. Part of the [PS5 
 - [Discard that could empty a theme](#discard-that-could-empty-a-theme)
 - [Timers that broke when the clock changed](#timers-that-broke-when-the-clock-changed)
 - [A console that didn't wake (again)](#a-console-that-didnt-wake-again)
+- [A check and a write that were two lookups](#a-check-and-a-write-that-were-two-lookups)
+- [Failures that looked like results](#failures-that-looked-like-results)
+- [Empty folders the system removed at rest mode](#empty-folders-the-system-removed-at-rest-mode)
+- [Rests in a row taken for a crash loop](#rests-in-a-row-taken-for-a-crash-loop)
+- [Views left up after every rest](#views-left-up-after-every-rest)
+- [An SVG check that looked for words](#an-svg-check-that-looked-for-words)
+- [A manager anyone on the network could open](#a-manager-anyone-on-the-network-could-open)
 - [Small things that confused people](#small-things-that-confused-people)
 - [Testing without the console](#testing-without-the-console)
 
@@ -769,7 +776,7 @@ console: 66 folders, 217 overlays, and rest mode fine.
 ## Applies that took half a minute
 
 Applying the same theme again took 36 seconds. To see where, 1.77 added the
-time of each step to the apply's line in Activity, and the console's own log
+time of each step to the apply's line in the log, and the console's own log
 then showed three causes, each found from the line before:
 
 - **12 seconds waiting on overlays the home screen never lets go of.** It
@@ -833,7 +840,7 @@ answer from the console to arrive at the wrong moment:
 - **Leaving the editor while a styling run went on:** each step wrote to the
   theme open at that moment, so the rest of the run went into whichever
   theme was opened next. Now another theme doesn't open while the page is
-  writing into one (the library and Activity do).
+  writing into one (the library and Settings do).
 - **Going back to the library as a theme opened:** the editor appeared over
   it. **Closing Mix and match while it loaded:** an error. **Closing and
   opening the Preview quickly:** it could keep the first one's font.
@@ -911,6 +918,185 @@ has finished making it. The home screen's own views still go in as soon as
 it runs, as it reads the game icons as it starts. Confirmed on the console:
 three rests in a row, the last a minute after the second, each woke, the two
 apps covered 2 to 3 seconds after they appeared.
+
+## A check and a write that were two lookups
+
+A review pointed out that the write guard checked one thing and wrote to
+another. It resolved the deepest existing folder of a path, checked that it
+was inside the plugin's folder, then opened the path again to write. Between
+the two, a folder on the way could be swapped for a link to anywhere, and the
+write would follow it: `O_NOFOLLOW` protects only the last part of a path.
+Only something else running on the console could make that swap, but the
+guard exists precisely so that nothing depends on that. A test proved the
+race real: one thread swapping a folder for a link to a folder outside, four
+writing through it with the guard's functions. Against the old guard, in 15
+seconds, four files were made outside and a file placed there was deleted.
+**Solution (1.88):** the folder is opened from the plugin's folder down, one
+part at a time, never through a link, and
+the write is made relative to that open folder (`openat`, `renameat`,
+`unlinkat`), so there is no second lookup to fool. Deleting a folder walks it
+the same way. The same gap was closed where files are read and then used: a
+theme's file is staged only if it is the very file its check passed
+(identity compared on the open file), and an overlay's folder is compared
+with the one built after it is mounted. Against the new guard the same test
+made about 280,000 writes, renames and deletes with nothing outside touched;
+it runs on every push (`tests/fsguard/`).
+
+## Failures that looked like results
+
+The new write guard of the 1.81 to 1.84 test builds passed every test, and on
+the console no new theme could be made. 1.82 said "a folder on the way is
+another filesystem", 1.83 "theme.ini: not a plain file", 1.84 nothing at all.
+The console's `/data` was blamed first: 1.83 stopped trusting device numbers,
+and 1.84 checked at start how folders made relative to an open folder behave,
+making them by name where they looked wrong. That check passed on the
+console, and new themes still failed, which pointed elsewhere.
+
+The cause was the SDK's libc. A few of its functions, among them every call
+relative to an open folder (`openat`, `mkdirat`, `fstatat`, `renameat`,
+`unlinkat`, `linkat`, `symlinkat`), make the system call themselves and return
+whatever the kernel hands back. On a failure that is the error number, as if
+it were the result, and `errno` stays as it was. `openat` of the new theme's
+folder, not there yet, returned 2 ("no such file"), which reads as open file
+number 2, and the guard walked on into it. Hence another filesystem (file 2's),
+"not a plain file", and a folder that was never made. A computer's libc
+reports failures as POSIX says, so the tests never saw it. The first test build
+didn't either, because none of its calls failed. The same functions explain a
+reason the log had given since 1.80: "hard links aren't available here (No
+such file or directory)", which was a left-over `errno`, not the reason. A
+failure taken for an open file could also close or write to another file the
+plugin had open. On the console it closed the plugin's own lock, so the fix,
+sent as an update, took the running copy for one too old to hand over and
+needed a restart. These were test builds on one console, never released.
+
+**Solution (1.88):** on the PS5 those calls go through the plugin's own
+(`src/platform_ps5.c`), which report a failure as -1 with `errno`, as
+libkernel's own do. The build disassembles the plugin and fails if anything
+calls one of the SDK's (`tools/check_syscalls.py`). Run on 1.84, it names 48
+such places. What 1.83 and 1.84 changed for a console that wasn't at fault
+was undone: folders are made relative to the open folder again, a file's type
+is checked through its open file, and a staged file's identity includes its
+device. Two changes stayed because they are right either way. A folder is
+deleted only when the mount table shows nothing mounted inside it (a test
+mounts a folder inside a theme and tries to delete it). And a folder is
+whatever opens as one, not what its type says.
+
+## Empty folders the system removed at rest mode
+
+Twice on 4 November the console went into rest mode and didn't come back:
+the home screen closed, and no new one started. The kernel log
+(`ps5-klog.elf`, started while it hung) showed the system trying to start it
+every few seconds, each time failing at its first view: "Mount failed …
+target=/user/bgft … error=0x80020002", no such folder. `/user/bgft` was gone,
+and so was every other empty folder at the top of `/user` and in
+`/user/temp`: `common`, `priv`, `sshared`, `lost+found`, `fsroot_temp` and
+more. Folders with something in them were all there, and so was everything
+in `/data`. A restart made the missing folders again, and the console
+started normally.
+
+The likely cause is the one 1.44 met in another form (no game or app
+starting until a restart, CE-105733-9). When the home screen exits, the
+system takes its sandbox down. An overlay of ours still inside one of that
+sandbox's views of `/user` keeps the system from taking that view down, and
+its cleanup of the sandbox's empty folders then reaches the real `/user`
+through it. The last step wasn't seen directly: the log tool started after
+it. Since 1.46 the plugin has taken its overlays out the moment the home
+screen's process is gone, but the system starts on the sandbox at that same
+moment, so it is a race. 115 overlays took up to a second, one after another,
+and the two hangs came at 939 and 1,001 ms. Earlier rests had been won.
+
+**Narrowed in 1.88:** the plugin acts as the home screen's exit begins (the
+kernel marks a process that is winding down; it is checked every 10 ms),
+rather than once the process is gone. It takes its overlays out four at a
+time, those inside views of folders the system can write first (`/user`,
+`/original_user`, `/system_ex`, `/mnt/rnps`), and takes out what was still in
+use once the process is gone. (Since 1.89 they come out in the order the
+system takes the views down: see [Views left up after every
+rest](#views-left-up-after-every-rest).) If no home screen starts within 20 seconds, the
+log says what was left behind and whether `/user/bgft` is there. A rest with
+the kernel log running shows how far ahead of the system the overlays come
+out; until that is measured on more consoles, the safe way into rest mode is
+with **No theme**.
+
+On 5 November, six rests in a row on the console all woke, with every empty
+folder still there: the overlays were out 319 to 416 ms after the home
+screen's exit began. On the one rest where the log gave the process's end,
+it came at 321 ms, two milliseconds after the last of 106 overlays was out,
+and one it still had open came out then. 1.88 logged the process's end
+after every rest, but looked for it only once the overlays were out, so its
+figure wasn't the margin. Since 1.89 the plugin looks between overlays: "ShellUI
+gone 350 ms after its exit began, 30 ms after ours were out" gives the
+margin, and "before ours were all out" says the system got there first.
+
+## Rests in a row taken for a crash loop
+
+The same six rests, the last ones 30 seconds apart, ended with the theme
+taken down at the fifth: "the system app NPXS40087 restarted 3 times within
+60 s, as when it crashes on start". Each rest closes the home screen and
+starts the next in a new sandbox, and the crash guard (see [A guard that took
+down every theme](#a-guard-that-took-down-every-theme)) counts new sandboxes.
+**Solution (1.88):** a home screen that was up 20 seconds or more before it
+closed was in use, and rest mode only follows one that was: its restart
+starts the count again. On the console 1.88 kept the theme through eight
+rests, seven of them about 28 seconds apart, but the home screens were up 24
+to 28 seconds: 4 seconds above the cutoff. 1.89 lowers it to 15 seconds. One crashing as it starts never gets that far: on the
+console it was replaced every 9 seconds (1.31). The log says how long each
+home screen was up ("; up 30 s"). A host test rests five times in 15 seconds
+and keeps the theme, then has the home screen close as it starts and sees the
+theme come down at the third; with the old count it fails at the third rest.
+The cost: a loop in which the home screen stays up 15 seconds or more each
+time is no longer caught. The one seen, once a minute (1.39), came from
+overlays forced off, which the plugin no longer does.
+
+## Views left up after every rest
+
+The same eight rests on 1.88 left about five more views of themable folders
+in the console's mount table each time. The table showed why. The system
+takes a sandbox down newest view first, and a view with an overlay of ours
+still in it as it gets there stays up until the console restarts. The last
+views it makes are the home screen's of `/mnt/rnps`, and those of
+`/system/vsh_asset` and `/system_ex/vsh_asset` in the sandboxes of
+`NPXS40101` and `NPXS40102`, two apps that close and start again with the
+home screen. The plugin took its overlays out newest first by when it had
+made them, so its oldest, in `/mnt/rnps`, came out last, after the system
+had been there; those in the two apps' sandboxes it never took out. The
+views are read-only, so nothing could be written through them, but each rest
+left more behind. A rest with the theme down left only each sandbox's view
+of the console's data folder, which every old sandbox keeps, also of apps the
+plugin never touches.
+
+**Solution (1.89):** the overlays come out in the order the system takes the
+views down, those inside the newest view first, and the two apps' with the
+home screen's. Five seconds after each rest the log says whether the system
+took those sandboxes down, or which of its views stayed. A host test checks
+the order (`t_overlays_come_out_newest_view_first`); the console has the last
+word.
+
+## An SVG check that looked for words
+
+The check for SVG pictures refused a file containing `<script`,
+`javascript:`, an `http` link and a few other words. A review pointed out
+that a list of words isn't a parser: XML has namespaces, entities, character
+references and spellings a list doesn't foresee. **Solution (1.88):** a
+small parser that accepts only what the console's own SVG pictures use, and
+refuses everything else by name (`src/svg.c`). To find that subset, all 1,092
+SVG pictures of 13.42 were read (on a copy on a computer, and over FTP,
+read-only); every one passes, and so does every icon the manager makes from
+them. 54 hostile files, among them `&#106;avascript:`, an XHTML namespace,
+`<set>` changing a link, `URL(` in capitals and CSS escapes, are all refused,
+in the host tests and the fuzzer's seeds.
+
+## A manager anyone on the network could open
+
+Anyone on the network could open the manager, change themes and read the
+log, and a web page could reach it through DNS rebinding (its own name made
+to point at the console), which the manager's header check doesn't stop.
+**Solution (1.88):** the manager answers only devices on the console's own
+network, refuses requests that name the console by an internet name, and by
+default opens only on devices you allow: once, with a code the console shows
+(see [How it works](how-it-works.md#who-can-open-the-manager)). Any device on
+the network, or only the console, can be chosen in **Settings › Devices**. The console's
+own browser always opens it.
 
 ## Small things that confused people
 

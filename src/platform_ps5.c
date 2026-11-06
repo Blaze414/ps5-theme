@@ -1,8 +1,8 @@
 /* PS5 implementation of platform.h (ps5-payload-sdk).
 
    Module loading follows etaHEN's own spawned services: the libraries they
-   link at load time (SystemService, UserService, Sysmodule, AppInstUtil) are
-   linked here too, and their functions are looked up in that inherited scope.
+   link at load time (SystemService, UserService, Sysmodule, AppInstUtil,
+   Notification) are linked here too, and their functions are looked up in that inherited scope.
    Nothing is ever dlopen()ed: loading a system module again from a spawned
    process can hang and block the dynamic linker for every thread.
    Functions are never called through direct imports, so an export missing on
@@ -10,6 +10,7 @@
 
 #include <dlfcn.h>
 #include <errno.h>
+#include <stdarg.h>
 #include <stddef.h>
 #include <fcntl.h>
 #include <pthread.h>
@@ -23,6 +24,8 @@
 
 #include <sys/event.h>
 #include <sys/mount.h>
+#include <sys/stat.h>
+#include <sys/syscall.h>
 #include <sys/user.h>
 #include <sys/thr.h>
 #include <sys/socket.h>
@@ -33,8 +36,76 @@
 #include <ps5/kernel.h>
 #include <ps5/klog.h>
 
+#include "config.h"
+#include "log.h"
 #include "platform.h"
-#include "theme.h"
+
+
+/* ---- system calls with their failures said (see the end of platform.h) ----
+
+   A system call made here as libkernel makes its own: the number in rax, the arguments in rdi, rsi, rdx, r10, r8 and
+   r9. The kernel says a failure with the carry flag, rax then holding the error number, returned as its negative
+   (the SDK's own libc returns it as it is, as if it were a result). Made from the payload's own code, as the SDK's
+   libc makes them: the SDK's start-up allows that. */
+__asm__(".pushsection .text.ps5_syscall,\"ax\",@progbits\n"
+        ".globl ps5_syscall\n"
+        ".hidden ps5_syscall\n"
+        ".type ps5_syscall,@function\n"
+        "ps5_syscall:\n"
+        "  movq %rdi, %rax\n"
+        "  movq %rsi, %rdi\n"
+        "  movq %rdx, %rsi\n"
+        "  movq %rcx, %rdx\n"
+        "  movq %r8, %r10\n"
+        "  movq %r9, %r8\n"
+        "  movq 8(%rsp), %r9\n"
+        "  syscall\n"
+        "  jnc 1f\n"
+        "  negq %rax\n"
+        "1:\n"
+        "  ret\n"
+        ".size ps5_syscall, .-ps5_syscall\n"
+        ".popsection\n");
+long ps5_syscall(long n, long a1, long a2, long a3, long a4, long a5, long a6);
+
+/* -1 with errno for a failure (a negative error number), else the result. */
+static long
+said(long r) {
+  if(r < 0) {
+    errno = (int)-r;
+    return -1;
+  }
+  return r;
+}
+
+/* Each kept a function of its own (never inlined), so tools/check_syscalls.py can tell that only these make the call. */
+#define WRAPPER __attribute__((noinline))
+
+WRAPPER int
+ps5_openat(int dir, const char *path, int flags, ...) {
+  int mode = 0;
+  if(flags & O_CREAT) {
+    va_list ap;
+    va_start(ap, flags);
+    mode = va_arg(ap, int);
+    va_end(ap);
+  }
+  return (int)said(ps5_syscall(SYS_openat, dir, (long)path, flags, mode, 0, 0));
+}
+
+WRAPPER int ps5_mkdirat(int dir, const char *path, mode_t mode) { return (int)said(ps5_syscall(SYS_mkdirat, dir, (long)path, mode, 0, 0, 0)); }
+WRAPPER int ps5_fstatat(int dir, const char *path, struct stat *st, int flags) { return (int)said(ps5_syscall(SYS_fstatat, dir, (long)path, (long)st, flags, 0, 0)); }
+WRAPPER int ps5_renameat(int from_dir, const char *from, int to_dir, const char *to) { return (int)said(ps5_syscall(SYS_renameat, from_dir, (long)from, to_dir, (long)to, 0, 0)); }
+WRAPPER int ps5_unlinkat(int dir, const char *path, int flags) { return (int)said(ps5_syscall(SYS_unlinkat, dir, (long)path, flags, 0, 0, 0)); }
+WRAPPER int ps5_linkat(int from_dir, const char *from, int to_dir, const char *to, int flags) { return (int)said(ps5_syscall(SYS_linkat, from_dir, (long)from, to_dir, (long)to, flags, 0)); }
+WRAPPER int ps5_symlinkat(const char *target, int dir, const char *path) { return (int)said(ps5_syscall(SYS_symlinkat, (long)target, dir, (long)path, 0, 0, 0)); }
+WRAPPER ssize_t ps5_readlink(const char *path, char *buf, size_t size) { return (ssize_t)said(ps5_syscall(SYS_readlink, (long)path, (long)buf, (long)size, 0, 0, 0)); }
+WRAPPER int ps5_statfs(const char *path, struct statfs *sf) { return (int)said(ps5_syscall(SYS_statfs, (long)path, (long)sf, 0, 0, 0, 0)); }
+WRAPPER int ps5_getfsstat(struct statfs *buf, long size, int mode) { return (int)said(ps5_syscall(SYS_getfsstat, (long)buf, size, mode, 0, 0, 0)); }
+WRAPPER int ps5_nmount(struct iovec *iov, unsigned int n, int flags) { return (int)said(ps5_syscall(SYS_nmount, (long)iov, n, flags, 0, 0, 0)); }
+WRAPPER int ps5_unmount(const char *dir, int flags) { return (int)said(ps5_syscall(SYS_unmount, (long)dir, flags, 0, 0, 0, 0)); }
+WRAPPER int ps5_thr_self(long *id) { return (int)said(ps5_syscall(SYS_thr_self, (long)id, 0, 0, 0, 0, 0)); }
+WRAPPER int ps5_thr_set_name(long id, const char *name) { return (int)said(ps5_syscall(SYS_thr_set_name, id, (long)name, 0, 0, 0, 0)); }
 
 
 typedef struct notify_request {
@@ -106,6 +177,61 @@ plat_notify(const char *msg) {
   memset(&req, 0, sizeof(req));
   snprintf(req.message, sizeof(req.message), "%s", msg);
   sceKernelSendNotificationRequest(0, &req, sizeof(req), 0);
+}
+
+
+/* The system's notification service (sceNotificationSend, libSceNotification, linked at load time as the others),
+   with the toast the system and etaHEN use: an icon, a line, a second line. Looked up once; missing on a firmware, or
+   refusing, the plain notification instead. */
+#define TOAST_USER_SYSTEM 0xFE
+static int (*toast_send)(int user, _Bool logged, const char *payload);
+static pthread_once_t toast_once = PTHREAD_ONCE_INIT;
+static void toast_lookup(void) { toast_send = lookup("libSceNotification.sprx", "sceNotificationSend"); }
+
+static void
+json_text(char *out, size_t size, const char *s) {
+  size_t o = 0;
+  for(; *s && o + 8 < size; s++) {
+    unsigned char c = (unsigned char)*s;
+    if(c == '"' || c == '\\') { out[o++] = '\\'; out[o++] = (char)c; }
+    else if(c < 0x20) o += (size_t)snprintf(out + o, size - o, "\\u%04x", c);
+    else out[o++] = (char)c;
+  }
+  out[o] = 0;
+}
+
+void
+plat_toast(const char *title, const char *detail, const char *icon) {
+  static unsigned seq;
+  pthread_once(&toast_once, toast_lookup);
+  if(!detail) detail = "";
+  char *json = toast_send && icon && !access(icon, R_OK) ? malloc(6144) : NULL;
+  if(json) {
+    char t[512], d[2048], url[256];
+    struct timespec ts;
+    struct tm tm;
+    json_text(t, sizeof(t), title);
+    json_text(d, sizeof(d), detail);
+    json_text(url, sizeof(url), icon);
+    clock_gettime(CLOCK_REALTIME, &ts);
+    gmtime_r(&ts.tv_sec, &tm);
+    unsigned id = (unsigned)(ts.tv_sec % 100000) * 1000 + __atomic_add_fetch(&seq, 1, __ATOMIC_RELAXED) % 1000;
+    int n = snprintf(json, 6144,
+      "{\"rawData\":{\"viewTemplateType\":\"InteractiveToastTemplateB\",\"channelType\":\"Downloads\","
+      "\"useCaseId\":\"IDC\",\"toastOverwriteType\":\"No\",\"isImmediate\":true,\"priority\":100,"
+      "\"viewData\":{\"icon\":{\"type\":\"Url\",\"parameters\":{\"url\":\"%s\"}},\"message\":{\"body\":\"%s\"}%s%s%s},"
+      "\"platformViews\":{\"previewDisabled\":{\"viewData\":{\"icon\":{\"type\":\"Predefined\",\"parameters\":{\"icon\":\"download\"}},"
+      "\"message\":{\"body\":\"%s\"}}}}},"
+      "\"createdDateTime\":\"%04d-%02d-%02dT%02d:%02d:%02d.%03ldZ\",\"localNotificationId\":\"%u\"}",
+      url, t, *d ? ",\"subMessage\":{\"body\":\"" : "", d, *d ? "\"}" : "", t,
+      tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday, tm.tm_hour, tm.tm_min, tm.tm_sec, ts.tv_nsec / 1000000, id);
+    int rc = n > 0 && n < 6144 ? toast_send(TOAST_USER_SYSTEM, 1, json) : -1;
+    free(json);
+    if(rc >= 0) return;
+  }
+  char msg[2600];
+  snprintf(msg, sizeof(msg), "%s%s%s", title, *detail ? ". " : "", detail);
+  plat_notify(msg);
 }
 
 
@@ -304,6 +430,25 @@ plat_process_start(int pid) {
 }
 
 
+#ifndef P_WEXIT
+#define P_WEXIT 0x02000   /* FreeBSD's "working on exiting" (sys/proc.h) */
+#endif
+
+int
+plat_process_exiting(int pid) {
+  int mib[4] = {CTL_KERN, KERN_PROC, KERN_PROC_PID, pid};
+  static _Thread_local char buf[8192];
+  size_t len = sizeof(buf);
+  const struct kinfo_proc *p = (const struct kinfo_proc *)buf;
+  size_t need = offsetof(struct kinfo_proc, ki_stat) + 1;
+  if(pid <= 0) return 1;
+  if(sysctl(mib, 4, buf, &len, NULL, 0)) return errno == ESRCH;   /* (anything else: not known, so not yet) */
+  if(!len) return 1;
+  if(len < need || p->ki_structsize < (int)need || p->ki_pid != pid) return 0;
+  return p->ki_stat == SZOMB || (p->ki_flag & P_WEXIT) != 0;
+}
+
+
 /* The mount table in a buffer of the caller's (getmntinfo keeps one
    buffer for the whole process, and the ShellUI guard reads the table
    while the main thread may). Free it; NULL with *n < 0 on failure. */
@@ -324,24 +469,54 @@ mount_table(int *n) {
 }
 
 
+static int
+is_ours(const struct statfs *m, const char *stage_prefix) {
+  return !strcmp(m->f_fstypename, "nullfs") && !strncmp(m->f_mntfromname, stage_prefix, strlen(stage_prefix));
+}
+
+/* Is mount point `outer` the folder `on`, or one holding it? */
+static int
+holds(const char *outer, const char *on) {
+  size_t n = strlen(outer);
+  return !strncmp(outer, on, n) && (on[n] == 0 || on[n] == '/' || (n && outer[n - 1] == '/'));
+}
+
 int
-plat_our_top_mounts(const char *stage_prefix, const char *under, char (*out)[1024], int max, int *buried) {
+plat_our_top_mounts(const char *stage_prefix, const char *under, char (*out)[1024], int max, int *buried, int *view) {
   int n, count = 0;
   *buried = 0;
   struct statfs *sf = mount_table(&n);   /* in the order mounts were made: a later one at a point is over it */
   if(!sf) return -1;
   for(int i = 0; i < n && count < max; i++) {
-    if(strcmp(sf[i].f_fstypename, "nullfs") || strncmp(sf[i].f_mntfromname, stage_prefix, strlen(stage_prefix)) ||
-       strncmp(sf[i].f_mntonname, under, strlen(under))) {
+    if(!is_ours(&sf[i], stage_prefix) || strncmp(sf[i].f_mntonname, under, strlen(under))) continue;
+    int top = 1;   /* nothing but ours over it */
+    for(int k = i + 1; k < n && top; k++) top = strcmp(sf[k].f_mntonname, sf[i].f_mntonname) || is_ours(&sf[k], stage_prefix);
+    if(!top) {
+      (*buried)++;
       continue;
     }
-    int top = 1;   /* nothing but ours over it */
-    for(int k = i + 1; k < n && top; k++) {
-      top = strcmp(sf[k].f_mntonname, sf[i].f_mntonname) ||
-            (!strcmp(sf[k].f_fstypename, "nullfs") && !strncmp(sf[k].f_mntfromname, stage_prefix, strlen(stage_prefix)));
+    if(view) {
+      view[count] = -1;
+      for(int k = i - 1; k >= 0 && view[count] < 0; k--) {
+        if(!is_ours(&sf[k], stage_prefix) && holds(sf[k].f_mntonname, sf[i].f_mntonname)) view[count] = k;
+      }
     }
-    if(top) snprintf(out[count++], 1024, "%s", sf[i].f_mntonname);
-    else (*buried)++;
+    snprintf(out[count++], 1024, "%s", sf[i].f_mntonname);
+  }
+  free(sf);
+  return count;
+}
+
+int
+plat_others_under(const char *stage_prefix, const char *under, char (*out)[1024], int max, int *ours) {
+  int n, count = 0;
+  *ours = 0;
+  struct statfs *sf = mount_table(&n);
+  if(!sf) return -1;
+  for(int i = 0; i < n; i++) {
+    if(strncmp(sf[i].f_mntonname, under, strlen(under))) continue;
+    if(is_ours(&sf[i], stage_prefix)) (*ours)++;
+    else if(count++ < max) snprintf(out[count - 1], 1024, "%s", sf[i].f_mntonname);
   }
   free(sf);
   return count;
@@ -512,6 +687,21 @@ plat_set_name(const char *name) {
 
 
 int
+plat_mounted_under(const char *path) {
+  int n, found = 0;
+  size_t len = strlen(path);
+  struct statfs *sf = mount_table(&n);
+  if(!sf) return -1;
+  for(int i = 0; i < n && !found; i++) {
+    const char *on = sf[i].f_mntonname;
+    found = !strncmp(on, path, len) && (on[len] == 0 || on[len] == '/');
+  }
+  free(sf);
+  return found;
+}
+
+
+int
 plat_mount_count(void) {
   return getfsstat(NULL, 0, MNT_NOWAIT);
 }
@@ -526,6 +716,22 @@ plat_dump_mounts(FILE *out) {
             sf[i].f_mntonname, (unsigned long long)sf[i].f_flags);
   }
   free(sf);
+}
+
+
+/* The kernel's own generator (FreeBSD's KERN_ARND, at most 256 bytes a call). The SDK's arc4random would fall back
+   to the clock if it couldn't reach it, which is no source for a key. */
+int
+plat_random(void *buf, size_t n) {
+  int mib[2] = { CTL_KERN, KERN_ARND };
+  uint8_t *p = buf;
+  while(n) {
+    size_t got = n > 256 ? 256 : n;
+    if(sysctl(mib, 2, p, &got, NULL, 0) || !got) return -1;
+    p += got;
+    n -= got;
+  }
+  return 0;
 }
 
 

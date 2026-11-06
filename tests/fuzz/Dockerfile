@@ -12,7 +12,7 @@ COPY tests/host/at9_fixture.js tests/host/rco_fixture.py tests/host/font_fixture
 COPY tests/fuzz/ tests/fuzz/
 RUN clang -std=gnu11 -D_GNU_SOURCE -DFUZZING_BUILD_MODE_UNSAFE_FOR_PRODUCTION -g -O1 -fno-omit-frame-pointer \
       -fsanitize=fuzzer,address,undefined -fno-sanitize-recover=all -Isrc -Wno-unused-function \
-      -o /fuzz tests/fuzz/fuzz.c src/verify.c src/texture.c src/zstd.c src/atrac9.c src/rco.c src/font.c src/png.c src/inflate.c src/fsguard.c src/log.c \
+      -o /fuzz tests/fuzz/fuzz.c src/verify.c src/texture.c src/zstd.c src/atrac9.c src/rco.c src/font.c src/png.c src/inflate.c src/fsguard.c src/log.c src/svg.c \
       tests/fuzz/stubs.c -lpthread -lm \
  && python3 tests/fuzz/seeds.py /stock /corpus
 

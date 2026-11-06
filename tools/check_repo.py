@@ -53,10 +53,9 @@ def check_version():
     tests = read("tests/host/test_e2e.py")
     found = {
         "Makefile VERSION": re.search(r"^VERSION\s*:=\s*(\S+)", read("Makefile"), re.M),
-        "src/theme.h PLUGIN_VERSION": re.search(r'#define PLUGIN_VERSION "([^"]+)"', read("src/theme.h")),
+        "src/config.h PLUGIN_VERSION": re.search(r'#define PLUGIN_VERSION "([^"]+)"', read("src/config.h")),
         "README.md": re.search(r"^Version (\d+\.\d+)\. ", read("README.md"), re.M),
         "tests: the status's version": re.search(r's\["version"\] == "([\d.]+)"', tests),
-        "tests: the start-up line": re.search(r'"ps5-theme ([\d.]+) starting"', tests),
     }
     versions = {k: m.group(1) for k, m in found.items() if m}
     problems = [f"{k}: version not found" for k, m in found.items() if not m]

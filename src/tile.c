@@ -12,8 +12,11 @@
 
 #include <sys/stat.h>
 
+#include "tile.h"
+#include "config.h"
+#include "fsguard.h"
+#include "log.h"
 #include "platform.h"
-#include "theme.h"
 
 
 #define STR_(x) #x

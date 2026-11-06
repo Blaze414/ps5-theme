@@ -10,7 +10,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "theme.h"
+#include "media.h"
 
 
 #define ZSTD_MAGIC        0xFD2FB528u

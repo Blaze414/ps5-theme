@@ -7,7 +7,7 @@
 #include <strings.h>
 #include <unistd.h>
 
-#include "theme.h"
+#include "media.h"
 
 
 #define PROBE_BYTES (256 * 1024)

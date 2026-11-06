@@ -33,7 +33,7 @@
 
 #include <sys/stat.h>
 
-#include "theme.h"
+#include "media.h"
 
 
 #define RCO_MAGIC        "RCOF"

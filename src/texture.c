@@ -20,7 +20,8 @@
 
 #include <sys/stat.h>
 
-#include "theme.h"
+#include "fsguard.h"
+#include "media.h"
 
 
 #define MAX_COMPRESSED  (128ull << 20)

@@ -1,6 +1,8 @@
 # Every push to main and every pull request: the end-to-end tests (with real
-# mounts, with mounts emulated, and under ThreadSanitizer), the codec
-# cross-checks, a short fuzz of every parser, the PS5 build with its files
+# mounts, with mounts emulated, and under ThreadSanitizer), the write guard
+# raced by a thread swapping folders for links, the codec
+# cross-checks, a short fuzz of every parser, the PS5 build (which fails if the
+# plugin calls one of the SDK's system call stubs that hide a failure) with its files
 # attached to the run, a second build from nothing that must match it byte for
 # byte, and the repository checks (docs links, the version everywhere).
 name: CI
@@ -31,11 +33,10 @@ jobs:
       - uses: actions/checkout@v4
       - name: Run the tests against the plugin on a fake console
         run: |
-          if [ "${{ matrix.mode }}" = full ]; then
-            tests/host/run.sh               # a privileged container: real read-only mounts
-          else
-            tests/host/run.sh emulated      # inside a build step: mounts emulated
-          fi
+          case "${{ matrix.mode }}" in
+            full)     tests/host/run.sh ;;            # a privileged container: real read-only mounts
+            emulated) tests/host/run.sh emulated ;;   # inside a build step: mounts emulated
+          esac
 
   tsan:
     name: End-to-end tests (ThreadSanitizer)
@@ -49,6 +50,15 @@ jobs:
         run: sudo sysctl -w vm.mmap_rnd_bits=28
       - name: The whole suite, stopping at the first data race between threads
         run: tests/host/run.sh tsan
+
+  guard:
+    name: Write guard against swapped folders
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Writes through a folder swapped for a link never land outside
+        run: SECONDS_TO_RACE=30 tests/fsguard/run.sh
 
   codecs:
     name: Codec cross-checks (ATRAC9, zstd)
@@ -114,9 +124,10 @@ jobs:
           if-no-files-found: error
 
   checks:
-    name: Docs links and version
+    name: Docs links, version and includes
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4
       - run: python3 tools/check_repo.py
+      - run: python3 tools/check_includes.py

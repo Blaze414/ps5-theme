@@ -8,7 +8,7 @@ Every page and control of the web manager. Part of the [PS5 Themes](../README.md
 - [Creating a theme](#creating-a-theme)
 - [The edit page](#the-edit-page)
 - [Applying](#applying)
-- [Activity](#activity)
+- [Settings](#settings)
 - [Messages](#messages)
 - [When the console's storage is nearly full](#when-the-consoles-storage-is-nearly-full)
 - [On a phone, and on the console](#on-a-phone-and-on-the-console)
@@ -26,29 +26,35 @@ drawings: on your console you see the real ones.
 
 The library is the home page.
 
-- **Cards:** each theme shows its preview picture, number of files, music
-  length, and "unsaved changes" when it has some. The firmware shows only
+- **Cards:** each theme shows its home screen as your console would show it
+  with the theme (since 1.89, [drawn as the Preview draws it](#preview-picture)),
+  its number of files, music length, and "unsaved changes" when it has some. The firmware shows only
   when it isn't this console's ("Any firmware", or **Other firmware** with
   what to do about it). The applied theme is outlined and tagged **Applied**.
   Selecting a card's picture opens the theme, as **Edit** does.
-- **Card buttons:** **Apply** (or **Apply again**), **Edit**, **Duplicate**,
+- **Card buttons:** **Apply** (**Apply again** for the one applied, **Save and
+  apply** with unsaved changes), **Edit**, **Duplicate**,
   **Export** and **Delete**. Delete asks for a second press ("Press again to
   delete", for 6 seconds). A button that can't be used says why: an empty
   theme, another firmware, or (for Delete) the theme being applied. A theme
   holding folders nested deeper than any of the console's (put there by hand
   over FTP, or a broken copy) isn't deleted at all, rather than in part: the
   message says to delete it over FTP (since 1.77).
-- **No theme card:** **Remove the theme** removes every overlay and keeps the
-  theme from coming back at the next start.
-- **Top bar:** shows the console's firmware and the theme applied ("Theme
-  None" without one), or what is being applied right now.
-- **Banner:** under the title, the result of the last apply, such as "16
-  files checked on the console".
-- **Import theme:** imports a theme `.zip`. You can also drop a `.zip` or a
+- **No theme card:** **Apply** removes every overlay and keeps the theme
+  from coming back at the next start (the button was **Remove the theme**
+  before 1.89).
+- **Top bar:** the theme applied ("No theme applied" without one), or what is
+  being applied right now, and the gear that opens [Settings](#settings)
+  (since 1.88; Activity and Access were tabs of their own before).
+- **Banner:** under the title, what to do to see all of the theme just
+  applied (rest mode for a new font, say), or why an apply failed or went
+  through only partly. Since 1.89 a clean apply is said once, by its message
+  ("Night applied."), and the number of files checked is left to the log.
+- **Import:** imports a theme `.zip`. You can also drop a `.zip` or a
   folder anywhere on the page.
-- **New theme** and **Mix and match** open a form above the cards; Escape
-  closes it.
-- **Mix and match** (with two themes or more, since 1.65): see below.
+- **New theme** opens [a screen of its own](#creating-a-theme) (since 1.89;
+  before, a panel above the cards): a name, then how it starts, one of the
+  ways being Mix and match. **‹ Library**, **Cancel** or Escape closes it.
 
 The page refreshes by itself every few seconds, and every second while a
 theme is being applied, so it stays correct even when you use it from two
@@ -74,7 +80,7 @@ while it was still reading stops reading and says nothing. While the page is
 still writing into a theme (styling its icons, an upload, a save), another
 theme doesn't open: each step writes to the theme that is open as it goes,
 and the rest of the run would have gone into the other one. The library and
-Activity open meanwhile. When the
+Settings open meanwhile. When the
 console doesn't answer the status within 10 seconds (it went into rest mode
 as it answered), the page asks again at the next look instead of waiting
 for good.
@@ -85,42 +91,72 @@ for good.
 
 **Mix and match** makes a new theme from parts of the ones you have: Snoopy's
 background and icons, say, with another theme's home music and interface
-sounds and a third one's font. The themes it takes from stay as they are.
+sounds and a third one's font. The themes it takes from stay as they are. It is
+one way to start a [new theme](#creating-a-theme): **Parts of several
+themes** (since 1.88; a form of its own before).
 
-- **Name** the new theme, then choose where each part comes from: one of your
-  themes, or **Console's own** (that part isn't changed). **Start from** fills
-  every part from one theme, to change a few of them afterwards.
+- **Each part is a row of pictures** (since 1.88): the console's own first,
+  then each of your themes that has something of that part, showing that
+  theme's own picture of it (its background, its icons, a game's icon from
+  it), or a sign of what it is for sounds, music, fonts and the interface
+  file's parts, with how much it has ("3 tiles", "1 area"). Choose one; **Console's own**
+  leaves that part as it is. Before 1.88 the choices were lists of theme
+  names, so you chose a look without seeing it.
+- **Everything from** fills every part from one theme, to change a few of
+  them afterwards.
 - **The parts:** background, icons, home music (its songs, playlist and
   settings), sounds, interface sounds, fonts, the Appearance themes'
   artwork, colours, interface icons, corner shapes, home screen tiles, games
   and apps, and the rest (animations, video, textures and other images).
   Each list offers only the themes that have something of that part, and how
-  many items each has.
-- **Element by element** splits a part so each piece can come from its own
-  theme: each background area (the default background, the Game Library, a
-  tile's), each Appearance piece, each tile, game, font or sound, each
-  interface sound, colour palette or interface icon. A piece left at **As the
-  part** follows the part's choice.
+  much each has.
+- **Piece by piece** splits a part so each piece can come from its own
+  theme, again as pictures: each background area (the default background,
+  the Game Library, a tile's), each Appearance piece, each tile, game (by its
+  name), font or sound, each interface sound, colour palette or interface
+  icon. A piece left at **As above** follows the part's choice.
 - **Interface sounds, colours, interface icons and corner shapes** live in
   one interface file. Element by element reads it from each theme that has
-  one (about 39 MB each on 13.42, read once while the form is open); after
+  one (about 39 MB each on 13.42, read once while the panel is open); after
   that, only the themes that change that kind are offered. The new theme's
   interface file is made on the device you're using, each entry taken from
   its own theme.
-- **Create** makes the theme, saves it, and opens it in the editor, with the
-  sections it uses switched on and the background's, Appearance pieces' and
-  songs' own choices kept. Check it there, then apply it.
+- **The icon style goes with the icons** (since 1.88): the
+  [icon style](games-and-apps.md#one-look-for-every-icon-icon-style) of the theme most of the games', apps' and home
+  screen tiles' icons come from, if it has one. That covers its shape and
+  what is behind the icons, and its styling of games installed later. Icons
+  taken from another theme stay as that theme made them; **Style icons** in
+  the new theme puts them in the shape too.
+- **Make the theme** makes it, saves it, and opens it in the editor, with the
+  sections it uses switched on and the background's, Appearance pieces',
+  songs' and icon style's own choices kept. Check it there, then apply it.
 - Only themes for this console's firmware are offered, and parts are taken
   as each theme is now, unsaved changes included.
 
 ## Creating a theme
 
-![The new theme form](screenshots/new-theme.png)
+![The New theme screen](screenshots/new-theme.png)
 
-A theme needs only a name. **Firmware** is set to this console's firmware;
-choose **Any firmware** on the edit page for themes you share. A theme made
-for another firmware can be kept and edited but not applied, since system
-files differ between firmware versions.
+**New theme** asks for a name, and how the theme starts (since 1.88), each
+way shown as a picture. It is a screen of its own (since 1.89), with nothing
+of the library around it; leaving it goes back to where it was opened from.
+
+- **Empty:** you choose each part in the editor (called "Nothing yet"
+  before 1.89).
+- **A copy of a theme:** choose one of yours from its picture; the copy is
+  yours to change, and the theme it comes from stays as it is.
+- **Parts of several themes:** [Mix and match](#mix-and-match), with two
+  themes or more.
+
+A way that can't be used yet says why under its picture ("Make or import a
+theme first.").
+
+The name can be left empty: the new theme is called "My theme", "My mix" or
+"… copy". A new empty theme is made for this console's firmware; **Can be
+applied on other firmware**, at the bottom, makes it for any firmware, for
+themes you share (it can also be changed on the edit page). A theme made for
+another firmware can be kept and edited but not applied, since system files
+differ between firmware versions.
 
 A new theme opens on its edit page with **Start here**: choose what to
 change from the list of parts, press **Apply**, and use rest mode for what
@@ -186,19 +222,29 @@ theme's parts on the left, the part you're changing on the right.
   (a file `originals-off` in its folder) and goes with a copy of it.
 - **Export** and **Apply** (at the top of the page) act on the theme as it
   is now. They are available as soon as the theme has anything in it.
-- **Preview** shows a home screen and a Control Center drawn from the theme:
-  its background, its colours, the Appearance artwork and colours of the
-  Appearance theme you pick (those the theme has artwork for are marked ✦),
-  a changed font and up to six changed icons. Where the theme leaves
-  something as it is, the console's own is drawn (since 1.66): its default
-  home background and the Appearance themes' artwork, which the plugin
-  decodes from the console's own textures to a quarter-size picture
-  (`/api/asset/picture`, read-only), the system tiles' icons, the search,
-  settings and Control Center icons, and the SST font. Only the layout around
-  them is approximate: the real look shows after you apply the theme and use
-  rest mode. **Refresh** draws it again after a change. Closed and opened
-  again quickly, it builds from the pieces it asked for itself, in its own
-  font (since 1.77: the first one's font could be left in its place).
+- **Preview** shows the home screen and the Control Center with the theme.
+  The home screen is drawn as the console draws it (since 1.89), at its own
+  1920×1080 size, from captures of 13.42's home screen: the Games and Media
+  rows with your console's own games and apps in the order it shows them
+  (read from its app database, `/api/app-db`), each tile's icon, the
+  selected one's name and background, an app's or game's name and **Start**
+  or **Play** button, the top bar's icons and clock, and the shade the
+  console lays over the background. The positions, sizes and text baselines
+  match the captures to within a few pixels. What the theme changes is its
+  own: icons, backgrounds, pictures, the font, and the Appearance artwork of
+  the Appearance theme you pick (those it has artwork for are marked ✦);
+  the rest is the console's own, read from it as the page runs. Select a
+  tile with a click or **←** **→**; **Games** and **Media** switch rows. It
+  opens on the tile the theme's card shows. Not drawn: your profile picture
+  (a grey circle), what the Welcome, PlayStation Store and Game Library
+  tiles show below the row, and a game's activity cards. The Control Center
+  is drawn the same way (since 1.91), measured from a capture of 13.42's:
+  the home screen behind it without its artwork and darker, the palette's
+  backdrop over it, the look's top-right piece and bottom panel at the
+  console's scale, the clock, a focused **Recently created** card holding a
+  screenshot of the home screen, and the row of the console's own icons.
+  Not drawn there: the Control Center's other cards. **Refresh** reads the
+  console's rows again.
 
 ![The Preview: the theme's background, Appearance artwork, font and icons drawn on a home screen](screenshots/preview.png)
 
@@ -219,11 +265,19 @@ and shapes is read first. If one can't be read, the page says so, with
 
 ### Preview picture
 
-The picture on the theme's library card. When you add a background, a
-1280×720 picture is made from it, fitted the same way. **Choose picture**
-uses any image instead, such as a photo of your TV with the theme applied.
-**Remove picture** goes back to the background one. Preview pictures are
-kept with the theme and exported with it, but never applied to the console.
+The picture on the theme's library card: its home screen, drawn as the
+Preview draws it, at 1280×720 (since 1.89; the background alone before). It
+shows the tile whose background the theme changes, or else the game played
+last. The page draws it again a moment after each change it makes to the
+theme (a picture added or removed, **Save**, **Discard**), so the card
+follows the theme as it changes; and for a theme that has none, or one drawn
+on another day, when the library opens. An empty theme has none: its card
+says so. **Choose picture** uses any image instead, such as a photo of your
+TV with the theme applied; **Remove picture** goes back to the home screen.
+The home screen picture is kept with the theme (`home.jpg`) but not
+exported, as it shows your console's games; the one made from the
+background (`preview.jpg`) and a chosen one are. None is ever applied to
+the console, and none is a change to Save or Discard.
 
 ### Background
 
@@ -487,7 +541,7 @@ a game's icon is. Tiles are never styled by themselves: only games and apps
 are "installed later". **The theme's background** is always offered behind
 the icons; until the theme has one, it says to add one in **Background**. **Style N icons** makes them all, each from the console's own icon,
 so styling again never stacks, and written as a picture you change by hand
-is. An icon you changed by hand is styled too (since 1.67; untick **The N
+is. An icon you changed by hand is styled too (since 1.67; turn off **The N
 icons you changed by hand too** to leave them as they are): your picture
 goes in the shape, and is kept with the style first, so styling again starts
 from it, never from an icon already styled. The theme lists the titles its
@@ -520,7 +574,7 @@ open never works from an old list.
 
 An icon the style made that the page lost track of (as could happen before
 1.71 with **Remove the style** and a game not installed) counts as changed by
-hand, and with **The icons you changed by hand too** ticked, styling again
+hand, and with **The icons you changed by hand too** on, styling again
 would put the styled icon inside the shape a second time. Since 1.72 the page
 tells it apart: outside the shape it is the style's own backdrop, as the
 console keeps it. It goes back on the style's list, with a message, and is
@@ -530,7 +584,7 @@ A game or app you uninstall keeps its pictures in the theme for when it comes
 back; applying the theme leaves them out without counting it as a failure
 (since 1.66: before, the apply said "applied partly").
 
-**Style games and apps installed later** (on by default) carries the style on
+**Style ones installed later** (under **Games and apps**, on by default) carries the style on
 by itself. While the theme is applied, the plugin styles a newly installed
 game or app once its install has finished: when nothing in its folders, its
 package or its download has changed for 2 minutes (10 before 1.73), as the plugin's own
@@ -624,12 +678,19 @@ start](challenges.md#apps-that-wouldnt-start) tell how this was worked out.
 
 Your first change to a theme brings up this bar at the bottom of the page.
 
-- **Save** keeps the changes.
+- **Save** keeps the changes. If the theme is the applied one, it is applied
+  again so the console shows what you saved, with one message: "Saved. Night
+  Sky applied." (since 1.89). Not after changes the console never shows, such
+  as a switch, a placement or a song name, nor when the theme was left with
+  nothing in it (the console keeps the last one applied, and the message
+  says so).
+- **Apply** with unsaved changes reads **Save and apply**: it saves them
+  first, so the console only ever shows a saved theme (since 1.89).
 - **Discard** asks once ("Press again to discard"), then puts the theme back as
-  it was at the last save. If the theme is applied and the console shows
-  something else (you applied the changes), it is applied again to match;
-  after changes the console never showed, such as a switch, a placement or a
-  song name, it isn't (since 1.62).
+  it was at the last save. The console still shows that save, so nothing
+  else happens. If it shows the changes (put back after a restart before you
+  saved), the theme is applied again to match, with one message ("Changes
+  discarded. Night Sky applied."; since 1.62).
 
 Both say what they are doing while they work ("Saving…", "Discarding…"), and
 a message shows each step if it takes more than a moment: a choice still on
@@ -695,13 +756,80 @@ perhaps open).
 The page follows an apply for as long as the console reports progress, however
 long that takes, and says so only if the console stops answering for 3 minutes.
 
-## Activity
+## Settings
 
-![The activity log](screenshots/activity.png)
+The gear at the top right (since 1.88), where the console keeps its own: a
+list on the left, the one chosen beside it (on a phone, one after the other).
+What is set once, or looked at when something goes wrong, is here, out of the
+way of making themes.
 
-The plugin's log, newest at the bottom: what was applied, every overlay and
-the files checked through it, uploads with their checksums, and any errors in
-plain words. A crash report from a previous run appears here too. Include it
+### Notifications
+
+What the console says, and when. Each is on until you turn it off:
+
+- **When PS5 Themes starts, stops or updates:** "PS5 Themes is ready", with the
+  address to open on a phone or computer.
+- **Tips after applying:** the second line of "Theme applied", such as
+  "Put the console in rest mode to see its new game and app icons and font."
+  (one notification since 1.88, rather than one per thing to do).
+- **Progress while applying:** "Applying…", and how far a long apply has got.
+
+You're always told when a theme can't be applied or is taken down. The
+console shows these as etaHEN shows its own: the plugin's icon beside two
+lines (see [How it works](how-it-works.md#notifications)).
+
+### Devices
+
+Who can open the manager (since 1.88). The console itself always can.
+
+- **Devices you allow** (the first choice, and how it starts): the first time a
+  phone or computer opens the manager, it shows **Allow this device** instead.
+  Press **Show a code on the console**: the console shows six digits in a
+  notification, for 2 minutes. Type them and press **Allow this device**; the
+  manager opens, and opens on that device from then on. A wrong code says so;
+  after five, ask for a new one.
+- **Any device on your network**: as before 1.88, anyone on your Wi-Fi or
+  network can open it and change your themes.
+- **Only this console**: phones and computers see that the manager opens only
+  on the console. Chosen from a phone or computer, it asks you to choose it
+  again first, as that device will lose access.
+
+**Allowed devices** lists each one with its kind ("iPhone, Safari"), its
+address and when it was allowed and last used. **Forget** (press twice)
+makes it ask for a code again; forgetting the device you're on takes you back
+to **Allow this device**.
+
+Whatever the choice, the manager answers only devices on your own network,
+and only when it is opened by the console's address (`http://192.168.1.20:8095`)
+or a local name, never through a name on the internet.
+
+### Storage
+
+What the plugin keeps on the console's storage, as one bar in parts like the
+console's own storage screen, and each part with what it is:
+
+- **Your themes:** their pictures, sounds and music, and what Discard goes
+  back to.
+- **Copies of the console's folders:** what a theme is put together from
+  (never the console's own files).
+- **Ready to show:** the applied theme, and the one before it, so switching
+  back is quick.
+- **Log and diagnostics.**
+- **Copies for other firmware**, after a firmware update: never used again.
+  **Remove** (press twice) deletes them, except any an overlay still shows.
+- **Room left for themes:** what the plugin may still use; 1 GB of the
+  console's storage is always kept free.
+
+Counting takes a few seconds on the console: it reads the plugin's folders.
+
+### Log
+
+![The log](screenshots/activity.png)
+
+The plugin's log, newest at the bottom (**Activity** before 1.88): what was
+applied, every overlay and the files checked through it, uploads with their
+checksums, and any errors in plain words. A crash report from a previous run
+appears here too. **Copy** puts the whole log on the clipboard, for a report
 when you ask for help with a theme.
 
 Lines worth knowing:
@@ -722,23 +850,51 @@ Lines worth knowing:
   put a view of a folder on top of the theme's, as after a game is installed
   again. Said once; rest mode brings the theme back there.
 - **"watching ShellUI (pid 117, sandbox _003)"** and **"ShellUI exited: 19
-  overlay(s) taken out of its sandbox NPXS40087_002 in 65 ms"**: the home
-  screen starting and stopping, at rest mode. Nothing of the theme goes into
-  a new home screen until the first line (see [How it
+  overlay(s) taken out of its sandbox NPXS40087_002 and of NPXS40101_002,
+  NPXS40102_002 (closing with it) in 65 ms, as its exit began; up 312 s"**:
+  the home screen starting and stopping, at rest mode, and how long it had
+  been up. Two apps close with it, and theirs come out too (since 1.89).
+  Nothing of the theme goes into a new home screen until the first line (see
+  [How it
   works](how-it-works.md#reaching-the-home-screen-through-its-sandbox-views)).
+  **"ShellUI gone 340 ms after its exit began, 30 ms after ours were out"**:
+  when it was gone, which is when the system starts taking its sandbox down;
+  the time after ours were out is the margin. **"… before ours were all
+  out"** means the system got there first; with **"; … more overlay(s) taken
+  out"**, those it still had open until then.
+- **"5 s after the home screen exited, the system had taken down the
+  sandboxes that closed with it (…)"**: normal (since 1.89). **"… 3 of the
+  system's view(s) in the sandboxes that closed with it were still up, which
+  stay until a restart: …"** names views the system couldn't take down; they
+  are read-only and harmless, but send the log (see
+  [Challenges](challenges.md#views-left-up-after-every-rest)).
+- **"the home screen hasn't started again … s after it exited"** (an error):
+  the console isn't coming back from rest mode. It says what the plugin left
+  in the old home screen's sandbox and whether `/user/bgft` is there (see
+  [Challenges](challenges.md#empty-folders-the-system-removed-at-rest-mode)).
+  Hold the power button until it beeps twice, start the console, and send
+  the log.
 - **"icon style: styled PPSA01234's icon in theme …"** and **"icon style:
   ITEM00001 is installed again; theme … is applied again for its pictures"**:
   the plugin styling a game installed later, or putting a reinstalled game's
   pictures back. **"theme …: applied again for 2 icon(s) the manager
   styled"**: the page's own styling of new games.
 - **"… was taken down: the console's interface kept restarting with it"**:
-  the plugin took a theme off because the home screen kept crashing with it.
+  the plugin took a theme off because the home screen kept crashing with it
+  (it restarted 3 times within a minute, each time within 15 seconds of
+  starting; rest mode doesn't count, since 1.88).
   Restart the console if the home screen doesn't come back, and send the
   log.
 
+### About
+
+The plugin's version, the console's firmware, the manager's address, the room
+left for themes, the theme applied and who can open the manager: what a
+report about a problem needs.
+
 ## Messages
 
-Messages appear at the top right. One saying something went wrong stays until
+Messages appear at the bottom right, above the save bar when it shows. One saying something went wrong stays until
 you close it with its **×**, so it can be read from across the room; others
 fade after a few seconds. At most five stay. Closing or reloading the page
 while a picture or sound is being made or sent asks first, since that would

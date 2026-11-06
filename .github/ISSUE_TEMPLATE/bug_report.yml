@@ -12,7 +12,7 @@ body:
     id: release
     attributes:
       label: Release
-      description: The plugin's version (the manager's Activity page shows it as it starts).
+      description: The plugin's version (the manager's Settings › About shows it).
       placeholder: "1.80"
     validations:
       required: true
@@ -38,6 +38,6 @@ body:
   - type: textarea
     id: log
     attributes:
-      label: Activity log
-      description: The manager's Activity page, copied. It holds paths, title IDs and your console's local address, nothing else.
+      label: Log
+      description: The manager's Settings › Log, copied. It holds paths, title IDs and your console's local address, nothing else.
       render: text

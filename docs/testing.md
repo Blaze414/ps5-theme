@@ -7,7 +7,7 @@ tests/host/run.sh
 ```
 
 Builds the real plugin sources for Linux with AddressSanitizer and UBSan and
-runs 72 end-to-end tests against a fake console tree in a privileged
+runs 74 end-to-end tests against a fake console tree in a privileged
 container. GitHub Actions runs them on every push and pull request, with
 mounts emulated and under ThreadSanitizer too, along with the codec checks
 and the fuzzing below (see [Building](building.md#continuous-integration)).
@@ -195,6 +195,23 @@ To try a release on a console of your own, see
   sent, anything but one JSON object in UTF-8 text refused, undone by
   Discard, copied by a duplicate;
 - apply progress;
+- SVG pictures: five built the ways the console's own are (a drawing tool's
+  comments and gradients, masks, `<use>`, class style rules, a drop shadow,
+  an embedded PNG, names in Japanese) accepted; scripts in any case and in
+  CDATA, event handlers, an XHTML namespace, entities, a stylesheet
+  instruction, `&#106;avascript:`, links out of the picture, an embedded SVG,
+  `<a>`, `<set>`, `@import`, CSS escapes, `URL(` in capitals, nested `<svg>`,
+  drawn text, broken XML, UTF-16 and nesting deeper than the console's each
+  refused by name;
+- who can open the manager, asked from the console's network address as a
+  phone would: the page loads and nothing else does; internet names for the
+  console refused from any device, local ones accepted; a code asked for
+  only with the manager's header, usable only by the device that asked,
+  five tries, never written in the log; the key a cookie only the manager's
+  requests carry, kept as its SHA-256, opening everything after a restart
+  too; an address outside the private ranges refused whatever it carries;
+  any device on the network, or only the console (the page still loads to
+  say so); a device forgotten; ten codes in ten minutes at most;
 - a byte-for-byte check that `/system_ex` is unchanged afterwards.
 
 ```bash
@@ -237,6 +254,19 @@ that too; it is mounted read-only and never copied into the image:
 ```bash
 tests/atrac9/run.sh path/to/bgm_home.at9
 ```
+
+```bash
+tests/fsguard/run.sh
+```
+
+Races the write guard (`tests/fsguard/race.c`): one thread keeps swapping a
+folder inside the plugin's folder for a link to a folder outside it, four
+others write, append, rename, link, copy, make folders and delete through it
+with the guard's functions, for 20 seconds (`SECONDS_TO_RACE`). Nothing
+outside may be made, changed or deleted. With `GUARD=<file>` it is built
+against another copy of the guard: the one before 1.88 lets files out within
+seconds (in one run of 15 seconds, four files made outside and one deleted;
+the 1.88 guard, about 280,000 operations and nothing touched).
 
 `tests/zstd/run.sh` checks the plugin's zstd decoder against the reference
 `zstd` tool.
@@ -400,6 +430,14 @@ After any failure the console was restarted before the next test.
 | 1.76 to 1.78 | Updates, applies, Apply again; rest mode on 1.77 | **Works**: rest mode on 1.77 (108 overlays out in 0.47 s, the next home screen covered in 3 s); Apply again 36.3 s on 1.77 (31.9 of it reading every game's folder), 5.7 s on 1.78 |
 | 1.79 | Apply again; then rest mode | Apply again **2.0 s**, but **the console didn't wake**: going into rest, two apps that start with the home screen had their views covered as the system made them, started again, and the next home screen never started; the console had to be switched off at its power button. Fixed in 1.80: nothing goes into any sandbox while the home screen restarts, and an app's new view waits 2 seconds |
 | 1.80 | The update from 1.79 (after the console was switched off at its power button); three rests in a row | **Works**: each woke; the home screen's overlays out in under a second and the next one covered at once; the two apps that start with it covered 2 to 3 seconds after they appeared |
+| 1.81 (a test build, not released) | The update from 1.80 through the update folder; a Mac allowed with a code; two rests; Apply, Apply again; a theme deleted | **Works**: carried on with its 253 overlays and updated Payload Manager's copy; the code shown on the console and the Mac allowed; both rests woke, the home screen's overlays out in under a second; Apply 3.4 s (every file checked again under the new rules, the interface file's SVG icons included, none skipped), Apply again 1.4 s; the new check of each overlay's folder passed on all 251; the theme deleted through the new write guard. No error in the log. (The next build, also numbered 1.81, was refused by the update folder as not newer: numbered 1.82) |
+| 1.82 (a test build, not released) | The update from 1.81; the new notifications; Apply; a new theme | **Partly**: took over and said "PS5 Themes is ready"; one "Theme applied" notification with what to do on its second line. **No new theme could be made**: "a folder on the way is another filesystem". A call that failed was taken for an open folder: the SDK's `openat` returns the error number as if it were the result (see [Challenges](challenges.md#failures-that-looked-like-results)). Fixed in 1.85 |
+| 1.83 (a test build, not released) | A new theme | **No new theme could be made**, again: "theme.ini: not a plain file". The same cause; what 1.83 changed (no device numbers) didn't touch it |
+| 1.84 (a test build, not released) | New theme, all three ways | **No new theme could be made**, and the log said nothing about why. Its check at start found folders made relative to an open folder right on the console, which ruled out the console's `/data` and led to the cause, the SDK's libc (see [Challenges](challenges.md#failures-that-looked-like-results)). Fixed in 1.85 |
+| 1.85 (a test build, not released) | The update from 1.84; New theme; Mix and match; Apply; rest mode | **Works, after a restart**: 1.84's failed calls had closed its own lock, so 1.85 took it for a copy too old to hand over and left it running ("restart the console to finish the update"). The console then didn't come back from rest mode once, still on 1.84, and was switched off at its power button (whether 1.84's state caused that isn't known). Started at boot, 1.85 put the theme back in 3.0 s; a new theme was made; a mix of 128 files was made and applied in 144 s (53 new folders, copied: hard links aren't available, "Operation not supported", the real reason at last); one rest woke, the next home screen covered at once. The icon style didn't go with a mix's icons: fixed in 1.86 |
+| 1.86 (a test build, not released) | The update from 1.85; a mix with an icon style; rest mode | **Partly**: handed over without a restart; a mix of 144 files kept its icon style and the plugin styled a game installed since. **Rest mode didn't come back**: the home screen closed (115 overlays out in 939 ms) and no new one started; the kernel log showed the system failing on "/user/bgft", which, with the other empty folders at the top of `/user`, was gone. A restart made them again (see [Challenges](challenges.md#empty-folders-the-system-removed-at-rest-mode)). Narrowed in 1.88 |
+| 1.87 (a test build, not released) | The update from 1.86; a restart; six rests in a row, the last ones 30 s apart | **Rest mode works; the crash guard didn't**: handed over without a restart; started at boot, put the theme back in 3.3 s; all six rests woke, the home screen's 106 to 110 overlays out 319 to 416 ms after its exit began (once the process was gone at 321 ms, 2 ms after them), and every empty folder of `/user` still there. **The fifth rest took the theme down**: three home screens within a minute, counted as a crash loop (see [Challenges](challenges.md#rests-in-a-row-taken-for-a-crash-loop)). Applied again in 0.7 s. Fixed in 1.88 |
+| 1.88 (a test build, not released) | The update from 1.87; eight rests in a row, seven of them about 28 s apart | **Works**: every rest woke and the theme stayed; the home screen's 107 overlays out in 541 to 606 ms each time, none stuck, every empty folder of `/user` still there. Each home screen was up 24 to 28 s, only 4 s above the crash guard's cutoff (lowered to 15 s in 1.89). **Found**: about five views of the system's stayed after every rest, with overlays of ours in them (read-only), and the log's "ShellUI gone" time was taken only after the overlays were out, so it wasn't the margin. Both changed in 1.89 |
 
 ## Problems found on the console, and the tests that keep them fixed
 
@@ -428,6 +466,10 @@ theme nested 100 folders deep, are in [How the bugs were found](#how-the-bugs-we
 | A theme of 66 folders refused (the limit was 64), without saying what to do | 1.74 | `t_themes_of_many_folders` |
 | Apply again took 36 seconds, reading every game's folder | 1.77 | `t_title_pictures` (a game's copy checked by its fingerprint) |
 | The console didn't wake: two apps' views covered as the system made them while the home screen restarted | 1.79 | `t_shellui_exit_releases_sandbox` |
+| No new theme could be made: a failed call taken for an open folder, as the SDK's libc returns the error number as if it were the result | 1.82 to 1.84 | The PS5 build itself: `tools/check_syscalls.py` fails it if anything calls one of the SDK's (the fake console's libc reports failures, so no test there could see it) |
+| Rest mode didn't come back: the system removed empty folders of `/user` (`/user/bgft` among them) as it took the home screen's sandbox down with overlays of ours still in it | 1.84, 1.86 | None on the fake console, whose mounts don't race a launcher; `t_shellui_exit_releases_sandbox` checks the overlays come out. On the console: a rest with the kernel log running (`ps5-klog.elf`) |
+| Rests in a row taken for a crash loop: the theme came down at the fifth, the last ones 30 s apart | 1.87 | `t_rests_in_a_row_keep_the_theme` (fails with 1.87's count) |
+| Views of the system's left up after every rest: ours came out newest first by when they were made, not in the order the system takes views down, and two apps' never | 1.88 | `t_overlays_come_out_newest_view_first`, `t_rests_in_a_row_keep_the_theme` (the two apps' sandboxes) |
 
 Every test runs after every change, in the CI and with `tests/host/run.sh`, so none of these can come back unnoticed
 on the fake console. What only a console can show (whether it wakes, whether the home screen reads a file) is still
